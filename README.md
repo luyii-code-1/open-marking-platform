@@ -54,3 +54,5 @@ Python 3.13镜像构建与四容器业务验证见 [Docker镜像联调](docs/Doc
 原Compose网络、Caddy证书验证与WSS链路见 [Compose与HTTPS联调](docs/Compose与HTTPS联调.md)。
 
 后续业务决定与现场验收所需信息汇总在 [待确认事项](docs/待确认事项.md)。
+
+192.168.1.2上的访问地址、账号读取方式、资源限制及100人实测结果见 [内网测试部署](docs/内网测试部署.md)。
