@@ -1,0 +1,77 @@
+services:
+  api:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      OMP_DATA: /data
+      OMP_TASK_MODE: celery
+      OMP_REDIS_URL: redis://redis:6379/0
+    volumes:
+      - ${OMP_HOST_DATA:-./data}:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+  worker:
+    build: .
+    restart: unless-stopped
+    command: [celery, -A, server.jobs:celery, worker, --loglevel=INFO, --concurrency=2]
+    env_file: .env
+    environment:
+      OMP_DATA: /data
+      OMP_TASK_MODE: celery
+      OMP_REDIS_URL: redis://redis:6379/0
+    volumes:
+      - ${OMP_HOST_DATA:-./data}:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+  scheduler:
+    build: .
+    restart: unless-stopped
+    command: [celery, -A, server.jobs:celery, beat, --loglevel=INFO, --schedule=/data/celerybeat-schedule]
+    env_file: .env
+    environment:
+      OMP_DATA: /data
+      OMP_TASK_MODE: celery
+      OMP_REDIS_URL: redis://redis:6379/0
+    volumes:
+      - ${OMP_HOST_DATA:-./data}:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: [redis-server, --appendonly, "yes", --maxmemory, 128mb, --maxmemory-policy, noeviction]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+  proxy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      OMP_DOMAIN: ${OMP_DOMAIN:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+volumes:
+  redis-data:
+  caddy-data:
+  caddy-config:

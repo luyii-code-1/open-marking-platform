@@ -1,0 +1,19 @@
+{
+  "status": "passed",
+  "platform": "Linux-5.15.146.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+  "python": "3.13.18",
+  "deployment": "docker-host-network",
+  "redis": "Redis server v=7.4.12 sha=00000000:0 malloc=jemalloc-5.3.0 bits=64 build=97c9b7ac751c8f00",
+  "worker_pool": "prefork",
+  "worker_concurrency": 2,
+  "broker_failure_persisted": true,
+  "scheduler_recovered": true,
+  "recognized_candidate": "123",
+  "final_score": 3,
+  "archive_verified": true,
+  "image_job_attempts": 1,
+  "upload_sha256": "082797bfd9cedc4e248b496326a1bc2c2384e041a095aa7b791581bcdce412fd",
+  "duration_seconds": 27.55,
+  "image": "omp-integration:20261112",
+  "image_id": "sha256:044e23ab970a5914f38748df99e7d04049bec94b4d2af83ef671cbf78332d5f9"
+}

@@ -1,0 +1,19 @@
+{
+  "status": "passed",
+  "compose": "5.7.1",
+  "image": "omp-integration:20261112",
+  "network_driver": "bridge",
+  "api_port_published": false,
+  "https_certificate_verified": true,
+  "web_shell_served": true,
+  "wss_upgrade_and_auth": true,
+  "foreign_origin_rejected": true,
+  "committed_change_received": true,
+  "logout_closed_socket": true,
+  "redis_service_dns_and_worker": true,
+  "recognized_candidate": "123",
+  "final_score": 3,
+  "archive_verified": true,
+  "upload_sha256": "d5b936c3078434b2ae74087e1e5c865f887f259e85dcd1874beb6c35eb15e699",
+  "duration_seconds": 50.67
+}

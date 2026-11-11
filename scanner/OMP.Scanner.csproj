@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>OMP.Scanner</AssemblyName>
+    <RootNamespace>OMP.Scanner</RootNamespace>
+    <StartupObject>OMP.Scanner.Program</StartupObject>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.22" />
+    <PackageReference Include="NAPS2.Sdk" Version="1.2.1" />
+    <PackageReference Include="NAPS2.Images.Gdi" Version="1.2.1" />
+    <PackageReference Include="NAPS2.Sdk.Worker.Win32" Version="1.2.1" />
+    <PackageReference Include="ZXing.Net.Bindings.Windows.Compatibility" Version="0.16.16" />
+  </ItemGroup>
+</Project>

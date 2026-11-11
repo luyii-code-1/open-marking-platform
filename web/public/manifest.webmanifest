@@ -1,0 +1,16 @@
+{
+  "id": "/",
+  "name": "Open Marking Platform",
+  "short_name": "阅卷平台",
+  "description": "制卡、扫描、协同阅卷与成绩分析",
+  "lang": "zh-CN",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f3f5f4",
+  "theme_color": "#17655b",
+  "icons": [
+    {"src":"/icons/omp-192.png","sizes":"192x192","type":"image/png","purpose":"any maskable"},
+    {"src":"/icons/omp-512.png","sizes":"512x512","type":"image/png","purpose":"any maskable"}
+  ]
+}

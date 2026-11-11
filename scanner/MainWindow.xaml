@@ -1,0 +1,56 @@
+<Window x:Class="OMP.Scanner.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="OMP 扫描工作台" Width="1180" Height="860" MinWidth="960" MinHeight="700" FontFamily="Microsoft YaHei UI" FontSize="14" Background="#F4F6FA" Closing="Window_Closing">
+  <Grid Margin="20">
+    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+    <GroupBox Header="服务器与账号" Background="White">
+      <Grid>
+        <Grid.ColumnDefinitions><ColumnDefinition Width="2*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+        <StackPanel><TextBlock Text="服务器地址" Margin="0,0,0,5"/><TextBox x:Name="ServerBox" Text="http://127.0.0.1:8000" AutomationProperties.Name="服务器地址"/></StackPanel>
+        <StackPanel Grid.Column="2"><TextBlock Text="账号" Margin="0,0,0,5"/><TextBox x:Name="UsernameBox" AutomationProperties.Name="账号"/></StackPanel>
+        <StackPanel Grid.Column="4"><TextBlock Text="密码" Margin="0,0,0,5"/><PasswordBox x:Name="PasswordBox" Padding="8,5" Height="32" AutomationProperties.Name="密码"/></StackPanel>
+        <StackPanel Grid.Column="5" Margin="14,22,0,0"><Button x:Name="LoginButton" Content="管理员登录并注册设备" Click="Login_Click"/><Button x:Name="DeviceLoginButton" Content="已注册设备连接" Click="DeviceLogin_Click"/></StackPanel>
+      </Grid>
+    </GroupBox>
+    <GroupBox Grid.Row="1" Header="选择考卷并建立扫描批次" Background="White">
+      <Grid>
+        <Grid.ColumnDefinitions><ColumnDefinition Width="3*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+        <StackPanel><TextBlock Text="考试 / 科目 / 考卷组" Margin="0,0,0,5"/><ComboBox x:Name="GroupsBox" AutomationProperties.Name="扫描的考卷"/></StackPanel>
+        <StackPanel Grid.Column="2"><TextBlock Text="考场备注" Margin="0,0,0,5"/><TextBox x:Name="RoomBox" AutomationProperties.Name="考场备注"/></StackPanel>
+        <StackPanel Grid.Column="4"><TextBlock Text="第二遍背面顺序" Margin="0,0,0,5"/><ComboBox x:Name="BackOrderBox" SelectedIndex="0"><ComboBoxItem Content="与正面同序" Tag="same"/><ComboBoxItem Content="与正面逆序" Tag="reverse"/></ComboBox></StackPanel>
+        <Button x:Name="CreateBatchButton" Grid.Column="5" Content="新建批次" Margin="14,22,0,0" Click="CreateBatch_Click"/>
+      </Grid>
+    </GroupBox>
+    <GroupBox Grid.Row="2" Header="采集与上传" Background="White">
+      <StackPanel>
+        <Grid Margin="0,0,0,12"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="当前批次" VerticalAlignment="Center" Margin="0,0,12,0"/><ComboBox x:Name="BatchesBox" Grid.Column="1" SelectionChanged="Batch_Changed"/><Button Grid.Column="2" Content="刷新批次状态" Margin="12,0,0,0" Click="Refresh_Click"/></Grid>
+        <WrapPanel Margin="0,0,0,12">
+          <ComboBox x:Name="DriverBox" Width="100" SelectedIndex="0" Margin="0,0,8,0"><ComboBoxItem Content="WIA" Tag="Wia"/><ComboBoxItem Content="TWAIN" Tag="Twain"/><ComboBoxItem Content="ESCL" Tag="Escl"/></ComboBox>
+          <Button Content="查找扫描仪" x:Name="FindDevicesButton" Click="Devices_Click"/>
+          <ComboBox x:Name="DevicesBox" Width="260" DisplayMemberPath="Name" Margin="0,0,12,0" AutomationProperties.Name="扫描仪"/>
+          <CheckBox x:Name="FeederBox" Content="使用自动输稿器 ADF" IsChecked="True" VerticalAlignment="Center"/>
+        </WrapPanel>
+        <WrapPanel>
+          <Button x:Name="ScanFrontButton" Content="第一遍：扫描正面" Click="ScanFront_Click"/>
+          <Button x:Name="ScanBackButton" Content="第二遍：扫描背面" Click="ScanBack_Click"/>
+          <Button x:Name="ImportFrontButton" Content="导入正面图片" Click="ImportFront_Click"/>
+          <Button x:Name="ImportBackButton" Content="导入背面图片" Click="ImportBack_Click"/>
+          <Button x:Name="StopButton" Content="停止扫描" Click="Stop_Click"/>
+          <Button x:Name="UploadButton" Content="上传 / 重试" Click="Upload_Click"/>
+          <Button x:Name="PairButton" Content="核对并确认批次" Click="Pair_Click"/>
+        </WrapPanel>
+        <TextBlock x:Name="BatchSummary" Margin="0,12,0,0" TextWrapping="Wrap" Foreground="#475569"/>
+        <TextBlock Text="双面卷分两遍采集；翻面后按本批次的同序 / 逆序设置配对。图片按所选顺序导入；多选文件按文件名排序。" Margin="0,7,0,0" Foreground="#475569" TextWrapping="Wrap"/>
+      </StackPanel>
+    </GroupBox>
+    <DataGrid Grid.Row="3" x:Name="PagesGrid" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" SelectionMode="Single" GridLinesVisibility="Horizontal" Background="White" HeadersVisibility="Column">
+      <DataGrid.Columns>
+        <DataGridTextColumn Header="扫描面" Binding="{Binding DisplaySide}" Width="80"/>
+        <DataGridTextColumn Header="采集顺序" Binding="{Binding Sequence}" Width="85"/>
+        <DataGridTextColumn Header="状态" Binding="{Binding DisplayStatus}" Width="90"/>
+        <DataGridTextColumn Header="本地检查" Binding="{Binding QualitySummary}" Width="190"/>
+        <DataGridTextColumn Header="捕获编号" Binding="{Binding CaptureId}" Width="280"/>
+        <DataGridTextColumn Header="提示" Binding="{Binding Error}" Width="*"/>
+      </DataGrid.Columns>
+    </DataGrid>
+    <Border Grid.Row="4" Padding="0,12,0,0"><StackPanel><TextBlock x:Name="StatusText" Text="登录后选择考卷。已保存的扫描批次可在重启后继续上传。" TextWrapping="Wrap"/><TextBlock x:Name="StorageText" Foreground="#64748B" Margin="0,5,0,0" FontSize="12"/></StackPanel></Border>
+  </Grid>
+</Window>
