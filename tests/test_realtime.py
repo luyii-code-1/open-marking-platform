@@ -68,3 +68,16 @@ def test_teacher_scope_assignment_removal_and_queue_coalescing(tmp_path,monkeypa
         for root in ('tasks','results','analysis'):client.offer({'type':'invalidate','roots':[root]})
         assert client.queue.qsize()==1 and await client.queue.get()=={'type':'sync'}
     asyncio.run(coalesce())
+def test_peer_disconnect_during_close_is_handled(monkeypatch):
+    import asyncio
+    from fastapi import WebSocketDisconnect
+    from server.realtime import events
+    monkeypatch.setenv('OMP_WS_ORIGINS','https://localhost')
+    class Disconnected:
+        headers={'origin':'https://localhost'}
+        query_params={}
+        async def accept(self):pass
+        async def receive_text(self):raise WebSocketDisconnect(code=1006)
+        async def close(self,code):raise WebSocketDisconnect(code=1006)
+    asyncio.run(events(Disconnected()))
+

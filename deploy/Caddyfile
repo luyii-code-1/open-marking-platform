@@ -1,3 +1,7 @@
+{
+    default_sni {$OMP_DOMAIN:localhost}
+}
+
 {$OMP_DOMAIN:localhost} {
     encode zstd gzip
     request_body {

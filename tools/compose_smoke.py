@@ -59,6 +59,7 @@ def main():
         started = time.monotonic()
         try:
             compose('up', '-d', '--no-build', '--wait', '--wait-timeout', '120')
+            wait_for(lambda: compose('exec', '-T', 'proxy', 'test', '-r', '/data/caddy/pki/authorities/local/root.crt', check=False).returncode == 0, 30)
             compose('cp', 'proxy:/data/caddy/pki/authorities/local/root.crt', str(root / 'ca.crt'))
             trust = ssl.create_default_context(cafile=str(root / 'ca.crt'))
             with httpx.Client(base_url=origin + '/api/v1/', verify=trust, trust_env=False, timeout=30) as api:

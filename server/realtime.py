@@ -188,7 +188,7 @@ async def events(socket:WebSocket):
         done,_=await asyncio.wait(workers,return_when=asyncio.FIRST_COMPLETED)
         for task in done:task.result()
     except (WebSocketDisconnect,asyncio.TimeoutError,KeyError,UnicodeDecodeError):
-        with suppress(RuntimeError):await socket.close(code=1008)
+        with suppress(RuntimeError,WebSocketDisconnect):await socket.close(code=1008)
     finally:
         if client:socket.app.state.event_hub.clients.discard(client)
         for task in workers:task.cancel()
