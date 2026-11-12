@@ -312,3 +312,33 @@ def test_retirement_transaction_failure_can_resume_after_files_removed(populated
     assert not (f['tmp_path']/'pages'/(f['page']['id']+'.image')).exists()
     monkeypatch.setattr(deletion,'put',original);retry_delete(f,plan)
     with db.connect() as connection:assert db.get(connection,plan['id'])['status']=='completed'
+
+
+def test_backup_during_partial_deletion_restores_and_resumes_same_plan(populated,monkeypatch):
+    f=populated;monkeypatch.setenv('OMP_STORAGE','ros');failing=True
+    with db.connect() as connection:
+        task=db.get(connection,f['task']['id']);task.update(status='claimed',expires_at=time.time()+300);db.put(connection,'tasks',task)
+        for suffix in ('.image','.png'):
+            relative='pages/'+f['page']['id']+suffix
+            db.put(connection,'storage-assets',{'relative':relative,'key':'projects/'+f['project']['id']+'/'+relative,'project_id':f['project']['id'],'backend':'ros','location':storage.location(),'status':'stored'})
+    def remote_delete(self,key):
+        if failing and key.endswith('.png'):raise OSError('interrupted')
+    monkeypatch.setattr(storage.Storage,'delete',remote_delete)
+    plan=queued_delete(f);jobs.execute(plan['job_id'])
+    assert not (f['tmp_path']/'pages'/(f['page']['id']+'.image')).exists()
+    from server import backups,recovery
+    snapshot=backups.create(f['owner']['id']);destination=f['tmp_path'].parent/(f['tmp_path'].name+'-restored')
+    report=recovery.restore(f['tmp_path']/'backups'/(snapshot['id']+'.sqlite3'),destination,files_from=f['tmp_path'],expected_sha256=snapshot['sha256'])
+    assert report['runtime_reset']['deletion_files_reset']==1
+    assert (destination/'pages'/(f['page']['id']+'.image')).exists()
+    monkeypatch.setattr(db,'ROOT',destination);failing=False
+    with db.connect() as connection:
+        assert db.get(connection,f['task']['id'])['status']=='claimed'
+        job=db.get(connection,plan['job_id']);assert job['status']=='failed'
+    logged=f['client'].post('/api/v1/auth/login',json={'username':'admin','password':'administrator-password'}).json()
+    f['headers']={'Authorization':'Bearer '+logged['token']}
+    retry_delete(f,plan)
+    with db.connect() as connection:
+        assert db.get(connection,plan['id'])['status']=='completed'
+        assert not connection.execute('SELECT 1 FROM deletion_locks').fetchone()
+    assert not any((destination/'pages'/(f['page']['id']+s)).exists() for s in ('.image','.png'))

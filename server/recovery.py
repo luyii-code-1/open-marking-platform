@@ -21,6 +21,10 @@ def _reset_runtime(root,reason):
         db.execute('BEGIN IMMEDIATE')
         counts['user_sessions']=db.execute('SELECT COUNT(*) FROM sessions').fetchone()[0]
         db.execute('DELETE FROM sessions')
+        locked={row['project_id'] for row in db.execute('SELECT project_id FROM deletion_locks')}
+        # Preserve the confirmed business snapshot until its deletion can resume.
+        # Restored scan bytes need cleanup again, including previously finished files.
+        counts['deletion_files_reset']=db.execute('UPDATE deletion_files SET done=0 WHERE plan_id IN (SELECT plan_id FROM deletion_locks) AND done=1').rowcount
         for kind in ('scanner-sessions','scanner-devices','download-tickets','auth-challenge','scanner-challenges','recovery-code','jobs','tasks','release-plans','projects'):
             changed=0
             for body in objects(db,kind):
@@ -36,12 +40,15 @@ def _reset_runtime(root,reason):
                     body.pop('run_token',None)
                 elif kind=='tasks':
                     if body['status']!='claimed':continue
+                    from .lifecycle import project_for
+                    if project_for(db,kind,body) in locked:continue
                     body.update(status='expired',expires_at=0)
                 elif kind=='release-plans':
                     if body['status']=='completed':continue
                     body.update(status='preview',expires_at=0,lease_until=0)
                     body.pop('operation_token',None)
                 elif kind=='projects':
+                    if body['id'] in locked:continue
                     if not body.get('storage_operation'):continue
                     body.pop('storage_operation',None)
                 put(db,kind,body);changed+=1
