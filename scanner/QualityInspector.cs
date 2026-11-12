@@ -32,6 +32,29 @@ public sealed record QualityReport(string[] Issues, double Dpi, double Sharpness
 
 public static class QualityInspector
 {
+    private static Bitmap Preview(Image source)
+    {
+        var scale = Math.Min(1, 1800.0 / Math.Max(source.Width, source.Height));
+        var bitmap = new Bitmap(Math.Max(1, (int)(source.Width * scale)), Math.Max(1, (int)(source.Height * scale)), PixelFormat.Format24bppRgb);
+        using var graphics = Graphics.FromImage(bitmap);
+        graphics.Clear(Color.White); graphics.DrawImage(source, new Rectangle(0, 0, bitmap.Width, bitmap.Height));
+        return bitmap;
+    }
+
+    private static string[] Codes(Bitmap bitmap)
+    {
+        var reader = new ZXing.Windows.Compatibility.BarcodeReader { AutoRotate = true, Options = new ZXing.Common.DecodingOptions { TryHarder = true, PossibleFormats = [ZXing.BarcodeFormat.QR_CODE] } };
+        return (reader.DecodeMultiple(bitmap) ?? []).Select(x => x.Text).Where(x => x.StartsWith("OMP1:", StringComparison.Ordinal)).Distinct().ToArray();
+    }
+
+    public static string? ReadSide(Image source, BatchRow batch)
+    {
+        using var bitmap = Preview(source);
+        var codes = Codes(bitmap);
+        if (codes.Length != 1) return null;
+        return new[] { "front", "back" }.FirstOrDefault(side => codes[0] == $"OMP1:{batch.TemplateId}:{batch.TemplateRevision}:{side}");
+    }
+
     public static QualityReport Inspect(Image source, BatchRow batch, string side, QualityOptions options)
     {
         var issues = new List<string>();
@@ -39,14 +62,11 @@ public static class QualityInspector
         if ((source.Width > source.Height) != (paperWidth > paperHeight)) (paperWidth, paperHeight) = (paperHeight, paperWidth);
         var dpi = Math.Min(source.Width / paperWidth, source.Height / paperHeight) * 25.4;
         if (dpi + 1 < options.MinDpi) issues.Add("low_resolution");
-        var scale = Math.Min(1, 1800.0 / Math.Max(source.Width, source.Height));
-        using var bitmap = new Bitmap(Math.Max(1, (int)(source.Width * scale)), Math.Max(1, (int)(source.Height * scale)), PixelFormat.Format24bppRgb);
-        using (var graphics = Graphics.FromImage(bitmap)) { graphics.Clear(Color.White); graphics.DrawImage(source, new Rectangle(0, 0, bitmap.Width, bitmap.Height)); }
+        using var bitmap = Preview(source);
         if (options.CheckQr)
         {
             if (string.IsNullOrEmpty(batch.TemplateId) || batch.TemplateRevision < 1) issues.Add("missing_binding");
-            var reader = new ZXing.Windows.Compatibility.BarcodeReader { AutoRotate = true, Options = new ZXing.Common.DecodingOptions { TryHarder = true, PossibleFormats = [ZXing.BarcodeFormat.QR_CODE] } };
-            var codes = (reader.DecodeMultiple(bitmap) ?? []).Select(x => x.Text).Where(x => x.StartsWith("OMP1:", StringComparison.Ordinal)).Distinct().ToArray();
+            var codes = Codes(bitmap);
             if (codes.Length == 0) issues.Add("missing_qr");
             else if (codes.Length > 1) issues.Add("multiple_qr");
             else if (codes[0] != $"OMP1:{batch.TemplateId}:{batch.TemplateRevision}:{side}") issues.Add("wrong_paper");

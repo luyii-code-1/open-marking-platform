@@ -17,13 +17,13 @@ public sealed class ScannerService : IDisposable
 
     public Task<List<ScanDevice>> Devices(Driver driver) => _controller.GetDeviceList(driver);
 
-    public async Task Acquire(ScanDevice device, string paper, bool feeder, Func<System.Drawing.Image, Task> receive, CancellationToken cancel)
+    public async Task Acquire(ScanDevice device, string paper, bool feeder, Func<System.Drawing.Image, Task> receive, CancellationToken cancel, bool duplex = false)
     {
         var options = new ScanOptions
         {
             Device = device, Dpi = 300,
             PageSize = paper == "A3" ? PageSize.A3 : PageSize.A4,
-            PaperSource = feeder ? PaperSource.Feeder : PaperSource.Flatbed,
+            PaperSource = duplex ? PaperSource.Duplex : feeder ? PaperSource.Feeder : PaperSource.Flatbed,
             BitDepth = BitDepth.Grayscale,
             ExcludeBlankPages = false,
             AutoDeskew = false,

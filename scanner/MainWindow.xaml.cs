@@ -54,7 +54,7 @@ public partial class MainWindow : Window
         _busy = true;
         UpdateControls();
         try { await operation(); }
-        catch (OperationCanceledException) { Tell("采集已停止，已经落盘的页面保留在本地队列。"); }
+        catch (OperationCanceledException) { if (CurrentBatch is { Status: "frozen" } frozen) Tell(frozen.Error, true); else Tell("采集已停止，已经落盘的页面保留在本地队列。"); }
         catch (Exception ex) { Tell(ex.Message, true); }
         finally { _busy = false; UpdateControls(); }
     }
@@ -130,14 +130,15 @@ public partial class MainWindow : Window
     {
         var api = RequireApi();
         var choice = GroupsBox.SelectedItem as Choice ?? throw new InvalidOperationException("请选择已经发布的考卷。");
-        var ordering = (BackOrderBox.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "same";
+        var mode = choice.Sides == 2 && (CaptureModeBox.SelectedItem as ComboBoxItem)?.Tag?.ToString() == "duplex" ? "duplex" : "separate";
+        var ordering = mode == "duplex" ? "same" : (BackOrderBox.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "same";
         var room = RoomBox.Text.Trim();
-        var result = await api.Post("scan-batches", new { group_id = choice.Id, room, back_order = ordering }, _lifetime.Token);
-        var batch = new BatchRow { Id = result.GetProperty("id").GetString()!, ServerUrl = api.ServerUrl, GroupId = choice.Id, Label = choice.Label, Room = room, Paper = choice.Paper, Sides = choice.Sides, BackOrder = ordering };
+        var result = await api.Post("scan-batches", new { group_id = choice.Id, room, back_order = ordering, capture_mode = mode }, _lifetime.Token);
+        var batch = new BatchRow { Id = result.GetProperty("id").GetString()!, ServerUrl = api.ServerUrl, GroupId = choice.Id, Label = choice.Label, Room = room, Paper = choice.Paper, Sides = choice.Sides, BackOrder = ordering, CaptureMode = mode };
         batch.TemplateId = Field(result, "template_id"); batch.TemplateRevision = result.GetProperty("template_revision").GetInt32();
         _queue.AddBatch(batch);
         LoadBatches(batch.Id);
-        Tell("批次已建立。先采集全部正面，核对张数后再翻面采集。");
+        Tell(mode == "duplex" ? "批次已建立。先用两张纸验证相邻两面出图顺序，再开始整批扫描。" : choice.Sides == 2 ? "批次已建立。先采集全部正面，核对张数后再翻面采集。" : "批次已建立，可采集正面。");
     });
 
     private void LoadBatches(string? selectedId = null)
@@ -150,6 +151,13 @@ public partial class MainWindow : Window
     }
 
     private void Batch_Changed(object sender, SelectionChangedEventArgs e) { if (PagesGrid is not null) { RefreshPages(); UpdateControls(); } }
+    private void CaptureSettings_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (BackOrderBox is null || ScanDuplexButton is null) return;
+        CaptureModeBox.IsEnabled = (GroupsBox.SelectedItem as Choice)?.Sides == 2;
+        BackOrderBox.IsEnabled = CaptureModeBox.IsEnabled && (CaptureModeBox.SelectedItem as ComboBoxItem)?.Tag?.ToString() == "separate";
+        if (!BackOrderBox.IsEnabled) BackOrderBox.SelectedIndex = 0;
+    }
     private void RefreshPages()
     {
         if (CurrentBatch is not { } batch) { PagesGrid.ItemsSource = Array.Empty<PageRow>(); BatchSummary.Text = "尚未选择批次。"; return; }
@@ -162,6 +170,13 @@ public partial class MainWindow : Window
     private void UpdateControls()
     {
         var open = CurrentBatch?.Status == "open";
+        var duplex = CurrentBatch?.CaptureMode == "duplex";
+        ScanDuplexButton.Visibility = ImportDuplexButton.Visibility = duplex ? Visibility.Visible : Visibility.Collapsed;
+        ScanFrontButton.Visibility = ScanBackButton.Visibility = ImportFrontButton.Visibility = ImportBackButton.Visibility = duplex ? Visibility.Collapsed : Visibility.Visible;
+        ScanDuplexButton.IsEnabled = ImportDuplexButton.IsEnabled = !_busy && open;
+        FeederBox.IsEnabled = !_busy && !duplex;
+        if (duplex) FeederBox.IsChecked = true;
+        CaptureHint.Text = duplex ? "每张纸连续输出两面，二维码识别正背面。请关闭驱动的跳过空白页、图像拆分和多流输出。" : CurrentBatch?.Sides == 2 ? "先采集全部正面，再翻面采集背面，按批次设置配对。" : "采集正面。多选导入文件按文件名排序。";
         LoginButton.IsEnabled = !_busy;
         DeviceLoginButton.IsEnabled = !_busy;
         CreateBatchButton.IsEnabled = !_busy && _api?.LoggedIn == true;
@@ -178,7 +193,7 @@ public partial class MainWindow : Window
 
     private async void Devices_Click(object sender, RoutedEventArgs e) => await Run(async () =>
     {
-        var driver = Enum.Parse<Driver>((DriverBox.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "Wia", true);
+        var driver = Enum.Parse<Driver>((DriverBox.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "Twain", true);
         var devices = await _scanner.Devices(driver);
         DevicesBox.ItemsSource = devices;
         if (devices.Count > 0) DevicesBox.SelectedIndex = 0;
@@ -218,6 +233,7 @@ public partial class MainWindow : Window
     private async Task Capture(string side)
     {
         var batch = RequireBatch();
+        if (batch.CaptureMode == "duplex") throw new InvalidOperationException("此批次请使用自动双面扫描。");
         RequireApi(batch);
         await CheckBatch(batch);
         var device = DevicesBox.SelectedItem as ScanDevice ?? throw new InvalidOperationException("请先查找并选择扫描仪。");
@@ -246,6 +262,43 @@ public partial class MainWindow : Window
 
     private async void ScanFront_Click(object sender, RoutedEventArgs e) => await Run(() => Capture("front"));
     private async void ScanBack_Click(object sender, RoutedEventArgs e) => await Run(() => Capture("back"));
+    private async void ScanDuplex_Click(object sender, RoutedEventArgs e) => await Run(CaptureDuplex);
+
+    private void RequireDuplexComplete(BatchRow batch)
+    {
+        try { DuplexOrder.RequireComplete(batch, _queue.Pages(batch.Id)); }
+        catch (InvalidOperationException ex) { Freeze(batch, ex.Message); throw; }
+    }
+
+    private async Task CaptureDuplex()
+    {
+        var batch = RequireBatch();
+        RequireApi(batch);
+        await CheckBatch(batch);
+        RequireDuplexComplete(batch);
+        var device = DevicesBox.SelectedItem as ScanDevice ?? throw new InvalidOperationException("请先查找并选择扫描仪。");
+        _captureCancel = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+        UpdateControls();
+        Tell("正在自动双面采集，每页先保存到本地队列。");
+        try
+        {
+            _captureTask = _scanner.Acquire(device, batch.Paper, true, async image =>
+            {
+                _captureCancel.Token.ThrowIfCancellationRequested();
+                var page = await Task.Run(() => _queue.AddPage(batch, "auto", image));
+                RefreshPages();
+                if (page.Status == "blocked") { Freeze(batch, page.Error); throw new InvalidOperationException("当前页已保存，采集已停止：" + page.Error); }
+            }, _captureCancel.Token, duplex: true);
+            await _captureTask;
+            Tell("自动双面采集结束，请核对实物张数与正背面配对。");
+        }
+        finally
+        {
+            _captureCancel.Dispose(); _captureCancel = null;
+            try { if (batch.Status == "open") RequireDuplexComplete(batch); }
+            finally { RefreshPages(); UpdateControls(); }
+        }
+    }
     private void Stop_Click(object sender, RoutedEventArgs e) { _captureCancel?.Cancel(); Tell("已请求停止扫描，正在等待设备结束当前操作。"); }
 
     private async Task Import(string side)
@@ -253,11 +306,14 @@ public partial class MainWindow : Window
         var batch = RequireBatch();
         RequireApi(batch);
         await CheckBatch(batch);
+        if ((side == "auto") != (batch.CaptureMode == "duplex")) throw new InvalidOperationException("导入方式与当前批次不一致。");
+        if (side == "auto") RequireDuplexComplete(batch);
         if (side == "back" && _queue.Pages(batch.Id).All(x => x.Side != "front")) throw new InvalidOperationException("请先导入正面。");
-        var dialog = new Microsoft.Win32.OpenFileDialog { Filter = "扫描图片|*.png;*.jpg;*.jpeg;*.bmp;*.tif;*.tiff", Multiselect = true, Title = side == "front" ? "按采集顺序导入正面" : "按采集顺序导入背面" };
+        var sideLabel = side == "auto" ? "双面序列（每张纸两面相邻）" : side == "front" ? "正面" : "背面";
+        var dialog = new Microsoft.Win32.OpenFileDialog { Filter = "扫描图片|*.png;*.jpg;*.jpeg;*.bmp;*.tif;*.tiff", Multiselect = true, Title = "按采集顺序导入" + sideLabel };
         if (dialog.ShowDialog(this) != true) return;
         var files = dialog.FileNames.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToArray();
-        if (MessageBox.Show($"将按文件名顺序导入 {files.Length} 个文件。请使用 001、002 等补零名称确保顺序。确认导入{(side == "front" ? "正面" : "背面")}？", "确认图片顺序", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+        if (MessageBox.Show($"将按文件名顺序导入 {files.Length} 个文件，多页 TIFF 按帧顺序读取。请使用 001、002 等补零名称确保顺序。确认导入{sideLabel}？", "确认图片顺序", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
         _captureCancel = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
         UpdateControls();
         try
@@ -279,11 +335,17 @@ public partial class MainWindow : Window
             }
             Tell("图片已保存到本地队列，等待上传。");
         }
-        finally { _captureCancel.Dispose(); _captureCancel = null; UpdateControls(); }
+        finally
+        {
+            _captureCancel.Dispose(); _captureCancel = null;
+            try { if (side == "auto" && batch.Status == "open") RequireDuplexComplete(batch); }
+            finally { RefreshPages(); UpdateControls(); }
+        }
     }
 
     private async void ImportFront_Click(object sender, RoutedEventArgs e) => await Run(() => Import("front"));
     private async void ImportBack_Click(object sender, RoutedEventArgs e) => await Run(() => Import("back"));
+    private async void ImportDuplex_Click(object sender, RoutedEventArgs e) => await Run(() => Import("auto"));
 
     private void Freeze(BatchRow batch, string reason)
     {
@@ -351,10 +413,14 @@ public partial class MainWindow : Window
         var api = RequireApi(batch);
         await CheckBatch(batch);
         var pages = _queue.Pages(batch.Id).Where(x => x.Status != "excluded").ToList();
+        if (batch.CaptureMode == "duplex") RequireDuplexComplete(batch);
         var fronts = pages.Count(x => x.Side == "front");
         var backs = pages.Count(x => x.Side == "back");
         if (fronts == 0 || (batch.Sides == 2 && fronts != backs) || pages.Any(x => x.Status != "uploaded")) throw new InvalidOperationException("确认前必须上传全部页面，且双面卷的正背面张数一致。");
-        var mapping = batch.Sides == 1 ? "单面卷，共 " + fronts + " 张。" : string.Join("\n", Enumerable.Range(1, Math.Min(fronts, 6)).Select(i => $"正面 {i} ↔ 背面 {(batch.BackOrder == "same" ? i : fronts - i + 1)}")) + (fronts > 6 ? "\n……" : "");
+        var orderedFronts = pages.Where(p => p.Side == "front").OrderBy(p => p.Sequence).ToList();
+        var orderedBacks = pages.Where(p => p.Side == "back").OrderBy(p => p.Sequence).ToList();
+        if (batch.BackOrder == "reverse") orderedBacks.Reverse();
+        var mapping = batch.Sides == 1 ? "单面卷，共 " + fronts + " 张。" : string.Join("\n", orderedFronts.Zip(orderedBacks).Take(6).Select(pair => $"正面 {pair.First.Sequence} ↔ 背面 {pair.Second.Sequence}")) + (fronts > 6 ? "\n……" : "");
         if (MessageBox.Show($"请人工核对纸张与页面顺序。\n\n{mapping}\n\n确认后服务器将建立答卷并继续处理。是否确认此批次？", "确认配对", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
         try { await api.Post($"scan-batches/{batch.Id}/pair", cancel: _lifetime.Token); }
         catch (ApiException ex) when (ex.StatusCode == 409) { Freeze(batch, ex.Message); return; }

@@ -57,6 +57,7 @@ internal static class ScannerSelfTest
             var accepted = await api.Upload(page);
             Check(accepted.GetProperty("id").GetString() == page.CaptureId && accepted.GetProperty("candidate_number").GetString() == "123", "JPEG上传识读不符。");
             queue.PageUploaded(page.CaptureId, page.CaptureId);
+            await DuplexChecks(api, queue, Path.GetDirectoryName(imagePath)!);
             api.Dispose();
             using (var connected = new ApiClient(server, deviceRoot, selfTest: true))
             {
@@ -77,8 +78,78 @@ internal static class ScannerSelfTest
             Check(front.Sequence == 1 && back.Sequence == 1, "正反面序号不独立。");
             queue.PageExcluded(front.CaptureId); queue.RetryBlocked(excludedBatch.Id);
             Check(new LocalQueue(queue.Root).Pages(excludedBatch.Id).Single(p => p.CaptureId == front.CaptureId).Status == "excluded", "已排除页被重试重新加入。");
-            Console.WriteLine("SELFTEST PASS: CNG key protection, signed device auth, durable queue, 4 rotations, QR mismatch, blur, corner damage, persistent quality freeze, SHA-256 mismatch rejection, JPEG upload, reconnect, scoped access, pairing");
+            Console.WriteLine("SELFTEST PASS: CNG key protection, signed device auth, durable queue, 4 rotations, QR mismatch, blur, corner damage, persistent quality freeze, SHA-256 mismatch rejection, JPEG upload, reconnect, scoped access, pairing, duplex front/back-first order, missing face, duplicate face, forced QR check, excluded pair recovery, duplex upload/pairing");
         }
         finally { api.DeleteTestKey(); }
+    }
+
+    private static void Reject(Action action, string message)
+    {
+        var rejected = false;
+        try { action(); } catch (InvalidOperationException) { rejected = true; }
+        Check(rejected, message);
+    }
+
+    private static async Task DuplexChecks(ApiClient api, LocalQueue queue, string fixtureRoot)
+    {
+        var fixture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(fixtureRoot, "duplex-fixture.json"))).RootElement;
+        var groupId = fixture.GetProperty("group_id").GetString()!;
+        BatchRow NewBatch(string id) => new() { Id = id, ServerUrl = api.ServerUrl, GroupId = groupId, Label = "双面自检", Paper = "A4", Sides = 2, CaptureMode = "duplex", BackOrder = "same", TemplateId = fixture.GetProperty("template_id").GetString()!, TemplateRevision = fixture.GetProperty("revision").GetInt32() };
+        using var frontImage = System.Drawing.Image.FromFile(Path.Combine(fixtureRoot, "duplex-1.png"));
+        using var backImage = System.Drawing.Image.FromFile(Path.Combine(fixtureRoot, "duplex-2.png"));
+        var remote = await api.Post("scan-batches", new { group_id = groupId, back_order = "same", capture_mode = "duplex" });
+        var batch = NewBatch(remote.GetProperty("id").GetString()!); queue.AddBatch(batch);
+        Reject(() => queue.AddPage(batch, "front", frontImage), "自动批次允许手动指定扫描面。");
+        var front = queue.AddPage(batch, "auto", frontImage);
+        Check(front is { Status: "pending", Side: "front", Sequence: 1 }, "首面未按二维码入队。");
+        var reopened = new LocalQueue(queue.Root);
+        var persisted = reopened.Batches().Single(b => b.Id == batch.Id);
+        Check(persisted.CaptureMode == "duplex" && persisted.DuplexFirstSide == "front", "自动模式或首面顺序未持久化。");
+        Reject(() => DuplexOrder.RequireComplete(persisted, reopened.Pages(batch.Id)), "缺面未阻止新一轮采集或确认。");
+        var back = reopened.AddPage(persisted, "auto", backImage);
+        Check(back is { Status: "pending", Side: "back", Sequence: 1 }, "相邻两面未保留同一纸张序号。");
+        DuplexOrder.RequireComplete(persisted, reopened.Pages(batch.Id));
+        foreach (var p in reopened.Pages(batch.Id))
+        {
+            var response = await api.Upload(p);
+            Check(response.GetProperty("id").GetString() == p.CaptureId, "双面页上传失败。");
+            reopened.PageUploaded(p.CaptureId, p.CaptureId);
+        }
+        await api.Post($"scan-batches/{batch.Id}/pair");
+
+        var backFirst = NewBatch(Guid.NewGuid().ToString()); queue.AddBatch(backFirst);
+        var b1 = queue.AddPage(backFirst, "auto", backImage);
+        var f1 = queue.AddPage(backFirst, "auto", frontImage);
+        Check(b1.Side == "back" && f1.Side == "front" && b1.Sequence == f1.Sequence && backFirst.DuplexFirstSide == "back", "背面先出图未正确配对。");
+        DuplexOrder.RequireComplete(backFirst, queue.Pages(backFirst.Id));
+        // Once locked, a new feed must begin with the same side.
+        var wrongStart = queue.AddPage(backFirst, "auto", frontImage);
+        Check(wrongStart.Status == "blocked" && wrongStart.QualityJson.Contains("wrong_paper") && File.Exists(Path.ChangeExtension(wrongStart.Path, ".png")), "跨次进纸顺序改变未保留原图并冻结。");
+
+        var duplicate = NewBatch(Guid.NewGuid().ToString()); queue.AddBatch(duplicate);
+        var first = queue.AddPage(duplicate, "auto", frontImage);
+        var repeated = queue.AddPage(duplicate, "auto", frontImage);
+        Check(repeated.Status == "blocked" && repeated.Sequence == first.Sequence && repeated.Side == "back" && duplicate.Status == "frozen", "重复面未冻结批次。");
+        queue.PageExcluded(first.CaptureId); queue.PageExcluded(repeated.CaptureId);
+        queue.BatchStatus(duplicate.Id, "open"); duplicate.Status = "open";
+        DuplexOrder.RequireComplete(duplicate, queue.Pages(duplicate.Id));
+        var replacementFront = queue.AddPage(duplicate, "auto", frontImage);
+        var replacementBack = queue.AddPage(duplicate, "auto", backImage);
+        Check(replacementFront.Sequence == 2 && replacementBack.Sequence == 2 && replacementBack.Status == "pending", "排除整张后重扫序号冲突或错配。");
+        DuplexOrder.RequireComplete(duplicate, queue.Pages(duplicate.Id));
+        queue.PageExcluded(replacementFront.CaptureId);
+        Reject(() => DuplexOrder.RequireComplete(duplicate, queue.Pages(duplicate.Id)), "只排除一面未阻止继续配页。");
+
+        var forcedQr = NewBatch(Guid.NewGuid().ToString()); queue.AddBatch(forcedQr);
+        await File.WriteAllTextAsync(Path.Combine(queue.Root, "quality-options.json"), System.Text.Json.JsonSerializer.Serialize(new QualityOptions(CheckQr: false)));
+        try
+        {
+            queue.AddPage(forcedQr, "auto", frontImage);
+            var bad = queue.AddPage(forcedQr, "auto", frontImage);
+            Check(bad.Status == "blocked" && bad.QualityJson.Contains("wrong_paper"), "关闭可选质量检查绕过了自动双面识别。");
+        }
+        finally { await File.WriteAllTextAsync(Path.Combine(queue.Root, "quality-options.json"), System.Text.Json.JsonSerializer.Serialize(new QualityOptions())); }
+        var invalid = NewBatch(Guid.NewGuid().ToString()); invalid.BackOrder = "reverse";
+        Reject(() => DuplexOrder.RequireComplete(invalid, []), "自动双面允许逆序配对。");
     }
 }

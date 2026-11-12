@@ -19,6 +19,8 @@ public sealed class BatchRow
     public string Paper { get; set; } = "A4";
     public int Sides { get; set; }
     public string BackOrder { get; set; } = "same";
+    public string CaptureMode { get; set; } = "separate";
+    public string DuplexFirstSide { get; set; } = "";
     public string Status { get; set; } = "open";
     public string Error { get; set; } = "";
     public string CreatedAt { get; set; } = "";

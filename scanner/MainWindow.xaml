@@ -13,9 +13,9 @@
     <GroupBox Grid.Row="1" Header="选择考卷并建立扫描批次" Background="White">
       <Grid>
         <Grid.ColumnDefinitions><ColumnDefinition Width="3*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-        <StackPanel><TextBlock Text="考试 / 科目 / 考卷组" Margin="0,0,0,5"/><ComboBox x:Name="GroupsBox" AutomationProperties.Name="扫描的考卷"/></StackPanel>
+        <StackPanel><TextBlock Text="考试 / 科目 / 考卷组" Margin="0,0,0,5"/><ComboBox x:Name="GroupsBox" SelectionChanged="CaptureSettings_Changed" AutomationProperties.Name="扫描的考卷"/></StackPanel>
         <StackPanel Grid.Column="2"><TextBlock Text="考场备注" Margin="0,0,0,5"/><TextBox x:Name="RoomBox" AutomationProperties.Name="考场备注"/></StackPanel>
-        <StackPanel Grid.Column="4"><TextBlock Text="第二遍背面顺序" Margin="0,0,0,5"/><ComboBox x:Name="BackOrderBox" SelectedIndex="0"><ComboBoxItem Content="与正面同序" Tag="same"/><ComboBoxItem Content="与正面逆序" Tag="reverse"/></ComboBox></StackPanel>
+        <StackPanel Grid.Column="4"><TextBlock Text="采集方式" Margin="0,0,0,5"/><ComboBox x:Name="CaptureModeBox" SelectedIndex="0" SelectionChanged="CaptureSettings_Changed"><ComboBoxItem Content="自动双面" Tag="duplex"/><ComboBoxItem Content="分面采集" Tag="separate"/></ComboBox><TextBlock Text="背面配对顺序" Margin="0,10,0,5"/><ComboBox x:Name="BackOrderBox" SelectedIndex="0"><ComboBoxItem Content="与正面同序" Tag="same"/><ComboBoxItem Content="与正面逆序" Tag="reverse"/></ComboBox></StackPanel>
         <Button x:Name="CreateBatchButton" Grid.Column="5" Content="新建批次" Margin="14,22,0,0" Click="CreateBatch_Click"/>
       </Grid>
     </GroupBox>
@@ -23,12 +23,14 @@
       <StackPanel>
         <Grid Margin="0,0,0,12"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="当前批次" VerticalAlignment="Center" Margin="0,0,12,0"/><ComboBox x:Name="BatchesBox" Grid.Column="1" SelectionChanged="Batch_Changed"/><Button Grid.Column="2" Content="刷新批次状态" Margin="12,0,0,0" Click="Refresh_Click"/></Grid>
         <WrapPanel Margin="0,0,0,12">
-          <ComboBox x:Name="DriverBox" Width="100" SelectedIndex="0" Margin="0,0,8,0"><ComboBoxItem Content="WIA" Tag="Wia"/><ComboBoxItem Content="TWAIN" Tag="Twain"/><ComboBoxItem Content="ESCL" Tag="Escl"/></ComboBox>
+          <ComboBox x:Name="DriverBox" Width="100" SelectedIndex="1" Margin="0,0,8,0"><ComboBoxItem Content="WIA" Tag="Wia"/><ComboBoxItem Content="TWAIN" Tag="Twain"/><ComboBoxItem Content="ESCL" Tag="Escl"/></ComboBox>
           <Button Content="查找扫描仪" x:Name="FindDevicesButton" Click="Devices_Click"/>
           <ComboBox x:Name="DevicesBox" Width="260" DisplayMemberPath="Name" Margin="0,0,12,0" AutomationProperties.Name="扫描仪"/>
           <CheckBox x:Name="FeederBox" Content="使用自动输稿器 ADF" IsChecked="True" VerticalAlignment="Center"/>
         </WrapPanel>
         <WrapPanel>
+          <Button x:Name="ScanDuplexButton" Content="自动双面扫描" Click="ScanDuplex_Click"/>
+          <Button x:Name="ImportDuplexButton" Content="导入双面序列" Click="ImportDuplex_Click"/>
           <Button x:Name="ScanFrontButton" Content="第一遍：扫描正面" Click="ScanFront_Click"/>
           <Button x:Name="ScanBackButton" Content="第二遍：扫描背面" Click="ScanBack_Click"/>
           <Button x:Name="ImportFrontButton" Content="导入正面图片" Click="ImportFront_Click"/>
@@ -38,7 +40,7 @@
           <Button x:Name="PairButton" Content="核对并确认批次" Click="Pair_Click"/>
         </WrapPanel>
         <TextBlock x:Name="BatchSummary" Margin="0,12,0,0" TextWrapping="Wrap" Foreground="#475569"/>
-        <TextBlock Text="双面卷分两遍采集；翻面后按本批次的同序 / 逆序设置配对。图片按所选顺序导入；多选文件按文件名排序。" Margin="0,7,0,0" Foreground="#475569" TextWrapping="Wrap"/>
+        <TextBlock x:Name="CaptureHint" Margin="0,7,0,0" Foreground="#475569" TextWrapping="Wrap"/>
       </StackPanel>
     </GroupBox>
     <DataGrid Grid.Row="3" x:Name="PagesGrid" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" SelectionMode="Single" GridLinesVisibility="Horizontal" Background="White" HeadersVisibility="Column">

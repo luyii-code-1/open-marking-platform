@@ -31,6 +31,8 @@ public sealed class LocalQueue
         cmd.ExecuteNonQuery();
         EnsureColumn(db, "batches", "template_id", "TEXT NOT NULL DEFAULT ''");
         EnsureColumn(db, "batches", "template_revision", "INTEGER NOT NULL DEFAULT 0");
+        EnsureColumn(db, "batches", "capture_mode", "TEXT NOT NULL DEFAULT 'separate'");
+        EnsureColumn(db, "batches", "duplex_first_side", "TEXT NOT NULL DEFAULT ''");
         EnsureColumn(db, "pages", "quality_report", "TEXT NOT NULL DEFAULT '{}'");
     }
 
@@ -61,10 +63,10 @@ public sealed class LocalQueue
     }
 
     public void AddBatch(BatchRow batch) => Execute("""
-        INSERT INTO batches(id,server_url,group_id,label,room,paper,sides,back_order,status,created_at,template_id,template_revision)
-        VALUES($id,$server,$group,$label,$room,$paper,$sides,$ordering,'open',$at,$template,$revision)
+        INSERT INTO batches(id,server_url,group_id,label,room,paper,sides,back_order,status,created_at,template_id,template_revision,capture_mode,duplex_first_side)
+        VALUES($id,$server,$group,$label,$room,$paper,$sides,$ordering,'open',$at,$template,$revision,$mode,$first)
         """, ("$id", batch.Id), ("$server", batch.ServerUrl), ("$group", batch.GroupId), ("$label", batch.Label),
-        ("$room", batch.Room), ("$paper", batch.Paper), ("$sides", batch.Sides), ("$ordering", batch.BackOrder), ("$at", DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss")), ("$template", batch.TemplateId), ("$revision", batch.TemplateRevision));
+        ("$room", batch.Room), ("$paper", batch.Paper), ("$sides", batch.Sides), ("$ordering", batch.BackOrder), ("$at", DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss")), ("$template", batch.TemplateId), ("$revision", batch.TemplateRevision), ("$mode", batch.CaptureMode), ("$first", batch.DuplexFirstSide));
 
     public void BindTemplate(BatchRow batch) => Execute("UPDATE batches SET template_id=$template,template_revision=$revision WHERE id=$id", ("$template", batch.TemplateId), ("$revision", batch.TemplateRevision), ("$id", batch.Id));
 
@@ -72,10 +74,10 @@ public sealed class LocalQueue
     {
         using var db = Open();
         using var cmd = db.CreateCommand();
-        cmd.CommandText = "SELECT id,server_url,group_id,label,room,paper,sides,back_order,status,error,created_at,template_id,template_revision FROM batches ORDER BY created_at DESC";
+        cmd.CommandText = "SELECT id,server_url,group_id,label,room,paper,sides,back_order,status,error,created_at,template_id,template_revision,capture_mode,duplex_first_side FROM batches ORDER BY created_at DESC";
         using var row = cmd.ExecuteReader();
         var list = new List<BatchRow>();
-        while (row.Read()) list.Add(new BatchRow { Id = row.GetString(0), ServerUrl = row.GetString(1), GroupId = row.GetString(2), Label = row.GetString(3), Room = row.GetString(4), Paper = row.GetString(5), Sides = row.GetInt32(6), BackOrder = row.GetString(7), Status = row.GetString(8), Error = row.GetString(9), CreatedAt = row.GetString(10), TemplateId = row.GetString(11), TemplateRevision = row.GetInt32(12) });
+        while (row.Read()) list.Add(new BatchRow { Id = row.GetString(0), ServerUrl = row.GetString(1), GroupId = row.GetString(2), Label = row.GetString(3), Room = row.GetString(4), Paper = row.GetString(5), Sides = row.GetInt32(6), BackOrder = row.GetString(7), Status = row.GetString(8), Error = row.GetString(9), CreatedAt = row.GetString(10), TemplateId = row.GetString(11), TemplateRevision = row.GetInt32(12), CaptureMode = row.GetString(13), DuplexFirstSide = row.GetString(14) });
         return list;
     }
 
@@ -94,8 +96,11 @@ public sealed class LocalQueue
     public PageRow AddPage(BatchRow batch, string side, System.Drawing.Image image)
     {
         if (batch.Status != "open") throw new InvalidOperationException("当前批次已关闭或冻结，请新建批次。");
+        var automatic = side == "auto";
+        if ((automatic && batch.CaptureMode != "duplex") || (!automatic && batch.CaptureMode == "duplex")) throw new InvalidOperationException("采集方式与批次不一致。");
+        if (automatic && (batch.Sides != 2 || batch.BackOrder != "same")) throw new InvalidOperationException("自动双面要求双面题卡及同序配对。");
         if (side == "back" && batch.Sides != 2) throw new InvalidOperationException("单面题卡不需要扫描背面。");
-        if (side is not ("front" or "back")) throw new ArgumentException("扫描面无效。");
+        if (side is not ("front" or "back" or "auto")) throw new ArgumentException("扫描面无效。");
         var captureId = Guid.NewGuid().ToString();
         var folder = System.IO.Path.Combine(Root, "pages", batch.Id);
         Directory.CreateDirectory(folder);
@@ -108,20 +113,35 @@ public sealed class LocalQueue
         SaveDurably(upload, stream => image.Save(stream, codec, settings));
         using var file = File.OpenRead(upload);
         var sha = Convert.ToHexString(SHA256.HashData(file)).ToLowerInvariant();
+        using var db = Open();
+        using var transaction = db.BeginTransaction();
+        DuplexSlot? slot = null;
+        var sideReadFailed = false;
+        if (automatic)
+        {
+            string? detected = null;
+            try { detected = QualityInspector.ReadSide(image, batch); }
+            catch (Exception ex) when (ex is not OutOfMemoryException) { sideReadFailed = true; }
+            slot = DuplexOrder.Next(batch, Pages(batch.Id), detected);
+            side = slot.Side; batch.DuplexFirstSide = slot.FirstSide;
+        }
         QualityReport report;
-        try { report = QualityInspector.Inspect(image, batch, side, QualityOptions.Load(Root)); }
+        try
+        {
+            var options = QualityOptions.Load(Root);
+            report = QualityInspector.Inspect(image, batch, side, automatic ? options with { CheckQr = true } : options);
+        }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         { report = new QualityReport(["inspection_failed"], 0, 0, 0, new QualityOptions()); }
         if (file.Length > 30 * 1024 * 1024) report = report with { Issues = [.. report.Issues, "too_large"] };
+        if (sideReadFailed || slot?.InvalidState == true) report = report with { Issues = [.. report.Issues, "inspection_failed"] };
         var quality = System.Text.Json.JsonSerializer.Serialize(report, new System.Text.Json.JsonSerializerOptions { PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase });
-        using var db = Open();
-        using var transaction = db.BeginTransaction();
         using var cmd = db.CreateCommand();
         cmd.Transaction = transaction;
         cmd.CommandText = "SELECT COALESCE(MAX(sequence),0)+1 FROM pages WHERE batch_id=$batch AND side=$side";
         cmd.Parameters.AddWithValue("$batch", batch.Id);
         cmd.Parameters.AddWithValue("$side", side);
-        var sequence = Convert.ToInt32(cmd.ExecuteScalar());
+        var sequence = slot?.Sequence ?? Convert.ToInt32(cmd.ExecuteScalar());
         cmd.CommandText = "INSERT INTO pages(capture_id,batch_id,side,sequence,path,sha256,status,error,quality_report) VALUES($id,$batch,$side,$sequence,$path,$sha,$status,$error,$quality)";
         cmd.Parameters.AddWithValue("$id", captureId);
         cmd.Parameters.AddWithValue("$sequence", sequence);
@@ -131,6 +151,11 @@ public sealed class LocalQueue
         cmd.Parameters.AddWithValue("$error", report.Passed ? "" : report.Summary);
         cmd.Parameters.AddWithValue("$quality", quality);
         cmd.ExecuteNonQuery();
+        if (automatic)
+        {
+            cmd.CommandText = "UPDATE batches SET duplex_first_side=$first WHERE id=$batch";
+            cmd.Parameters.AddWithValue("$first", batch.DuplexFirstSide); cmd.ExecuteNonQuery();
+        }
         if (!report.Passed)
         {
             cmd.CommandText = "UPDATE batches SET status='frozen',error=$error WHERE id=$batch"; cmd.ExecuteNonQuery();
