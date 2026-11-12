@@ -38,7 +38,12 @@ internal static class DesktopSelfTest
                     var result=await worker.Recognize(batch,page);queue.PageRecognized(page.CaptureId,result.GetRawText());
                 }
                 var pairs=JsonDocument.Parse(queue.PairLocally(batch));Check(pairs.RootElement[0].GetProperty("candidate_number").GetString()=="123","Offline candidate recognition failed.");
-                Check(queue.Pages(batchId).Count==2,"Offline queue lost a page.");await offline.Close();
+                Check(queue.Pages(batchId).Count==2,"Offline queue lost a page.");
+                var firstQuestion=JsonDocument.Parse(batch.TemplateJson).RootElement.GetProperty("questions")[0];
+                var preview=Json(await offline.Invoke("preview",Json(new{batch_id=batchId,page_id=queue.Pages(batchId).First(p=>p.Side=="front").CaptureId,question_id=firstQuestion.GetProperty("id").GetString()})));
+                using(var imageStream=new MemoryStream(Convert.FromBase64String(preview.GetProperty("url").GetString()!.Split(',')[1])))
+                using(var thumbnail=System.Drawing.Image.FromStream(imageStream))Check(thumbnail.Width==360&&thumbnail.Height==172,"Local question preview did not merge all regions.");
+                await offline.Close();
             }
             Checkpoint("offline_processed",new{batch_id=batchId,pages=2});await Console.In.ReadLineAsync();
             using(var resumed=new DesktopController(new LocalQueue(root),Worker(),selfTest:true))

@@ -295,8 +295,20 @@ public sealed class DesktopController : IDisposable
         var page=_queue.Pages(Batch(batchId).Id).First(p=>p.CaptureId==pageId);byte[]? content=null;
         if(questionId.Length>0&&Guid.TryParse(questionId,out _)&&page.RecognitionJson!="{}")
         {
-            var entry=Json(page.RecognitionJson).GetProperty("cuts").EnumerateArray().First(e=>Text(e,"question_id")==questionId);
-            using var archive=System.IO.Compression.ZipFile.OpenRead(Path.Combine(_queue.Root,"processed",pageId,"cuts.zip"));using var input=archive.GetEntry(Text(entry,"entry"))!.Open();using var output=new MemoryStream();input.CopyTo(output);content=output.ToArray();
+            var entries=Json(page.RecognitionJson).GetProperty("cuts").EnumerateArray().Where(e=>Text(e,"question_id")==questionId).ToArray();
+            if(entries.Length==0)throw new InvalidOperationException("本页没有该题的本地切题图。");
+            using var archive=System.IO.Compression.ZipFile.OpenRead(Path.Combine(_queue.Root,"processed",pageId,"cuts.zip"));var pieces=new List<Bitmap>();
+            try
+            {
+                foreach(var entry in entries)
+                {
+                    using var input=archive.GetEntry(Text(entry,"entry"))!.Open();using var original=Image.FromStream(input);pieces.Add(new Bitmap(original));
+                }
+                using var merged=new Bitmap(pieces.Max(p=>p.Width),pieces.Sum(p=>p.Height)+12*(pieces.Count-1));
+                using(var graphics=Graphics.FromImage(merged)){graphics.Clear(Color.White);var top=0;foreach(var piece in pieces){graphics.DrawImageUnscaled(piece,0,top);top+=piece.Height+12;}}
+                using var output=new MemoryStream();merged.Save(output,ImageFormat.Png);content=output.ToArray();
+            }
+            finally{foreach(var piece in pieces)piece.Dispose();}
         }
         using Stream stream=content is null?File.OpenRead(page.Path):new MemoryStream(content);using var image=Image.FromStream(stream);
         var scale=Math.Min(1,1000d/Math.Max(image.Width,image.Height));using var thumbnail=new Bitmap(Math.Max(1,(int)(image.Width*scale)),Math.Max(1,(int)(image.Height*scale)));using(var graphics=Graphics.FromImage(thumbnail))graphics.DrawImage(image,0,0,thumbnail.Width,thumbnail.Height);

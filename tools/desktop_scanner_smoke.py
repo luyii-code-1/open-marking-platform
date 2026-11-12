@@ -50,7 +50,7 @@ def run(scanner_dll=None,bundled=False):
                 project=post('projects',{'name':'离线工作区验证'});subject=post('subjects',{'project_id':project['id'],'name':'语文','group_mode':'default'});group_id=subject['default_group_id']
                 cls=post('classes',{'name':'一班','grade':'10'});post('students',{'class_id':cls['id'],'name':'学生','candidate_number':'123'})
                 template=post('templates',{'group_id':group_id,'name':'本机双面卷','paper':'A4','sides':2,'candidate_length':3,'questions':[
-                    {'number':1,'type':'single','points':3,'options':4,'answer':['B'],'regions':[{'page':1,'x':15,'y':110,'width':90,'height':20}]},
+                    {'number':1,'type':'single','points':3,'options':4,'answer':['B'],'regions':[{'page':1,'x':15,'y':110,'width':90,'height':20},{'page':1,'x':15,'y':140,'width':90,'height':20}]},
                     {'number':2,'type':'single','points':2,'options':4,'answer':['A'],'regions':[{'page':2,'x':15,'y':110,'width':90,'height':20}]}]})
                 template=post('templates/'+template['id']+'/publish',None)
                 pdf=root/'sheet.pdf';pdf.write_bytes(paper.pdf(template));renderer=shutil.which('pdftoppm')
@@ -62,7 +62,9 @@ def run(scanner_dll=None,bundled=False):
                     def fill(x,y):cv2.rectangle(image,(round((x-1.5)*sx),round((y-1)*sy)),(round((x+1.5)*sx),round((y+1)*sy)),0,-1)
                     if index==0:
                         for col,digit in enumerate('123'):fill(18+col*6,57+int(digit)*3.5)
-                    question=template['questions'][index];_,x,y=paper.bubbles(question,question['regions'][0])[1 if index==0 else 0];fill(x,y)
+                    question=template['questions'][index]
+                    for region in question['regions']:
+                        _,x,y=paper.bubbles(question,region)[1 if index==0 else 0];fill(x,y)
                     path=root/f'filled-{index}.png';path.write_bytes(cv2.imencode('.png',image)[1].tobytes());images.append(path)
                 native=subprocess.Popen(['dotnet',str(dll),'--desktop-self-test',base,str(root/'client'),str(images[0]),str(images[1]),project['id'],account['username'],account['password'],'-' if bundled else sys.executable,str(repo)],cwd=repo,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding='utf-8',creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
                 messages=queue.Queue()

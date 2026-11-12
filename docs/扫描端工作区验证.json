@@ -34,7 +34,8 @@
     ],
     "pages": 2,
     "candidate_number": "123",
-    "final_score": 5
+    "final_score": 5,
+    "local_multi_region_preview": "passed: two regions, 360x172 preview"
   },
   "frontend": [
     "build passed",
