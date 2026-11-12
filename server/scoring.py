@@ -19,6 +19,7 @@ def objective_score(selected, answer, maximum, rule=None):
             return 0
         return maximum if selected == answer else min(maximum, cents(rule.get('partial_points',0))) if selected else 0
     if rule['mode'] == 'per_option':
+        if rule.get('wrong_action','deduct')=='zero' and selected-answer:return 0
         return max(0,min(maximum,len(selected & answer)*cents(rule.get('correct_points',1))-len(selected-answer)*cents(rule.get('wrong_penalty',1))))
     raise ValueError('不支持的评分规则')
 

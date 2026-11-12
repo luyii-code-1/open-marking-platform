@@ -39,7 +39,7 @@ def test_quality_evidence_freezes_until_admin_review_and_preserves_idempotency(t
             group = db.put(connection, 'groups', {'subject_id': subject['id'], 'name': '组'})
             template = db.put(connection, 'templates', {'group_id': group['id'], 'revision': 1, 'sides': 1})
             batch = db.put(connection, 'scan-batches', {'group_id': group['id'], 'template_id': template['id'], 'status': 'front'})
-        monkeypatch.setattr(paper, 'decode', lambda data: (None, paper.code(template, 'front')))
+        monkeypatch.setattr(paper, 'decode', lambda data,template=None: (None, paper.code(template, 'front')))
         capture = str(uuid4())
         url = f"/api/v1/scan-batches/{batch['id']}"
         data = {'capture_id': capture, 'side': 'front', 'sequence': '1', 'quality_report': json.dumps(report())}

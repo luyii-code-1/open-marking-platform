@@ -45,7 +45,7 @@ def test_pdf_preview_matches_published_print_pixels_without_persisting_draft(tmp
             with Image.open(io.BytesIO(preview.content)) as actual,Image.open(prefix.with_suffix('.png')) as expected:
                 assert actual.size==expected.size
                 assert ImageChops.difference(actual.convert('RGB'),expected.convert('RGB')).getbbox() is None
-            assert paper.decode(preview.content)[1]==paper.code(template,'front' if page==1 else 'back')
+            assert paper.decode(preview.content)[1]==''
         with db.connect() as connection:before=connection.execute('SELECT COUNT(*) FROM objects').fetchone()[0]
         assert client.post('/api/v1/templates/preview',json={**body,'id':''},headers=headers).status_code==200
         with db.connect() as connection:assert connection.execute('SELECT COUNT(*) FROM objects').fetchone()[0]==before

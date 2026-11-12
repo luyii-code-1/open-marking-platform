@@ -13,6 +13,7 @@ public partial class DesktopWindow : Window
     private string _pendingActivation="";
     public async void ReceiveActivation(string value)
     {
+        if(_closing)return;
         if(value.Length==0){Activate();return;}
         if(!_pageReady){_pendingActivation=value;return;}
         try
@@ -59,7 +60,7 @@ public partial class DesktopWindow : Window
             Browser.CoreWebView2.WebMessageReceived+=Message;
             _controller.Changed=()=>Dispatcher.BeginInvoke(()=>
             {
-                if(!_closing&&Allowed(Browser.Source?.AbsoluteUri??""))Browser.CoreWebView2.PostWebMessageAsJson("{\"event\":\"changed\",\"protocol\":\"omp-scanner-3\"}");
+                if(!_closing&&Allowed(Browser.Source?.AbsoluteUri??""))Browser.CoreWebView2.PostWebMessageAsJson("{\"event\":\"changed\",\"protocol\":\"omp-scanner-4\"}");
             });
             _timer.Tick+=async(_,_)=>await _controller.Tick();_timer.Start();
             Browser.CoreWebView2.Navigate(LocalPage);
@@ -67,12 +68,12 @@ public partial class DesktopWindow : Window
             if(_controller.Server.Length>0)
             {
                 await _controller.Tick();
-                Browser.CoreWebView2.PostWebMessageAsJson("{\"event\":\"changed\",\"protocol\":\"omp-scanner-3\"}");
+                Browser.CoreWebView2.PostWebMessageAsJson("{\"event\":\"changed\",\"protocol\":\"omp-scanner-4\"}");
                 using var timeout=new CancellationTokenSource(TimeSpan.FromSeconds(4));
                 try{using var http=new System.Net.Http.HttpClient();using var response=await http.GetAsync(_controller.PageUrl(),timeout.Token);if(response.IsSuccessStatusCode)Browser.CoreWebView2.Navigate(_controller.PageUrl());}catch(System.Net.Http.HttpRequestException){}catch(OperationCanceledException){}
             }
         }
-        catch(Exception error){LoadingText.Text=error.Message;LoadingText.Visibility=Visibility.Visible;return;}
+        catch(Exception error){if(!_closing){LoadingText.Text=error.Message;LoadingText.Visibility=Visibility.Visible;}return;}
         _pageReady=true;
         var activation=_pendingActivation.Length>0?_pendingActivation:PairingActivation.InitialUri;
         PairingActivation.InitialUri="";_pendingActivation="";
@@ -125,6 +126,7 @@ public partial class DesktopWindow : Window
     private async void ClosingWindow(object? sender,CancelEventArgs args)
     {
         if(_ready)return;args.Cancel=true;if(_closing)return;_closing=true;_timer.Stop();
-        try{await _controller.Close();}finally{_ready=true;Browser.Dispose();Close();}
+        try{await _controller.Close();}
+        finally{_ready=true;Browser.Dispose();_ = Dispatcher.BeginInvoke(DispatcherPriority.Normal,new Action(Close));}
     }
 }

@@ -1,5 +1,5 @@
 {
-  "url": "https://192.168.1.2:18443",
+  "url": "https://192.0.2.10:18443",
   "image_tag": "omp-integration:20261113-ui12",
   "code_commit": "5818de838890ea80e8b93432f12438e81c0d7a1c",
   "verified_static_files": 11,
@@ -49,5 +49,6 @@
   ],
   "installer_version": "0.1.0+204a6dc2d1",
   "ui_acceptance": "pending user review",
-  "real_Hi5100S": "pending hardware"
+  "real_Hi5100S": "pending hardware",
+  "connection_details": "anonymized examples; actual connection is deployment-owned"
 }

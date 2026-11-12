@@ -9,5 +9,6 @@
 - React、Ant Design、ZXing、SQLite及Python依赖遵循各自上游许可证和声明。
 - 网页宿主使用Microsoft WebView2 SDK，许可证及NOTICE见扫描端`third-party-licenses/webview2-*`。运行时由Microsoft Edge WebView2 Runtime提供。
 - 本地识读引擎随包携带Python、NumPy、OpenCV和ZXing-C++；组件版本记录在`recognition/BUILD-INFO.json`，许可材料见`recognition/licenses/`。PyInstaller构建工具及其引导程序的许可材料同目录保留。
+- 题卡嵌入字体OMP Paper Sans由Noto Sans SC生成，遵循SIL Open Font License 1.1；字体、上游地址及完整许可位于`server/fonts/`，PDF按实际字符嵌入子集。
 
 正式对外发布前应随实际发布文件核对第三方声明及相应源代码的提供方式。

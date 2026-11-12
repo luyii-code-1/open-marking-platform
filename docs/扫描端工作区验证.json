@@ -44,7 +44,7 @@
     "PWA isolation passed"
   ],
   "lan": {
-    "url": "https://192.168.1.2:18443",
+    "url": "https://192.0.2.10:18443",
     "image_tag": "omp-integration:20261112-ui7",
     "code_commit": "a6362153cb331b43013d499538a368e80ccbf956",
     "verified_static_files": 11,
@@ -69,5 +69,6 @@
     "ui_acceptance": "pending user review"
   },
   "ui_acceptance": "pending user review",
-  "real_Hi5100S_driver_and_paper_acceptance": "pending"
+  "real_Hi5100S_driver_and_paper_acceptance": "pending",
+  "connection_details": "anonymized examples; actual connection is deployment-owned"
 }

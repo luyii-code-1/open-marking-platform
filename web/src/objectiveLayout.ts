@@ -52,8 +52,9 @@ export function applyAnswers(questions: Question[], input: string) {
 }
 
 type Layout = { columns: number; startPage: number }
-export const compactChoice = { width: 8, height: 2.3, pitch: 6.1, rowHeight: 6, optionPitch: 9.5 }
+export const compactChoice = { width: 4, height: 2.3, pitch: 4.8, rowHeight: 4.6, optionPitch: 5 }
 export function choiceCenters(question: Question, region: Region) {
+  if (question.choice_style === 'compact') return [...answerLetters.slice(0, question.options)].map((letter,index)=>({letter,x:region.x+9+index*5,y:region.y+2.4}))
   const compact = question.choice_style === 'bracket'
   return [...answerLetters.slice(0, question.options)].map((letter, index) => ({ letter, x: region.x + (compact ? 14 + index * 9.5 : 12 + index * Math.min(12, (region.width - 12) / question.options)), y: region.y + (compact ? 3 : 7) }))
 }
@@ -62,25 +63,28 @@ export function arrangeObjective(template: Template, ids: string[], { columns, s
   const selected = new Set(ids), target = template.questions.filter(q => selected.has(q.id)).sort((a, b) => a.number - b.number)
   if (!target.length || target.some(q => q.type === 'subjective')) throw new Error('请选择需要排布的客观题')
   if (!Number.isInteger(columns) || columns < 1 || columns > 10 || !Number.isInteger(startPage) || startPage < 1 || startPage > template.sides) throw new Error('排布列数或起始面无效')
-  const paperWidth = template.paper === 'A3' ? 420 : 210, gap = 6
-  const width = Math.floor(((paperWidth - 24 - (columns - 1) * gap) / columns) * 10) / 10
-  if (target.some(q => width < 20 + (q.options - 1) * 9.5)) throw new Error('当前列数放不下选项，请减少列数')
+  const paperWidth = template.paper === 'A3' ? 420 : 210, panels = template.paper === 'A3' ? template.sheet_columns || 2 : 1, gap = 3
+  const panelWidth = (paperWidth-24-(panels-1)*8)/panels
+  const width = Math.floor(((panelWidth - (columns - 1) * gap) / columns) * 10) / 10
+  if (target.some(q => width < 12 + (q.options - 1) * 5)) throw new Error('当前题卡栏内放不下选项，请减少客观题列数')
   const occupied = template.questions.filter(q => !selected.has(q.id)).flatMap(q => q.regions)
   const slots: Region[] = []
   for (let page = startPage; page <= template.sides && slots.length < target.length; page++) {
-    const byColumn: Region[][] = Array.from({ length: columns }, () => [])
-    for (let row = 0; 100 + row * compactChoice.pitch + compactChoice.rowHeight <= 255; row++)
-      for (let col = 0; col < columns; col++) {
-        const slot = { page, x: Math.round((12 + col * (width + gap)) * 10) / 10, y: Math.round((100 + row * compactChoice.pitch) * 1000) / 1000, width, height: compactChoice.rowHeight }
-        if (!occupied.some(region => overlaps(region, slot))) byColumn[col].push(slot)
-      }
-    const count = Math.min(target.length - slots.length, byColumn.reduce((sum, list) => sum + list.length, 0)), used = Array(columns).fill(0)
-    for (let remaining = count; remaining > 0;) for (let col = 0; col < columns && remaining; col++) if (used[col] < byColumn[col].length) { used[col]++; remaining-- }
-    byColumn.forEach((list, col) => slots.push(...list.slice(0, used[col])))
+    for(let panel=0;panel<panels&&slots.length<target.length;panel++) {
+      const top=page===1&&panel===0?100:35
+      for(let block=0;top+block*27+4*compactChoice.pitch+compactChoice.rowHeight<=255&&slots.length<target.length;block++)
+        for(let col=0;col<columns&&slots.length<target.length;col++)
+          for(let row=0;row<5&&slots.length<target.length;row++) {
+            const y=top+block*27+row*compactChoice.pitch
+            if(y+compactChoice.rowHeight>255)continue
+            const slot={page,x:Math.round((12+panel*(panelWidth+8)+col*(width+gap))*1000)/1000,y:Math.round(y*1000)/1000,width,height:compactChoice.rowHeight}
+            if(!occupied.some(region=>overlaps(region,slot)))slots.push(slot)
+          }
+    }
   }
   if (slots.length < target.length) throw new Error(`剩余空间可放${slots.length}题，需要${target.length}题；请增加列数、启用背面或调整已有区域`)
   const positions = new Map(target.map((q, index) => [q.id, slots[index]]))
-  return template.questions.map(q => positions.has(q.id) ? { ...q, choice_style: 'bracket' as const, regions: [positions.get(q.id)!] } : q)
+  return template.questions.map(q => positions.has(q.id) ? { ...q, choice_style: 'compact' as const, regions: [positions.get(q.id)!] } : q)
 }
 
 export function addObjective(template: Template, config: Layout & { numbers: string; type: 'single' | 'multiple'; options: number; points: number }, uuid = () => crypto.randomUUID()) {

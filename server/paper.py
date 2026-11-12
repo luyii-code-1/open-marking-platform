@@ -7,14 +7,12 @@ from reportlab.graphics.barcode import qr
 from reportlab.graphics.shapes import Drawing
 from reportlab.graphics import renderPDF
 from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+from .paper_fonts import FONT
 from reportlab.lib.utils import ImageReader
 from . import db as database
 from .richtext import layout as rich_layout
 
-pdfmetrics.registerFont(UnicodeCIDFont('STSong-Light'))
-pdfmetrics.registerFontFamily('STSong-Light',normal='STSong-Light',bold='STSong-Light',italic='STSong-Light',boldItalic='STSong-Light')
-from .omr import ABSENT_X, ABSENT_Y, dimensions, code, bubbles, decode, align, manual_align, absent_mark, recognize
+from .omr import ABSENT_X, ABSENT_Y, dimensions, code, bubbles, decode, align, manual_align, absent_mark, recognize, manual_binding, panels, absent_position
 
 
 
@@ -23,7 +21,11 @@ from .omr import ABSENT_X, ABSENT_Y, dimensions, code, bubbles, decode, align, m
 
 def validate(template):
     w,h=dimensions(template)
-    compact=any(q.get('choice_style')=='bracket' for q in template.get('questions',[]))
+    compact=any(q.get('choice_style') in ('bracket','compact') for q in template.get('questions',[]))
+    columns=panels(template)
+    if type(columns) is not int or columns not in ((2,3) if template['paper']=='A3' and manual_binding(template) else (1,)):raise ValueError('A3请选择每面2栏或3栏，A4使用单栏模板')
+    panel_width=(w-24-(columns-1)*8)/columns
+    if manual_binding(template) and 18+(template.get('candidate_length',8)-1)*6+2>12+panel_width:raise ValueError('准考证号超出首栏，请减少位数或选择较宽的模板')
     if not isinstance(template.get('candidate_length',8),int) or not 1<=template.get('candidate_length',8)<=20: raise ValueError('准考证号长度应为1至20位')
     occupied=[]
     for question in template.get('questions',[]):
@@ -33,12 +35,17 @@ def validate(template):
                 raise ValueError('答题区页码超出题卡范围')
             if min(region['x'],region['y'])<0 or min(region['width'],region['height'])<=0 or region['x']+region['width']>w-8 or region['y']+region['height']>h-8:
                 raise ValueError('答题区超出纸张有效范围')
-            if region['y']<100:
-                raise ValueError('请将答题区放在100毫米以下，保留标题及考号区域')
+            reserved=100 if not manual_binding(template) or (region['page']==1 and region['x']<12+panel_width) else 35
+            if region['y']<reserved:raise ValueError(f'本栏答题区需从{reserved}毫米开始，保留标题及考号区域')
+            if manual_binding(template):
+                panel=min(columns-1,max(0,int((region['x']-12+.01)/(panel_width+8))))
+                left=12+panel*(panel_width+8)
+                if region['x']<left-.01 or region['x']+region['width']>left+panel_width+.01:raise ValueError('答题区域不能跨越题卡分栏')
             bracket=question.get('choice_style')=='bracket'
-            if question.get('choice_style') not in (None,'bracket'):raise ValueError('选择题填涂样式无效')
-            minimum_width=20+(question.get('options',4)-1)*9.5 if bracket else 12+question.get('options',4)*6
-            if question['type']!='subjective' and (region['width']<minimum_width or region['height']<(6 if bracket else 14)): raise ValueError('客观题区域不足以容纳选项')
+            tight=question.get('choice_style')=='compact'
+            if question.get('choice_style') not in (None,'bracket','compact'):raise ValueError('选择题填涂样式无效')
+            minimum_width=12+(question.get('options',4)-1)*5 if tight else 20+(question.get('options',4)-1)*9.5 if bracket else 12+question.get('options',4)*6
+            if question['type']!='subjective' and (region['width']<minimum_width or region['height']<(4.6 if tight else 6 if bracket else 14)): raise ValueError('客观题区域不足以容纳选项')
             if compact and region['x']<110 and region['x']+region['width']>12 and region['y']<h-26 and region['y']+region['height']>h-38:raise ValueError('答题区与页脚灰度校准区域重叠')
             for previous in occupied:
                 if previous['page']==region['page'] and region['x']<previous['x']+previous['width'] and previous['x']<region['x']+region['width'] and region['y']<previous['y']+previous['height'] and previous['y']<region['y']+region['height']: raise ValueError('答题区域重叠')
@@ -69,24 +76,36 @@ def pdf(template):
             if not background.exists():raise ValueError('题卡底图不存在')
             c.drawImage(str(background),0,0,width=w*mm,height=h*mm)
             c.setFillColorRGB(1,1,1);c.rect(0,(h-100)*mm,w*mm,100*mm,fill=1,stroke=0);c.setFillColorRGB(0,0,0)
-        c.setFont('STSong-Light',16)
+        title_width=(w-24-(panels(template)-1)*8)/panels(template) if manual_binding(template) else w-65
+        title_size=min(16,16*(title_width-6)/max(1,pdfmetrics.stringWidth(template['name'],FONT,16)/mm))
+        c.setFont(FONT,title_size)
         c.drawString(15*mm,(h-20)*mm,template['name'])
         if template.get('subtitle'):
-            c.setFont('STSong-Light',10);c.drawString(15*mm,(h-25)*mm,template['subtitle'])
-        c.setFont('STSong-Light',9)
-        c.drawString(15*mm,(h-29)*mm,f"第{page}面 · 请按100%实际大小打印 · 不要裁去定位标记")
-        widget=qr.QrCodeWidget(code(template,side)); x0,y0,x1,y1=widget.getBounds()
-        drawing=Drawing(26*mm,26*mm,transform=[26*mm/(x1-x0),0,0,26*mm/(y1-y0),0,0]); drawing.add(widget)
-        renderPDF.draw(drawing,c,(w-42)*mm,(h-36)*mm)
+            c.setFont(FONT,10);c.drawString(15*mm,(h-25)*mm,template['subtitle'])
+        c.setFont(FONT,9)
+        c.drawString(15*mm,(h-29)*mm,f"第{page}面 · 按实际大小打印，保留定位标记")
+        if not manual_binding(template):
+            widget=qr.QrCodeWidget(code(template,side)); x0,y0,x1,y1=widget.getBounds()
+            drawing=Drawing(26*mm,26*mm,transform=[26*mm/(x1-x0),0,0,26*mm/(y1-y0),0,0]); drawing.add(widget)
+            renderPDF.draw(drawing,c,(w-42)*mm,(h-36)*mm)
+        if manual_binding(template):
+            count=panels(template);pw=(w-24-(count-1)*8)/count
+            for panel in range(count):
+                left=12+panel*(pw+8)
+                if panel:
+                    c.setFont(FONT,min(title_size,11));c.drawString((left+2)*mm,(h-20)*mm,template['name'])
+                    c.setDash(1,3);c.setStrokeGray(.65);c.line((left-4)*mm,15*mm,(left-4)*mm,(h-15)*mm);c.setDash();c.setStrokeGray(0)
+                c.setFont(FONT,8);c.drawRightString((left+pw-2)*mm,16*mm,f'第{(page-1)*count+panel+1}栏 / 共{count*template["sides"]}栏')
         for x,y in ((7,7),(w-7,7),(7,h-7),(w-7,h-7)):
             c.rect((x-2)*mm,(h-y-2)*mm,4*mm,4*mm,fill=1,stroke=0)
         if page==1:
             c.drawString(15*mm,(h-39)*mm,'姓名：____________  班级：____________  考场：____________')
             if template.get('layout_version',1)>=2:
                 c.drawString(15*mm,(h-46)*mm,'准考证号：')
-                c.drawString(104*mm,(h-46)*mm,'缺考标记：')
-                c.rect((ABSENT_X-2)*mm,(h-ABSENT_Y-1.5)*mm,4*mm,3*mm)
-                c.drawString(130*mm,(h-46)*mm,'（监考填涂）')
+                ax,ay=absent_position(template)
+                c.drawString((ax-23)*mm,(h-46)*mm,'缺考标记：')
+                c.rect((ax-2)*mm,(h-ay-1.5)*mm,4*mm,3*mm)
+                c.setFont(FONT,7);c.drawString((ax-24)*mm,(h-51)*mm,'由监考教师填涂')
             else:c.drawString(15*mm,(h-46)*mm,'准考证号：                       缺考标记：□（由监考教师填写）')
             for column in range(int(template.get('candidate_length',8))):
                 x=18+column*6
@@ -97,28 +116,29 @@ def pdf(template):
                     c.setFont('Helvetica',5); c.drawCentredString(x*mm,(h-y-.6)*mm,str(digit))
         column_tops={}
         for q in template.get('questions',[]):
-            if q.get('choice_style')=='bracket' and q['type']!='subjective':
+            if q.get('choice_style') in ('bracket','compact') and q['type']!='subjective':
                 for r in q['regions']:
                     if int(r['page'])==page:column_tops[r['x']]=min(column_tops.get(r['x'],r['y']),r['y'])
-        c.setFont('STSong-Light',8)
+        c.setFont(FONT,8)
         for x,top in column_tops.items():c.drawString((x+2)*mm,(h-top+2)*mm,'题号')
         for question in template.get('questions',[]):
             for region in question['regions']:
                 if int(region['page'])!=page: continue
                 x,y,rw,rh=(region[k] for k in ('x','y','width','height'))
-                c.setFont('STSong-Light',9)
+                c.setFont(FONT,9)
                 if question['type']!='subjective':
                     c.setFillColorRGB(1,1,1);c.rect(x*mm,(h-y-rh)*mm,rw*mm,rh*mm,fill=1,stroke=0);c.setFillColorRGB(0,0,0)
-                bracket=question['type']!='subjective' and question.get('choice_style')=='bracket'
+                tight=question.get('choice_style')=='compact'
+                bracket=question['type']!='subjective' and question.get('choice_style') in ('bracket','compact')
                 if not bracket:c.rect(x*mm,(h-y-rh)*mm,rw*mm,rh*mm)
                 if bracket:c.setFont('Helvetica',2.8*mm)
-                c.drawString((x+2)*mm,(h-y-(3.8 if bracket else 5))*mm,str(question['number']))
+                c.drawString((x+1)*mm,(h-y-(3.2 if tight else 3.8 if bracket else 5))*mm,str(question['number']))
                 if question['type']!='subjective':
                     for label,bx,by in bubbles(question,region):
                         if bracket:
                             c.setLineWidth(.17*mm)
                             for direction in (-1,1):
-                                edge=bx+direction*4;inner=edge-direction*.7
+                                edge=bx+direction*(2 if tight else 4);inner=edge-direction*.5
                                 path=c.beginPath();path.moveTo(inner*mm,(h-by+1.15)*mm);path.lineTo(edge*mm,(h-by+1.15)*mm);path.lineTo(edge*mm,(h-by-1.15)*mm);path.lineTo(inner*mm,(h-by-1.15)*mm);c.drawPath(path)
                             c.setFont('Helvetica',1.95*mm);c.drawCentredString(bx*mm,(h-by-.6)*mm,label);c.setLineWidth(1)
                         else:
@@ -145,9 +165,9 @@ def pdf(template):
                         try:asset=materialize('assets/'+question['image_asset_id']+'.png')
                         except FileNotFoundError:raise ValueError('题卡插图不存在')
                         c.drawImage(str(asset),(x+3)*mm,(h-y-rh+3)*mm,width=(rw-6)*mm,height=min(rh-12,question.get('image_height',25))*mm,preserveAspectRatio=True,anchor='c',mask='auto')
-        if any(q.get('choice_style')=='bracket' for q in template.get('questions',[])):
+        if any(q.get('choice_style') in ('bracket','compact') for q in template.get('questions',[])):
             c.setFillGray(1);c.rect(12*mm,26*mm,98*mm,12*mm,fill=1,stroke=0);c.setFillGray(0)
-            c.setFont('STSong-Light',8);c.drawString(12*mm,30*mm,'灰度校准 · 请勿填涂')
+            c.setFont(FONT,8);c.drawString(12*mm,30*mm,'灰度校准 · 请勿填涂')
             for index,gray in enumerate((255,192,128,64,0)):
                 c.setFillGray(gray/255);c.rect((62+index*8)*mm,29*mm,6*mm,5*mm,fill=1,stroke=0)
                 c.setFillGray(0);c.setLineWidth(.12*mm);c.rect((62+index*8)*mm,29*mm,6*mm,5*mm,fill=0,stroke=1)

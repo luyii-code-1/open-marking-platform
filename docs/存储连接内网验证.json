@@ -1,5 +1,5 @@
 {
-  "url": "https://192.168.1.2:18443",
+  "url": "https://192.0.2.10:18443",
   "image_tag": "omp-integration:20261112-ui10",
   "code_commit": "f3e7ef4637e42026b5f45dfc311e7c1c626b0cf3",
   "verified_static_files": 11,
@@ -50,5 +50,6 @@
   "credentials_key_permissions": {
     "directory": "0700",
     "file": "0600"
-  }
+  },
+  "connection_details": "anonymized examples; actual connection is deployment-owned"
 }

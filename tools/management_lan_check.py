@@ -67,7 +67,7 @@ def validate(system,ca_file,revision,installer_sha,on_account=None,remote_check=
                 {'number':2,'type':'subjective','points':1,'review_mode':'single','regions':[{'page':1,'x':15,'y':150,'width':80,'height':20}]}]})
             template=post(api,'templates/'+template['id']+'/publish');checkpoint(template_id=template['id'])
             response=scanner.get('scanner/projects/'+project['id']+'/package');response.raise_for_status();pack=response.json();config=pack['groups'][0]
-            assert pack['protocol']=='omp-scanner-3' and len(pack['room_tags'])==2
+            assert pack['protocol']=='omp-scanner-4' and len(pack['room_tags'])==2
             assert 'answer' not in config['template']['questions'][0]
             batch_id=str(uuid4());tag_ids=[t['id'] for t in tags]
             batch=post(scanner,'scanner/batches/'+batch_id,{'group_id':group_id,'template_id':template['id'],'template_revision':template['revision'],'config_sha256':config['config_sha256'],'capture_mode':'separate','back_order':'same','room_tag_ids':tag_ids})

@@ -1,6 +1,6 @@
 {
   "status": "passed",
-  "url": "https://192.168.1.2:18443",
+  "url": "https://192.0.2.10:18443",
   "fixture": "synthetic",
   "students": 100,
   "teachers": 100,
@@ -31,5 +31,6 @@
   "released": true,
   "restored": true,
   "restored_files": 199,
-  "duration_seconds_this_run": 99.6
+  "duration_seconds_this_run": 99.6,
+  "connection_details": "anonymized examples; actual connection is deployment-owned"
 }
