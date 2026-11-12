@@ -21,9 +21,15 @@
 
 公共`Button`保留静止时的宽度，加载时图标居中叠放，标签以透明度隐藏并保留可访问名称。表格操作不因图标插入而换行。成绩列表刷新时保留内容并覆盖加载提示，扫描进度提示保留固定位置。
 
+加载图标在按钮内部使用整层网格居中，定位层不使用位移变换，避免与组件库缩放动画冲突。按钮有文字或单独图标、前置或后置图标时，统一按按钮中心展示加载SVG。
+
+## 图标
+
+界面操作图标统一使用`@ant-design/icons`提供的SVG。箭头通过按钮`icon`与`iconPosition`设置，更多操作、缩放和侧栏展开/收起使用对应语义图标；仅图标按钮提供可访问名称。界面静态素材及文字不使用Emoji或字符充当操作图标。题卡坐标、框选区域和四点定位图形使用业务SVG，Logo使用提供的矢量文件。
+
 ## 本地验收
 
-在仓库根目录执行`npm --prefix web run build`，以及`test:actions`、`test:navigation`、`test:objective`、`test:pwa`检查。`test:actions`覆盖操作归属、重复点击、独立区块、失败清理及重试。
+在仓库根目录执行`npm --prefix web run build`，以及`test:actions`、`test:icons`、`test:navigation`、`test:objective`、`test:pwa`检查。`test:actions`覆盖操作归属、重复点击、独立区块、失败清理及重试；`test:icons`覆盖加载图标SVG、按钮标签、居中布局规则及静态界面的Emoji和字符图标检查。
 
 预览默认连接`http://127.0.0.1:8000`；可用进程环境变量`OMP_API_PROXY`选择测试后端，使用私有测试CA时同时设置`NODE_EXTRA_CA_CERTS`。在`web`目录执行：
 

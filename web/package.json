@@ -10,7 +10,8 @@
     "test:pwa": "node tools/test-worker.mjs",
     "test:navigation": "node tools/test-exam-navigation.mjs",
     "test:objective": "node tools/test-objective-layout.mjs",
-    "test:actions": "node tools/test-actions.mjs"
+    "test:actions": "node tools/test-actions.mjs",
+    "test:icons": "node tools/test-icons.mjs"
   },
   "dependencies": {
     "@ant-design/icons": "^6.0.0",
