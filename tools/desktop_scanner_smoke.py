@@ -71,7 +71,8 @@ def run(scanner_dll=None,bundled=False):
                     for region in question['regions']:
                         _,x,y=paper.bubbles(question,region)[1 if index==0 else 0];fill(x,y)
                     path=root/f'filled-{index}.png';path.write_bytes(cv2.imencode('.png',image)[1].tobytes());images.append(path)
-                native=subprocess.Popen(['dotnet',str(dll),'--desktop-self-test',base,str(root/'client'),str(images[0]),str(images[1]),project['id'],'pair-code',pairing['code'],'-' if bundled else sys.executable,str(repo)],cwd=repo,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding='utf-8',creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
+                entry=[str(dll.with_suffix('.exe'))] if bundled else ['dotnet',str(dll)]
+                native=subprocess.Popen([*entry,'--desktop-self-test',base,str(root/'client'),str(images[0]),str(images[1]),project['id'],'pair-code',pairing['code'],'-' if bundled else sys.executable,str(repo)],cwd=repo,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding='utf-8',creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
                 messages=queue.Queue()
                 def collect():
                     for line in native.stdout:messages.put(line)
