@@ -1,0 +1,72 @@
+{
+  "backend_full_suite": {
+    "passed": 89,
+    "seconds": 55.98
+  },
+  "socket_protocol_regression": {
+    "passed": 1,
+    "checks": [
+      "wrong token rejected",
+      "oversized frame rejected",
+      "authorized request accepted",
+      "parent pipe close exits worker"
+    ]
+  },
+  "dotnet_build": {
+    "warnings": 0,
+    "errors": 0,
+    "framework": "net10.0-windows",
+    "webview2_sdk": "1.0.4314.35"
+  },
+  "headless_native_tests": {
+    "development_worker": "passed",
+    "bundled_worker": "passed",
+    "scenario": [
+      "download project",
+      "stop validation server",
+      "reopen native controller",
+      "create offline batch",
+      "recognize both sides through TCP worker",
+      "persist pairing and close",
+      "restart validation server",
+      "reopen native controller",
+      "authenticate device, upload and commit"
+    ],
+    "pages": 2,
+    "candidate_number": "123",
+    "final_score": 5
+  },
+  "frontend": [
+    "build passed",
+    "exam navigation passed",
+    "objective authoring passed",
+    "PWA isolation passed"
+  ],
+  "lan": {
+    "url": "https://192.168.1.2:18443",
+    "image_tag": "omp-integration:20261112-ui7",
+    "code_commit": "a6362153cb331b43013d499538a368e80ccbf956",
+    "verified_static_files": 11,
+    "preserved_result_count": 100,
+    "backup_id": "ded44b8b-bcaa-44be-94e8-0e7717eedc21",
+    "backup_sha256": "148d3121e6e4bdff799e05bae1132be8ab0348a8008ef1ebfbf688ef2fc180d8",
+    "admin_portals": "passed",
+    "recovery_reset_invalid_code": "rejected",
+    "deletion_flow": {
+      "status": "passed",
+      "isolated_project_id": "56ec5e98-744b-45e4-b7d6-42219103d73a",
+      "deleted_records": 9,
+      "candidate_recognition": "passed",
+      "local_recognition": true,
+      "final_score": 1,
+      "archive_preserved": true,
+      "fresh_archive_id": "9407b836-c6ed-4197-a48c-fc2b1d2299c8",
+      "deleted_scan_files": 3,
+      "physical_local_cleanup_verified": true,
+      "existing_personnel_reused": true
+    },
+    "ui_acceptance": "pending user review"
+  },
+  "ui_acceptance": "pending user review",
+  "real_Hi5100S_driver_and_paper_acceptance": "pending"
+}
