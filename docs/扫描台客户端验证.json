@@ -1,0 +1,38 @@
+{
+  "source_commit": "204a6dc2d152cadc554d89a0ece43660c53fcb8a",
+  "integrity": "passed",
+  "backend_tests": 103,
+  "frontend": "build/navigation/objective/PWA passed",
+  "self_contained_executable": {
+    "status": "passed",
+    "scope": "headless desktop controller",
+    "manager_pairing": true,
+    "uri_and_single_instance": true,
+    "offline_room_tags": true,
+    "offline_server_outage_and_restart": true,
+    "bundled_engine": true,
+    "pages": 2,
+    "candidate_number": "123",
+    "final_score": 5,
+    "batch_id": "77b832be-7443-4b05-b08a-665af160965e"
+  },
+  "artifacts": [
+    {
+      "file": "OpenMarkingPlatform-source-preview.zip",
+      "size": 1045283,
+      "sha256": "ad57119da8392611651e1cf3131298b5a5724ab6e40840400bdb9ac18b75416c"
+    },
+    {
+      "file": "OpenMarkingPlatform-scanner-win-x64-preview.zip",
+      "size": 149098551,
+      "sha256": "8f76d5dacdc7b191f03b9f613f4d12428752dc25fc9979ce37f720f59ca8da96"
+    },
+    {
+      "file": "OpenMarkingPlatform-Scanner-204a6dc2d1-win-x64-Setup.exe",
+      "size": 105847400,
+      "sha256": "1de4e3609e5536e2bbf32331772dd5a5fa0316555a9cccfa4a722c9643fad5af"
+    }
+  ],
+  "ui_acceptance": "pending user review",
+  "real_Hi5100S_acceptance": "pending"
+}
