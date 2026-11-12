@@ -79,7 +79,7 @@ def main() -> None:
                 'recognition_engine': 'omp-omr-2', 'recognition_runtime_bundled': True,
                 'offline_project_workspaces': True,
                 'pending': ['User UI acceptance', 'Real Hi-5100S scanner acceptance',
-                            'ROS online crop specification and private-bucket validation',
+                            'ROS Beta media crop availability',
                             'Production deployment acceptance']}
     # Publish into a disposable directory; existing queues and registered keys are untouched.
     run(['npm', 'ci'], ROOT / 'web')
