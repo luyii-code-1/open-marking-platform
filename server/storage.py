@@ -25,8 +25,9 @@ def local_path(relative):
 def expected_hash(db,relative):
     parts=relative.split('/')
     if len(parts)!=2 or parts[0] not in ('pages','assets') or '.' not in parts[1]:return None
-    identifier,suffix=parts[1].rsplit('.',1);record=get(db,identifier,parts[0]) or {}
-    field='normalized_sha256' if parts[0]=='pages' and suffix=='png' else 'sha256'
+    identifier,suffix=parts[1].split('.',1);record=get(db,identifier,parts[0]) or {}
+    from .scan_files import hash_field
+    field=hash_field('.'+suffix) if parts[0]=='pages' else 'sha256'
     return record.get(field)
 
 

@@ -5,7 +5,7 @@
 {$OMP_DOMAIN:localhost} {
     encode zstd gzip
     request_body {
-        max_size 32MB
+        max_size 96MB
     }
     reverse_proxy api:8000
 }

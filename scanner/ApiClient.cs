@@ -7,7 +7,7 @@ using System.Text.Json;
 
 namespace OMP.Scanner;
 
-public sealed class ApiClient : IDisposable
+public sealed partial class ApiClient : IDisposable
 {
     private readonly HttpClient _http;
     private readonly SemaphoreSlim _identityLock = new(1, 1);

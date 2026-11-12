@@ -65,10 +65,12 @@ def _restore_files(root,source):
         for body in records[kind]:
             identifier=canonical(body['id'])
             suffixes=('.image','.png') if kind=='pages' and body.get('status')=='recognized' else ('.image',) if kind=='pages' else ('.png',) if kind=='assets' else ('.zip',)
+            if kind=='pages' and body.get('local_cuts_sha256'):suffixes+=('.cuts.zip',)
             if kind=='pages' and '.png' not in suffixes and source and (source/'pages'/(identifier+'.png')).is_file():suffixes+=('.png',)
             for suffix in suffixes:
                 relative=f'{kind}/{identifier}{suffix}'
-                expected=body.get('normalized_sha256' if kind=='pages' and suffix=='.png' else 'sha256')
+                from .scan_files import hash_field
+                expected=body.get(hash_field(suffix) if kind=='pages' else 'sha256')
                 if not expected and archived.get(relative):expected=archived[relative][0]['sha256']
                 needed[relative]=expected
     result={'needed':len(needed),'copied':0,'from_archive':0,'verified':0,'without_recorded_hash':0}

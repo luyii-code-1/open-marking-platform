@@ -128,7 +128,8 @@ def create(identifier,actor,progress=None,archive_id=None,ownership=None,preserv
                 kind,item=record['kind'],record['data']
                 if kind=='templates' and item.get('status')=='published':write_bytes('templates/'+item['id']+'.pdf',pdf(item))
                 if kind not in ('pages','assets'):continue
-                for suffix in (('.image','.png') if kind=='pages' else ('.png',)):
+                from .scan_files import page_suffixes,hash_field
+                for suffix in (page_suffixes(item) if kind=='pages' else ('.png',)):
                     name=kind+'/'+item['id']+suffix
                     try:source=materialize(name)
                     except FileNotFoundError:
@@ -141,7 +142,7 @@ def create(identifier,actor,progress=None,archive_id=None,ownership=None,preserv
                             output.write(block);digest.update(block);size+=len(block)
                     manifest.append({'path':name,'size':size,'sha256':digest.hexdigest()})
                     if kind=='pages' and suffix=='.image' and item.get('sha256') and digest.hexdigest()!=item['sha256']:raise HTTPException(409,'原始扫描文件与接收记录不一致：'+name)
-                    expected=item.get('normalized_sha256') if kind=='pages' and suffix=='.png' else item.get('sha256') if kind=='assets' else None
+                    expected=item.get(hash_field(suffix)) if kind=='pages' else item.get('sha256')
                     if expected and digest.hexdigest()!=expected:raise HTTPException(409,'文件与当前记录版本不一致：'+name)
             package.writestr('manifest.json',json.dumps(manifest))
         # Verify the bytes actually written before making the archive available.

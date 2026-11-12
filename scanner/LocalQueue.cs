@@ -5,7 +5,7 @@ using System.Security.Cryptography;
 
 namespace OMP.Scanner;
 
-public sealed class LocalQueue
+public sealed partial class LocalQueue
 {
     public string Root { get; }
     private readonly string _connectionString;
@@ -34,6 +34,11 @@ public sealed class LocalQueue
         EnsureColumn(db, "batches", "capture_mode", "TEXT NOT NULL DEFAULT 'separate'");
         EnsureColumn(db, "batches", "duplex_first_side", "TEXT NOT NULL DEFAULT ''");
         EnsureColumn(db, "pages", "quality_report", "TEXT NOT NULL DEFAULT '{}'");
+        foreach (var column in new[] { "project_id", "subject_id", "config_sha256" }) EnsureColumn(db, "batches", column, "TEXT NOT NULL DEFAULT ''");
+        EnsureColumn(db, "batches", "template_json", "TEXT NOT NULL DEFAULT '{}'");
+        EnsureColumn(db, "batches", "roster_json", "TEXT NOT NULL DEFAULT 'null'");
+        EnsureColumn(db, "batches", "local_pairs_json", "TEXT NOT NULL DEFAULT '[]'");
+        EnsureColumn(db, "pages", "recognition_json", "TEXT NOT NULL DEFAULT '{}'");
     }
 
     private static void EnsureColumn(SqliteConnection db, string table, string name, string definition)
@@ -74,10 +79,12 @@ public sealed class LocalQueue
     {
         using var db = Open();
         using var cmd = db.CreateCommand();
-        cmd.CommandText = "SELECT id,server_url,group_id,label,room,paper,sides,back_order,status,error,created_at,template_id,template_revision,capture_mode,duplex_first_side FROM batches ORDER BY created_at DESC";
+        cmd.CommandText = "SELECT id,server_url,group_id,label,room,paper,sides,back_order,status,error,created_at,template_id,template_revision,capture_mode,duplex_first_side,project_id,subject_id,config_sha256,template_json,roster_json,local_pairs_json FROM batches ORDER BY created_at DESC";
         using var row = cmd.ExecuteReader();
         var list = new List<BatchRow>();
         while (row.Read()) list.Add(new BatchRow { Id = row.GetString(0), ServerUrl = row.GetString(1), GroupId = row.GetString(2), Label = row.GetString(3), Room = row.GetString(4), Paper = row.GetString(5), Sides = row.GetInt32(6), BackOrder = row.GetString(7), Status = row.GetString(8), Error = row.GetString(9), CreatedAt = row.GetString(10), TemplateId = row.GetString(11), TemplateRevision = row.GetInt32(12), CaptureMode = row.GetString(13), DuplexFirstSide = row.GetString(14) });
+        row.Close();
+        foreach (var batch in list) LoadDesktopFields(db,batch);
         return list;
     }
 
@@ -85,11 +92,11 @@ public sealed class LocalQueue
     {
         using var db = Open();
         using var cmd = db.CreateCommand();
-        cmd.CommandText = "SELECT capture_id,batch_id,side,sequence,path,sha256,status,error,quality_report FROM pages WHERE batch_id=$batch ORDER BY CASE side WHEN 'front' THEN 0 ELSE 1 END,sequence";
+        cmd.CommandText = "SELECT capture_id,batch_id,side,sequence,path,sha256,status,error,quality_report,recognition_json FROM pages WHERE batch_id=$batch ORDER BY CASE side WHEN 'front' THEN 0 ELSE 1 END,sequence";
         cmd.Parameters.AddWithValue("$batch", batchId);
         using var row = cmd.ExecuteReader();
         var list = new List<PageRow>();
-        while (row.Read()) list.Add(new PageRow { CaptureId = row.GetString(0), BatchId = row.GetString(1), Side = row.GetString(2), Sequence = row.GetInt32(3), Path = row.GetString(4), Sha256 = row.GetString(5), Status = row.GetString(6), Error = row.GetString(7), QualityJson = row.GetString(8) });
+        while (row.Read()) list.Add(new PageRow { CaptureId = row.GetString(0), BatchId = row.GetString(1), Side = row.GetString(2), Sequence = row.GetInt32(3), Path = row.GetString(4), Sha256 = row.GetString(5), Status = row.GetString(6), Error = row.GetString(7), QualityJson = row.GetString(8), RecognitionJson = row.GetString(9) });
         return list;
     }
 

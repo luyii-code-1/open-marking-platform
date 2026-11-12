@@ -33,7 +33,6 @@ public sealed class ScannerService : IDisposable
         {
             using (scanned)
             {
-                cancel.ThrowIfCancellationRequested();
                 var path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "omp-" + Guid.NewGuid().ToString("N") + ".png");
                 try
                 {

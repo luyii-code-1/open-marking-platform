@@ -21,6 +21,12 @@ public sealed class BatchRow
     public string BackOrder { get; set; } = "same";
     public string CaptureMode { get; set; } = "separate";
     public string DuplexFirstSide { get; set; } = "";
+    public string ProjectId { get; set; } = "";
+    public string SubjectId { get; set; } = "";
+    public string ConfigSha256 { get; set; } = "";
+    public string TemplateJson { get; set; } = "{}";
+    public string RosterJson { get; set; } = "null";
+    public string LocalPairsJson { get; set; } = "[]";
     public string Status { get; set; } = "open";
     public string Error { get; set; } = "";
     public string CreatedAt { get; set; } = "";
@@ -39,6 +45,7 @@ public sealed class PageRow
     public string Error { get; set; } = "";
     public string DisplaySide => Side == "front" ? "正面" : "背面";
     public string QualityJson { get; set; } = "{}";
+    public string RecognitionJson { get; set; } = "{}";
     public string QualitySummary
     {
         get

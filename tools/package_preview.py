@@ -31,7 +31,7 @@ def source_files():
     for name in ['LICENSE', 'LICENSE.md', 'NOTICE', 'NOTICE.md']:
         if (ROOT / name).is_file():
             yield ROOT / name
-    for folder in ['server', 'web', 'scanner', 'deploy', 'docs', 'tools', 'tests']:
+    for folder in ['server', 'web', 'scanner', 'scanner_engine', 'deploy', 'docs', 'tools', 'tests']:
         for path in sorted((ROOT / folder).rglob('*')):
             relative = path.relative_to(ROOT)
             if any(part in EXCLUDED for part in relative.parts):
@@ -75,6 +75,9 @@ def main() -> None:
                 'source_modified': bool(subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT, text=True).strip()),
                 'scanner_framework': framework, 'scanner_runtime': 'win-x64',
                 'scanner_self_contained': False,
+                'scanner_ui': 'WebView2', 'scanner_protocol': 'omp-scanner-2',
+                'recognition_engine': 'omp-omr-1', 'recognition_runtime_bundled': True,
+                'offline_project_workspaces': True,
                 'pending': ['User UI acceptance', 'Real Hi-5100S scanner acceptance',
                             'ROS online crop specification and private-bucket validation',
                             'Production deployment acceptance']}
@@ -92,6 +95,8 @@ def main() -> None:
              '-r', 'win-x64', '--self-contained', 'false', '-o', str(staging), '--nologo'], ROOT)
         if not (staging / 'OMP.Scanner.exe').is_file():
             raise RuntimeError('Scanner publish did not produce OMP.Scanner.exe')
+        from tools.build_recognition import build as build_recognition
+        build_recognition(staging / 'recognition')
         shutil.copyfile(ROOT / 'docs/扫描端.md', staging / '扫描端说明.md')
         shutil.copyfile(ROOT / 'docs/安装与交付.md', staging / '安装与交付.md')
         shutil.copyfile(ROOT / 'LICENSE', staging / 'LICENSE')

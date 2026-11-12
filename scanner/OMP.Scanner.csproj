@@ -14,9 +14,11 @@
   </PropertyGroup>
   <ItemGroup>
     <Content Include="third-party-licenses\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\web\dist\**\*" Link="ui\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.15" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4314.35" />
     <PackageReference Include="NAPS2.Sdk" Version="1.2.1" />
     <PackageReference Include="NAPS2.Images.Gdi" Version="1.2.1" />
     <PackageReference Include="NAPS2.Sdk.Worker.Win32" Version="1.2.1" />

@@ -1,0 +1,2 @@
+# Install the shared runtime requirements first: python -m pip install -r requirements.txt
+pyinstaller==6.22.3

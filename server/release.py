@@ -61,7 +61,8 @@ def prepare(identifier,body,current,progress=None,plan_id=None,ownership=None):
     entries={e['path']:e for e in manifest};files=[]
     for index,page in enumerate(pages):
         if progress:progress(index,len(pages),'核对扫描文件')
-        for suffix in ('.image','.png'):
+        from .scan_files import page_suffixes
+        for suffix in page_suffixes(page):
             relative='pages/'+page['id']+suffix;path=local_path(relative);reference=references.get(relative)
             if not path.exists() and not reference and not (page.get('status')=='recognized' or suffix=='.image'):continue
             entry=entries.get(relative)

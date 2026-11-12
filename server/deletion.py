@@ -251,7 +251,8 @@ def prepare_files(db,plan,manifest):
     files=[]
     for row in db.execute("SELECT o.body FROM objects o JOIN deletion_scope s ON s.id=o.id WHERE o.kind='pages'"):
         page=json.loads(row['body'])
-        for suffix in ('.image','.png'):
+        from .scan_files import page_suffixes
+        for suffix in page_suffixes(page):
             relative='pages/'+page['id']+suffix;entry=entries.get(relative);path=local_path(relative)
             refs=[json.loads(r['body']) for r in db.execute("SELECT body FROM objects WHERE kind='storage-assets' AND deleted=0 AND json_extract(body,'$.relative')=? AND json_extract(body,'$.status')='stored'",(relative,))]
             if entry is None:

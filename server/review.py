@@ -254,6 +254,11 @@ def image(identifier:str,current=Depends(user)):
         region=source['region']
         page=int(region['page'])-1
         if page>=len(submission['pages']): raise HTTPException(409,'答卷缺页')
+        from .scanner_pipeline import local_piece
+        prepared=local_piece(source.get('page_id',submission['pages'][page]),question['id'],region,source.get('normalized_sha256'))
+        if prepared is not None:
+            with Image.open(io.BytesIO(prepared)) as cut:pieces.append(cut.convert('RGB'))
+            continue
         from .storage import materialize
         try:path=materialize('pages/'+source.get('page_id',submission['pages'][page])+'.png')
         except FileNotFoundError:raise HTTPException(409,'校正图尚未就绪')

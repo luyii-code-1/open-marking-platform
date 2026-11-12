@@ -10,7 +10,7 @@ import httpx
 from server import paper
 
 
-def validate(api, revision, inspect_files=None):
+def validate(api, revision, inspect_files=None, local_recognition=False):
     renderer = shutil.which('pdftoppm')
     if not renderer: raise RuntimeError('需要Poppler验证实际扫描链路')
     def post(path, body=None, status=200):
@@ -41,7 +41,11 @@ def validate(api, revision, inspect_files=None):
     group_id = subject['default_group_id']
     template = post('templates', {'name': '隔离验证卷', 'group_id': group_id, 'paper': 'A4', 'sides': 1, 'candidate_length': len(candidate), 'questions': [{'number': 1, 'type': 'single', 'options': 4, 'points': 1, 'answer': ['B'], 'regions': [{'page': 1, 'x': 15, 'y': 110, 'width': 90, 'height': 20}]}]})
     template = post(f"templates/{template['id']}/publish")
-    batch = post('scan-batches', {'group_id': group_id, 'back_order': 'same'})
+    if local_recognition:
+        from uuid import uuid4
+        response=api.get(f"scanner/projects/{project['id']}/package");response.raise_for_status();config=response.json()['groups'][0]
+        batch=post('scanner/batches/'+str(uuid4()),{'group_id':group_id,'template_id':template['id'],'template_revision':template['revision'],'config_sha256':config['config_sha256'],'capture_mode':'separate','back_order':'same'})
+    else:batch = post('scan-batches', {'group_id': group_id, 'back_order': 'same'})
     with tempfile.TemporaryDirectory(prefix='omp-deletion-lan-') as temporary:
         root = Path(temporary)
         response = api.get(f"templates/{template['id']}/pdf"); response.raise_for_status()
@@ -53,11 +57,21 @@ def validate(api, revision, inspect_files=None):
         _, x, y = paper.bubbles(template['questions'][0], template['questions'][0]['regions'][0])[1]; fill(x, y)
         from uuid import uuid4
         page_id = str(uuid4())
-        response = api.post(f"scan-batches/{batch['id']}/pages", files={'file': ('scan.png', cv2.imencode('.png', image)[1].tobytes(), 'image/png')}, data={'capture_id': page_id, 'side': 'front', 'sequence': '1'})
+        if local_recognition:
+            from scanner_engine.main import process
+            source=root/'pages'/batch['id']/(page_id+'.jpg');source.parent.mkdir(parents=True);content=cv2.imencode('.jpg',image)[1].tobytes();source.write_bytes(content)
+            recognized=process(root,{'batch_id':batch['id'],'capture_id':page_id,'side':'front','template':config['template'],'config_sha256':config['config_sha256'],'source_sha256':hashlib.sha256(content).hexdigest()})
+            import json
+            derived=root/'processed'/page_id
+            response=api.post(f"scanner/batches/{batch['id']}/pages",data={'capture_id':page_id,'side':'front','sequence':'1','manifest':json.dumps(recognized)},files={'file':('scan.jpg',content,'image/jpeg'),'normalized':('normalized.png',(derived/'normalized.png').read_bytes(),'image/png'),'cuts':('cuts.zip',(derived/'cuts.zip').read_bytes(),'application/zip')})
+        else:response = api.post(f"scan-batches/{batch['id']}/pages", files={'file': ('scan.png', cv2.imencode('.png', image)[1].tobytes(), 'image/png')}, data={'capture_id': page_id, 'side': 'front', 'sequence': '1'})
         response.raise_for_status()
     response = api.get('jobs'); response.raise_for_status()
-    process_job = next(job for job in response.json() if job['kind'] == 'process-page' and job.get('payload', {}).get('page_id') == page_id)
-    wait('jobs/' + process_job['id'], lambda job: job.get('status') == 'completed')
+    if local_recognition:
+        assert not any(job['kind']=='process-page' and job.get('payload',{}).get('page_id')==page_id for job in response.json())
+    else:
+        process_job = next(job for job in response.json() if job['kind'] == 'process-page' and job.get('payload', {}).get('page_id') == page_id)
+        wait('jobs/' + process_job['id'], lambda job: job.get('status') == 'completed')
     response = api.get(f"scan-batches/{batch['id']}/pages"); response.raise_for_status(); page = response.json()[0]
     assert page['status'] == 'recognized'
     assert page['candidate_number'] == candidate
@@ -71,7 +85,7 @@ def validate(api, revision, inspect_files=None):
     archive = finished['result']
     response = api.get(f"archives/{archive['id']}/download"); response.raise_for_status()
     digest = hashlib.sha256(response.content).hexdigest(); assert digest == archive['sha256']
-    print('Linux Worker识读、配页、结分及归档通过，正在核对隔离考试删除范围', flush=True)
+    print(('本地识读、服务端校验及后台归档通过' if local_recognition else 'Linux Worker识读、配页、结分及归档通过')+'，正在核对隔离考试删除范围', flush=True)
     plan = post(f"projects/{project['id']}/deletion-preview")
     assert not plan['blockers'] and plan['retained_archives'] == 1
     response = api.get(f"deletion-plans/{plan['id']}/manifest"); response.raise_for_status()
@@ -79,7 +93,7 @@ def validate(api, revision, inspect_files=None):
     result = post(f"deletion-plans/{plan['id']}/confirm", {'confirm': True, 'reason': '隔离部署验证完成'},status=202)
     finished=wait('jobs/'+result['job_id'],lambda row:row.get('status')=='completed')
     result=finished['result']
-    assert result['status']=='completed' and result['file_count']==2
+    assert result['status']=='completed' and result['file_count']==(3 if local_recognition else 2)
     if inspect_files:assert not any(inspect_files(page_id).values())
     response=api.get(f"archives/{result['archive_id']}/download");response.raise_for_status()
     assert response.content
@@ -90,4 +104,4 @@ def validate(api, revision, inspect_files=None):
     assert hashlib.sha256(response.content).hexdigest() == digest
     response = api.get('archives'); response.raise_for_status()
     assert next(a for a in response.json() if a['id'] == archive['id'])['project_deleted']
-    return {'status': 'passed', 'isolated_project_id': project['id'], 'deleted_records': plan['record_count'], 'candidate_recognition': 'passed', 'final_score': 1, 'archive_preserved': True, 'fresh_archive_id':result['archive_id'],'deleted_scan_files':result['file_count'],'physical_local_cleanup_verified':inspect_files is not None, 'existing_personnel_reused': True}
+    return {'status': 'passed', 'isolated_project_id': project['id'], 'deleted_records': plan['record_count'], 'candidate_recognition': 'passed','local_recognition':local_recognition, 'final_score': 1, 'archive_preserved': True, 'fresh_archive_id':result['archive_id'],'deleted_scan_files':result['file_count'],'physical_local_cleanup_verified':inspect_files is not None, 'existing_personnel_reused': True}

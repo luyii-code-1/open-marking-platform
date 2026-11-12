@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 from typing import Annotated
 from uuid import uuid4
 
-from fastapi import FastAPI, Depends, Header, HTTPException, UploadFile, File, Form, Request
+from fastapi import FastAPI, Depends, Header, HTTPException, UploadFile, File, Form, Request, Body
 from fastapi.responses import Response, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
@@ -371,7 +371,7 @@ def page_image(identifier:str,current=Depends(admin)):
 
 
 @app.post('/api/v1/scan-batches/{identifier}/pair')
-def pair(identifier:str,current=Depends(scan_admin)):
+def pair(identifier:str,body:dict|None=Body(default=None),current=Depends(scan_admin)):
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
         batch=scan_batch(db,identifier,current)
@@ -390,6 +390,9 @@ def pair(identifier:str,current=Depends(scan_admin)):
         if any(p['status']!='recognized' for p in page_list): raise HTTPException(409,'存在待处理识别异常')
         numbers=[p['candidate_number'] for p in fronts]
         if any(not number or '?' in number for number in numbers) or len(set(numbers))!=len(numbers): raise HTTPException(409,'考号缺失或重复，请处理后配对')
+        if body and 'local_pairs' in body:
+            local=[{'candidate_number':front['candidate_number'],'pages':[front['id']]+([backs[i]['id']] if template['sides']==2 else [])} for i,front in enumerate(fronts)]
+            if body['local_pairs']!=local:raise HTTPException(409,'本地配页清单与服务器页面记录不一致，请核查后重新确认')
         students={s['candidate_number']:s for s in objects(db,'students')}
         group=require(db,batch['group_id'],'groups')
         if group.get('roster_id'):students.update({s['candidate_number']:s for s in require(db,group['roster_id'],'rosters')['students']})
@@ -442,6 +445,8 @@ from .conversion_routes import router as conversion_router
 app.include_router(conversion_router)
 from .deletion import router as deletion_router
 app.include_router(deletion_router)
+from .scanner_pipeline import router as scanner_pipeline_router
+app.include_router(scanner_pipeline_router)
 
 web_distribution=Path(__file__).resolve().parents[1]/'web'/'dist'
 if web_distribution.exists():
