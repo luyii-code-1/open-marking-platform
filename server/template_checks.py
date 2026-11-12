@@ -57,6 +57,9 @@ def issues(template,complete=False):
             rule=q.get('rule') if q.get('rule') is not None else {'mode':'exact'}
             if not isinstance(rule,dict) or rule.get('mode','exact') not in ('exact','partial','per_option'):errors.append(label+'给分规则无效')
             else:
+                if rule.get('wrong_action','deduct') not in ('deduct','zero'):errors.append(label+'错选处理应为扣分或整题归零')
+                allowed={'mode','partial_points','correct_points','wrong_penalty','wrong_action'}
+                if set(rule)-allowed:errors.append(label+'含不支持的规则字段')
                 for key in {'partial':('partial_points',),'per_option':('correct_points','wrong_penalty')}.get(rule.get('mode'),()):
                     try:
                         value=cents(rule.get(key,0 if key=='partial_points' else 1))

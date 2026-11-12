@@ -22,7 +22,8 @@ def main(output=None):
         for index,template in enumerate(json.loads(fixture.read_text())['templates']):
             assert not issues(template,complete=True),issues(template,complete=True)
             pdf=root/f'{index}.pdf';pdf.write_bytes(paper.pdf(template))
-            if output:shutil.copyfile(pdf,output/f"{template['paper']}-选择题样张.pdf")
+            label=f"{template['paper']}-{template.get('sheet_columns',1)}栏"
+            if output:shutil.copyfile(pdf,output/f"{label}-选择题样张.pdf")
             subprocess.run([renderer,'-r','150','-png',str(pdf),str(root/f'{index}')],check=True,capture_output=True)
             selections={}
             for page in range(1,template['sides']+1):
@@ -31,7 +32,7 @@ def main(output=None):
                 blank,_=paper.decode(cv2.imencode('.png',image)[1].tobytes())
                 _,_,blank_answers=paper.recognize(blank,template,'front' if page==1 else 'back')
                 assert all(not selected for selected in blank_answers.values()),blank_answers
-                if output:shutil.copyfile(root/f'{index}-{page}.png',output/f"{template['paper']}-第{page}面.png")
+                if output:shutil.copyfile(root/f'{index}-{page}.png',output/f"{label}-第{page}面.png")
                 def fill(x,y):cv2.rectangle(image,(round((x-1.5)*sx),round((y-1)*sy)),(round((x+1.5)*sx),round((y+1)*sy)),0,-1)
                 if page==1:
                     for column,digit in enumerate('123'):fill(18+column*6,57+int(digit)*3.5)
@@ -41,8 +42,8 @@ def main(output=None):
                             for letter,x,y in paper.bubbles(question,region):
                                 if letter in question['answer']:fill(x,y)
                 side='front' if page==1 else 'back'
-                image,code=paper.decode(cv2.imencode('.png',image)[1].tobytes())
-                assert code==paper.code(template,side)
+                image,code=paper.decode(cv2.imencode('.png',image)[1].tobytes(),template)
+                assert code=='' if paper.manual_binding(template) else code==paper.code(template,side)
                 _,candidate,answers=paper.recognize(image,template,side)
                 if page==1:assert candidate=='123'
                 selections.update(answers)

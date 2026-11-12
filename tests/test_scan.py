@@ -21,6 +21,9 @@ def test_wrong_paper_freezes_batch_and_preserves_evidence(tmp_path,monkeypatch):
         group=create('groups',{'name':'一组','subject_id':subject['id']})
         template=create('templates',{'name':'数学卡','group_id':group['id'],'paper':'A4','sides':2,'questions':[{'number':1,'type':'single','options':4,'answer':['A'],'points':3,'regions':[{'page':1,'x':15,'y':105,'width':80,'height':20}]}]})
         assert client.post('/api/v1/templates/'+template['id']+'/publish',headers=headers).status_code==200
+        # Existing published QR sheets continue to enforce their original binding.
+        with db.connect() as connection:
+            legacy=db.get(connection,template['id']);legacy['layout_version']=2;db.put(connection,'templates',legacy)
         batch=create('scan-batches',{'group_id':group['id'],'room':'01','back_order':'reverse'})
         output=io.BytesIO(); Image.new('L',(1000,1400),255).save(output,format='PNG')
         capture=str(uuid4())

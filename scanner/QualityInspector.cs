@@ -49,6 +49,7 @@ public static class QualityInspector
 
     public static string? ReadSide(Image source, BatchRow batch)
     {
+        if(batch.ManualBinding)return null;
         using var bitmap = Preview(source);
         var codes = Codes(bitmap);
         if (codes.Length != 1) return null;
@@ -63,7 +64,8 @@ public static class QualityInspector
         var dpi = Math.Min(source.Width / paperWidth, source.Height / paperHeight) * 25.4;
         if (dpi + 1 < options.MinDpi) issues.Add("low_resolution");
         using var bitmap = Preview(source);
-        if (options.CheckQr)
+        if(batch.ManualBinding&&(string.IsNullOrEmpty(batch.TemplateId)||batch.TemplateRevision<1))issues.Add("missing_binding");
+        if (options.CheckQr&&!batch.ManualBinding)
         {
             if (string.IsNullOrEmpty(batch.TemplateId) || batch.TemplateRevision < 1) issues.Add("missing_binding");
             var codes = Codes(bitmap);

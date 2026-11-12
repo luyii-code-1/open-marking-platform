@@ -79,7 +79,7 @@ def process_page(identifier,ownership=None):
         mirror('pages/'+identifier+'.image',project_id)
         if (database.ROOT/'pages'/(identifier+'.png')).exists():mirror('pages/'+identifier+'.png',project_id)
         return
-    image,_=decode(materialize('pages/'+identifier+'.image').read_bytes())
+    image,_=decode(materialize('pages/'+identifier+'.image').read_bytes(),template)
     try:normalized,candidate,selections=recognize(image,template,page['side'])
     except ValueError as error:
         with connect() as db:

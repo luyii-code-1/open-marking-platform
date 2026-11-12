@@ -15,7 +15,7 @@ from .identifiers import prepare_questions
 
 router=APIRouter(prefix='/api/v1')
 _render_slots=threading.BoundedSemaphore(2)
-DEFINITION_FIELDS=('name','subtitle','paper','sides','candidate_length','layout_version','background_assets','background_asset_id','questions')
+DEFINITION_FIELDS=('name','subtitle','paper','sides','candidate_length','layout_version','sheet_columns','background_assets','background_asset_id','questions')
 
 
 def default_group(db,subject_id,actor):
@@ -67,7 +67,7 @@ def instantiate(identifier:str,body:dict,current=Depends(admin)):
         definition=deepcopy(entry['definition'])
         name=body.get('name',entry['name'])
         if not isinstance(name,str) or not 1<=len(name.strip())<=100:raise HTTPException(422,'请填写100字以内题卡标题')
-        definition.update(name=name.strip(),group_id=group['id'],revision=0,status='draft',layout_version=2,library_id=identifier)
+        definition.update(name=name.strip(),group_id=group['id'],revision=0,status='draft',layout_version=3,library_id=identifier)
         prepare_questions(definition)
         return put(db,'templates',definition,current['id'])
 
@@ -88,13 +88,29 @@ def check_template(body:dict,current=Depends(admin)):
     return {'valid':not errors,'issues':errors}
 
 
+@router.post('/templates/objective-preview')
+def objective_preview(body:dict,current=Depends(admin)):
+    from .scoring import objective_score
+    if not isinstance(body.get('question'),dict):raise HTTPException(422,'题目配置应为对象')
+    question={**body.get('question',{}),'regions':[]}
+    errors=issues({'name':'规则试算','paper':'A4','sides':1,'questions':[question]})
+    selected=body.get('selected',[])
+    if question.get('type') not in ('single','multiple'):errors.append('请选择客观题')
+    count=question.get('options',4);count=count if type(count) is int and count in (3,4,5) else 0
+    if not isinstance(selected,list) or any(not isinstance(s,str) or s not in 'ABCDE'[:count] for s in selected) or len(set(selected))!=len(selected):errors.append('试算选项无效')
+    if question.get('type')=='single' and len(selected)>1:errors.append('单选题只能选择一个选项')
+    if not question.get('answer'):errors.append('请先填写标准答案')
+    if errors:raise HTTPException(422,'；'.join(errors))
+    return {'score':objective_score(selected,question['answer'],question['points'],question.get('rule'))/100,'maximum':question['points']}
+
+
 @router.post('/templates/preview')
 def preview_template(body:dict,page:int=1,current=Depends(admin)):
     errors=issues(body)
     if errors:raise HTTPException(422,'；'.join(errors))
     if not 1<=page<=body['sides']:raise HTTPException(422,'预览页码超出题卡范围')
     check_assets(body)
-    template={**body,'id':body.get('id') or str(uuid4()),'revision':body.get('revision',0),'layout_version':body.get('layout_version',2)}
+    template={**body,'id':body.get('id') or str(uuid4()),'revision':body.get('revision',0),'layout_version':body.get('layout_version',3)}
     renderer=shutil.which('pdftoppm')
     if not renderer:raise HTTPException(503,'PDF预览需要服务器安装Poppler的pdftoppm')
     if not _render_slots.acquire(blocking=False):raise HTTPException(503,'预览正在生成，请稍后更新',headers={'Retry-After':'1'})

@@ -10,7 +10,9 @@ internal static class DesktopSelfTest
     private static void Checkpoint(string name,object? result=null){Console.WriteLine(JsonSerializer.Serialize(new{checkpoint=name,result}));Console.Out.Flush();}
     public static async Task Run(string[] args)
     {
-        if(args.Length!=10)throw new ArgumentException("Desktop self-test: server root front back project username password python-or-dash repository");
+        if(args.Length is not (10 or 11))throw new ArgumentException("Desktop self-test: server root front back project username password python-or-dash repository [first-side]");
+        var firstSide=args.Length==11?args[10]:"front";
+        if(firstSide is not ("front" or "back"))throw new ArgumentException("Invalid first side");
         var root=Path.GetFullPath(args[2]);Directory.CreateDirectory(root);var queue=new LocalQueue(root);
         var python=args[8]=="-"?null:args[8];var repository=args[9];
         RecognitionWorker Worker()=>new(root,python,repository);
@@ -46,10 +48,10 @@ internal static class DesktopSelfTest
                 var group=state.GetProperty("package").GetProperty("groups")[0];
                 Check(!group.GetProperty("template").GetProperty("questions")[0].TryGetProperty("answer",out _),"Device cache contains an answer key.");
                 var tags=state.GetProperty("package").TryGetProperty("room_tags",out var tagList)?tagList.EnumerateArray().Select(t=>t.GetProperty("id").GetString()).ToArray():[];
-                var created=Json(await offline.Invoke("createBatch",Json(new{group_id=group.GetProperty("id").GetString(),name="离线重启验证",capture_mode="duplex",room_tag_ids=tags}))!);
+                var created=Json(await offline.Invoke("createBatch",Json(new{group_id=group.GetProperty("id").GetString(),name="离线重启验证",capture_mode="duplex",first_side=firstSide,room_tag_ids=tags}))!);
                 batchId=created.GetProperty("id").GetString()!;var batch=queue.Batches().Single(b=>b.Id==batchId);
                 using(var savedTags=JsonDocument.Parse(batch.RoomTagsJson))Check(savedTags.RootElement.GetArrayLength()==tags.Length,"Offline batch tags were lost.");
-                foreach(var file in new[]{args[3],args[4]})
+                foreach(var file in firstSide=="back"?new[]{args[4],args[3]}:new[]{args[3],args[4]})
                 {
                     using var image=System.Drawing.Image.FromFile(file);var page=queue.AddPage(batch,"auto",image);Check(page.Status=="pending",page.Error);
                     var result=await worker.Recognize(batch,page);queue.PageRecognized(page.CaptureId,result.GetRawText());

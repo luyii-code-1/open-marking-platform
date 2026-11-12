@@ -17,7 +17,7 @@ import httpx
 from server import paper
 
 
-def run(scanner_dll=None,bundled=False):
+def run(scanner_dll=None,bundled=False,back_first=False):
     repo=Path(__file__).resolve().parents[1]
     dll=Path(scanner_dll).resolve() if scanner_dll else repo/'scanner/bin/Debug/net10.0-windows/OMP.Scanner.dll'
     if not dll.is_file():raise RuntimeError('请先编译.NET扫描端')
@@ -72,7 +72,7 @@ def run(scanner_dll=None,bundled=False):
                         _,x,y=paper.bubbles(question,region)[1 if index==0 else 0];fill(x,y)
                     path=root/f'filled-{index}.png';path.write_bytes(cv2.imencode('.png',image)[1].tobytes());images.append(path)
                 entry=[str(dll.with_suffix('.exe'))] if bundled else ['dotnet',str(dll)]
-                native=subprocess.Popen([*entry,'--desktop-self-test',base,str(root/'client'),str(images[0]),str(images[1]),project['id'],'pair-code',pairing['code'],'-' if bundled else sys.executable,str(repo)],cwd=repo,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding='utf-8',creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
+                native=subprocess.Popen([*entry,'--desktop-self-test',base,str(root/'client'),str(images[0]),str(images[1]),project['id'],'pair-code',pairing['code'],'-' if bundled else sys.executable,str(repo),'back' if back_first else 'front'],cwd=repo,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding='utf-8',creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
                 messages=queue.Queue()
                 def collect():
                     for line in native.stdout:messages.put(line)
@@ -94,7 +94,7 @@ def run(scanner_dll=None,bundled=False):
                 response=api.get('results',params={'group_id':group_id});response.raise_for_status();rows=response.json();assert len(rows)==1 and rows[0]['candidate_number']=='123' and rows[0]['total']==5
                 assert {t['name'] for t in rows[0]['room_tags']}=={'第一考场','二楼'}
                 status=api.get('scanner/pairings/'+pairing['id']);status.raise_for_status();assert status.json()['status']=='paired'
-                result={'status':'passed','scope':'headless desktop controller','manager_pairing':True,'uri_and_single_instance':True,'offline_room_tags':True,'offline_server_outage_and_restart':True,'bundled_engine':bundled,'pages':2,'candidate_number':'123','final_score':5,'batch_id':batch}
+                result={'status':'passed','scope':'headless desktop controller','manager_pairing':True,'uri_and_single_instance':True,'offline_room_tags':True,'offline_server_outage_and_restart':True,'bundled_engine':bundled,'first_side':'back' if back_first else 'front','pages':2,'candidate_number':'123','final_score':5,'batch_id':batch}
                 print(json.dumps(result,ensure_ascii=False),flush=True);return result
         finally:
             if native and native.poll() is None:stop(native)
@@ -103,4 +103,4 @@ def run(scanner_dll=None,bundled=False):
 
 
 if __name__=='__main__':
-    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--scanner-dll',type=Path);parser.add_argument('--bundled',action='store_true');options=parser.parse_args();run(options.scanner_dll,options.bundled)
+    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--scanner-dll',type=Path);parser.add_argument('--bundled',action='store_true');parser.add_argument('--back-first',action='store_true');options=parser.parse_args();run(options.scanner_dll,options.bundled,options.back_first)

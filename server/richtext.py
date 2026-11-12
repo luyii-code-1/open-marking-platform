@@ -1,3 +1,4 @@
+from .paper_fonts import FONT
 from html import escape
 from html.parser import HTMLParser
 from reportlab.lib.styles import ParagraphStyle
@@ -41,7 +42,7 @@ def inline(node):
 def flowables(html,width):
     if len(html)>100000:raise ValueError('单题富文本过长')
     parser=Parser();parser.feed(html)
-    style=ParagraphStyle('answer',fontName='STSong-Light',fontSize=9,leading=13,wordWrap='CJK')
+    style=ParagraphStyle('answer',fontName=FONT,fontSize=9,leading=13,wordWrap='CJK')
     def paragraph(content):return Paragraph(content or ' ',style)
     def visit(node):
         if isinstance(node,str):return [paragraph(escape(node))] if node.strip() else []

@@ -14,7 +14,7 @@ import uuid
 import zipfile
 from server.scan_files import write_atomic
 import cv2
-from server.omr import ENGINE_VERSION, absent_mark, code, decode, recognize
+from server.omr import ENGINE_VERSION, absent_mark, code, decode, recognize, manual_binding
 
 MAX_MESSAGE = 2 * 1024 * 1024
 
@@ -30,8 +30,8 @@ def process(root, request):
     if not source.is_relative_to(root): raise ValueError('图像路径无效')
     content = source.read_bytes()
     if len(content) > 30 * 1024 * 1024 or digest(content) != request['source_sha256']: raise ValueError('本地原图校验失败')
-    image, value = decode(content)
-    if value != code(template, side): raise ValueError('二维码与当前题卡版本或扫描面不符')
+    image, value = decode(content,template)
+    if not manual_binding(template) and value != code(template, side): raise ValueError('二维码与当前题卡版本或扫描面不符')
     normalized, candidate, selections = recognize(image, template, side)
     encoded = cv2.imencode('.png', normalized)[1].tobytes(); entries = []
     directory = root / 'processed' / capture_id

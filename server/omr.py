@@ -5,7 +5,22 @@ import numpy as np
 import zxingcpp
 
 ABSENT_X, ABSENT_Y = 124, 45
-ENGINE_VERSION = "omp-omr-2"
+ENGINE_VERSION = "omp-omr-3"
+
+
+def manual_binding(template):
+    return template.get('layout_version', 2) >= 3
+
+
+def panels(template):
+    return template.get('sheet_columns', 2 if template['paper']=='A3' else 1) if manual_binding(template) else 1
+
+
+def absent_position(template=None):
+    if template and manual_binding(template):
+        width,_=dimensions(template)
+        return min(124, (width-24-(panels(template)-1)*8)/panels(template)-8),45
+    return ABSENT_X,ABSENT_Y
 
 
 def dimensions(template):
@@ -18,15 +33,20 @@ def code(template,side):
 
 def bubbles(question,region):
     count=int(question.get('options',4))
+    if question.get('choice_style')=='compact':return [(chr(65+i),region['x']+9+i*5,region['y']+2.4) for i in range(count)]
     if question.get('choice_style')=='bracket':return [(chr(65+i),region['x']+14+i*9.5,region['y']+3) for i in range(count)]
     spacing=min(12,(region['width']-12)/count)
     return [(chr(65+i),region['x']+12+i*spacing,region['y']+7) for i in range(count)]
 
 
-def decode(data):
+def decode(data,template=None):
     array=np.frombuffer(data,dtype=np.uint8)
     image=cv2.imdecode(array,cv2.IMREAD_GRAYSCALE)
     if image is None or image.size>40_000_000:raise ValueError('图片无效或像素超过4000万')
+    if template and manual_binding(template):
+        width,height=dimensions(template)
+        if (image.shape[1]>image.shape[0]) != (width>height):image=cv2.rotate(image,cv2.ROTATE_90_CLOCKWISE)
+        return image,''
     barcodes=zxingcpp.read_barcodes(image,formats=zxingcpp.BarcodeFormat.QRCode)
     native={b.text:b for b in barcodes if b.text.startswith('OMP1:')}
     if len(native)>1:return image,'OMP1:AMBIGUOUS'
@@ -91,21 +111,26 @@ def manual_align(image,template,corners):
 def absent_mark(normalized,side,template=None):
     if side!='front':return False
     if template is not None and template.get('layout_version',1)<2:return False
-    crop=normalized[round((ABSENT_Y-.75)*4):round((ABSENT_Y+.75)*4),round((ABSENT_X-1.1)*4):round((ABSENT_X+1.1)*4)]
+    x,y=absent_position(template)
+    crop=normalized[round((y-.75)*4):round((y+.75)*4),round((x-1.1)*4):round((x+1.1)*4)]
     return bool(crop.size and np.mean(crop<135)>.45)
 
 
 def recognize(image,template,side,corners=None):
     normalized=manual_align(image,template,corners) if corners is not None else align(image,template)
     calibrated=135
-    if any(q.get('choice_style')=='bracket' for q in template.get('questions',[])):
-        _,height=dimensions(template)
-        levels=[float(np.median(normalized[round((height-33)*4):round((height-30)*4),round((63+i*8)*4):round((67+i*8)*4)])) for i in range(5)]
-        if levels[0]-levels[4]>60 and all(a>=b-12 for a,b in zip(levels,levels[1:])):calibrated=(levels[0]+levels[1])/2
-    def ink(x,y,compact=False):
-        radius=2.6 if compact else 1.1
+    if any(q.get('choice_style') in ('bracket','compact') for q in template.get('questions',[])):
+        width,height=dimensions(template)
+        samples=[]
+        if manual_binding(template):samples.append([float(np.median(normalized[25:29,round((width-43+i*5)*4):round((width-41+i*5)*4)])) for i in range(5)])
+        samples.append([float(np.median(normalized[round((height-33)*4):round((height-30)*4),round((63+i*8)*4):round((67+i*8)*4)])) for i in range(5)])
+        for levels in samples:
+            if levels[0]-levels[4]>60 and all(a>=b-12 for a,b in zip(levels,levels[1:])):
+                calibrated=(levels[0]+levels[1])/2;break
+    def ink(x,y,style=None):
+        radius=2.6 if style=='bracket' else 1.5 if style=='compact' else 1.1
         crop=normalized[round((y-.75)*4):round((y+.75)*4),round((x-radius)*4):round((x+radius)*4)]
-        return float(np.mean(crop<(calibrated if compact else 135))) if crop.size else 0
+        return float(np.mean(crop<(calibrated if style else 135))) if crop.size else 0
     candidate=None
     if side=='front':
         digits=[]
@@ -118,6 +143,6 @@ def recognize(image,template,side,corners=None):
         if question['type']=='subjective': continue
         for region in question['regions']:
             if int(region['page'])==(1 if side=='front' else 2):
-                selections[question['id']]=[label for label,x,y in bubbles(question,region) if ink(x,y,question.get('choice_style')=='bracket')>.45]
+                selections[question['id']]=[label for label,x,y in bubbles(question,region) if ink(x,y,question.get('choice_style'))>.45]
     return normalized,candidate,selections
 

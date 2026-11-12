@@ -11,7 +11,7 @@ namespace OMP.Scanner;
 
 public sealed class DesktopController : IDisposable
 {
-    public const string Protocol="omp-scanner-3";
+    public const string Protocol="omp-scanner-4";
     private readonly LocalQueue _queue;
     private readonly RecognitionWorker _worker;
     private readonly bool _selfTest;
@@ -134,6 +134,11 @@ public sealed class DesktopController : IDisposable
                 var mode=sides==2?Text(args,"capture_mode","duplex"):"separate";var order=mode=="duplex"?"same":Text(args,"back_order","same");
                 if(mode is not ("duplex" or "separate")||order is not ("same" or "reverse"))throw new InvalidOperationException("扫描模式无效。");
                 var created=new BatchRow{Id=Guid.NewGuid().ToString(),ServerUrl=_server,GroupId=Text(selected,"id"),Label=Text(args,"name","扫描批次"),Room=Text(args,"room"),Paper=Text(template,"paper"),Sides=sides,CaptureMode=mode,BackOrder=order,TemplateId=Text(template,"id"),TemplateRevision=template.GetProperty("revision").GetInt32()};
+                if(mode=="duplex"&&template.TryGetProperty("layout_version",out var version)&&version.GetInt32()>=3)
+                {
+                    created.DuplexFirstSide=Text(args,"first_side");
+                    if(created.DuplexFirstSide is not ("front" or "back"))throw new InvalidOperationException("请先校准并选择扫描仪正面或背面先出图。");
+                }
                 var tagIds=args.TryGetProperty("room_tag_ids",out var requestedTags)?requestedTags.EnumerateArray().Select(t=>t.GetString()??"").ToArray():[];
                 var tags=project.TryGetProperty("room_tags",out var availableTags)?availableTags.EnumerateArray().Where(t=>tagIds.Contains(Text(t,"id"))).ToArray():[];
                 if(tagIds.Distinct().Count()!=tagIds.Length||tags.Length!=tagIds.Length)throw new InvalidOperationException("考场标签不在已下载的项目配置中，请刷新项目。");

@@ -33,7 +33,7 @@ def build(destination):
                 if not any(word in entry.name.upper() for word in ('LICENSE','LICENCE','COPYING','EXCEPTION')):continue
                 path=Path(distribution.locate_file(entry))
                 if path.is_file():shutil.copyfile(path,target/str(entry).replace('/','_').replace('\\','_'))
-        (built/'BUILD-INFO.json').write_text(json.dumps({'engine_version':'omp-omr-2','python':sys.version,'dependencies':versions},indent=2),encoding='utf-8')
+        (built/'BUILD-INFO.json').write_text(json.dumps({'engine_version':'omp-omr-3','python':sys.version,'dependencies':versions},indent=2),encoding='utf-8')
         shutil.copytree(built,destination)
     return destination
 

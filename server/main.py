@@ -183,7 +183,7 @@ def create_route(kind):
             if kind=='templates':
                 if value.get('paper') not in ('A3','A4') or value.get('sides') not in (1,2):
                     raise HTTPException(422,'纸型或单双面无效')
-                value.update(revision=0,status='draft',layout_version=2)
+                value.update(revision=0,status='draft',layout_version=3)
                 prepare_questions(value)
             if kind=='assignments':
                 template=require(db,value['template_id'],'templates')
@@ -260,7 +260,7 @@ def edit_template(identifier:str,body:dict,current=Depends(admin)):
         db.execute('BEGIN IMMEDIATE')
         old=require(db,identifier,'templates')
         if old['status']=='published': raise HTTPException(409,'已发布版式不能直接编辑，请复制新题卡')
-        body={**old,**body,'id':identifier,'group_id':old['group_id'],'status':'draft','revision':old['revision'],'layout_version':2}
+        body={**old,**body,'id':identifier,'group_id':old['group_id'],'status':'draft','revision':old['revision'],'layout_version':3}
         prepare_questions(body)
         return put(db,'templates',body,current['id'])
 
@@ -281,7 +281,7 @@ def publish(identifier:str,current=Depends(admin)):
         except (ValueError,KeyError,TypeError) as error:raise HTTPException(422,str(error))
         for asset_id in assets:require(db,asset_id,'assets')
         if template['status']!='published':
-            template.update(status='published',revision=template['revision']+1,layout_version=2)
+            template.update(status='published',revision=template['revision']+1)
             put(db,'templates',template,current['id'])
             group=require(db,template['group_id'],'groups')
             group['template_id']=identifier
@@ -326,8 +326,6 @@ def upload_page(identifier:str,file:UploadFile=File(),capture_id:str=Form(),side
     if side not in ('front','back') or sequence<1: raise HTTPException(422,'面或顺序无效')
     data=file.file.read(30*1024*1024+1)
     if len(data)>30*1024*1024: raise HTTPException(413,'图片超过30MB')
-    try: image,value=paper.decode(data)
-    except ValueError as error: raise HTTPException(422,str(error))
     digest=hashlib.sha256(data).hexdigest()
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
@@ -340,6 +338,8 @@ def upload_page(identifier:str,file:UploadFile=File(),capture_id:str=Form(),side
         if require(db,batch['group_id'],'groups').get('frozen'):raise HTTPException(409,'成绩已冻结，请先发起复核')
         if batch['status'] in ('frozen','paired'): raise HTTPException(409,'批次已冻结或已确认')
         template=require(db,batch['template_id'],'templates')
+        try:image,value=paper.decode(data,template)
+        except ValueError as error:raise HTTPException(422,str(error))
         if side=='back' and template['sides']==1: raise HTTPException(422,'单面题卡不需要背面')
         if any(p['batch_id']==identifier and p['side']==side and p['sequence']==sequence and not p.get('excluded') for p in objects(db,'pages')): raise HTTPException(409,'该顺序已采集，请处理补扫')
         from .lifecycle import writable
@@ -355,7 +355,7 @@ def upload_page(identifier:str,file:UploadFile=File(),capture_id:str=Form(),side
                 put(db,'scan-batches',batch,current['id'])
                 put(db,'exceptions',{'batch_id':identifier,'group_id':batch['group_id'],'page_id':capture_id,'kind':'scan_quality','source':'scanner','status':'open','reason':'；'.join(ISSUES[i] for i in quality['issues']),'evidence':quality},current['id'])
         status=200
-        if value!=paper.code(template,side):
+        if not paper.manual_binding(template) and value!=paper.code(template,side):
             page['status']='quarantined'; batch['status']='frozen'
             put(db,'scan-batches',batch,current['id'])
             put(db,'exceptions',{'batch_id':identifier,'page_id':capture_id,'kind':'wrong_paper','status':'open','reason':'二维码与所选考卷或面不符'},current['id'])

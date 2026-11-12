@@ -21,7 +21,7 @@ def checksum(content): return hashlib.sha256(content).hexdigest()
 
 
 def configuration(template):
-    fields = ('id', 'name', 'paper', 'sides', 'revision', 'layout_version', 'candidate_length')
+    fields = ('id', 'name', 'paper', 'sides', 'revision', 'layout_version', 'candidate_length', 'sheet_columns')
     result = {k: template[k] for k in fields if k in template}
     result['questions'] = [{k: q[k] for k in ('id', 'number', 'type', 'options', 'regions', 'choice_style') if k in q} for q in template['questions']]
     return result
@@ -53,7 +53,7 @@ def project_package(identifier: str, current=Depends(scan_admin)):
             packaged.append({'id': group['id'], 'name': group['name'], 'subject_id': group['subject_id'], 'frozen': bool(group.get('frozen')),
                              'template': configuration(template), 'config_sha256': config_hash(template),
                              'roster': [{'candidate_number': s['candidate_number'], 'name': s['name']} for s in roster['students']] if roster else None})
-        return {'protocol': 'omp-scanner-3', 'engine_version': ENGINE_VERSION,
+        return {'protocol': 'omp-scanner-4', 'engine_version': ENGINE_VERSION,
                 'room_tags':find(db,'room-tags',project_id=identifier),
                 'project': {k: project[k] for k in ('id', 'name', 'status')},
                 'subjects': [{k: s[k] for k in ('id', 'name', 'default_group_id') if k in s} for s in subjects], 'groups': packaged}
@@ -108,7 +108,7 @@ def image_bytes(file, expected_shape=None):
 
 
 def verify_result(template, side, result, original, normalized, cuts):
-    supported={ENGINE_VERSION} if any(q.get('choice_style')=='bracket' for q in template['questions']) else {ENGINE_VERSION,'omp-omr-1'}
+    supported={ENGINE_VERSION} if template.get('layout_version',2)>=3 or any(q.get('choice_style')=='compact' for q in template['questions']) else {ENGINE_VERSION,'omp-omr-2'} if any(q.get('choice_style')=='bracket' for q in template['questions']) else {ENGINE_VERSION,'omp-omr-2','omp-omr-1'}
     if result.get('engine_version') not in supported or result.get('template_id') != template['id'] or result.get('template_revision') != template['revision'] or result.get('config_sha256') != config_hash(template): raise HTTPException(409, '本地识读引擎或题卡版本不匹配，请更新扫描端并下载配置')
     if any(result.get(key) != checksum(data) for key, data in (('source_sha256', original), ('normalized_sha256', normalized), ('local_cuts_sha256', cuts))): raise HTTPException(422, '上传文件与本地识读校验值不一致')
     candidate = result.get('candidate_number')

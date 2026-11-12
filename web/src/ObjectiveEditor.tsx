@@ -13,7 +13,7 @@ export function ObjectiveEditor({ value, page, readOnly, selected, onChange, onE
   const current = rows[Math.min(index, rows.length - 1)]
   const active = rows.find(q=>q.id===selected)||rows[0]
   const nextNumber = Math.max(0, ...value.questions.map(q => q.number)) + 1
-  const defaults = { columns: 2, startPage: page }
+  const defaults = { columns: value.paper==='A3'&&value.sheet_columns===3?3:4, startPage: page }
   function changeAnswer(q: Question, text: string) {
     try { const answer = parseAnswer(q, text); onChange(value.questions.map(item => item.id === q.id ? { ...item, answer } : item)) }
     catch (e) { message.warning((e as Error).message) }
@@ -24,7 +24,7 @@ export function ObjectiveEditor({ value, page, readOnly, selected, onChange, onE
     if (current.type === 'single') setIndex(i => Math.min(i + 1, rows.length - 1))
     keys.current?.focus()
   }
-  const layoutFields = <div className="editor-form-grid"><Form.Item name="columns" label="分栏数" rules={[{ required: true }]}><InputNumber min={1} max={10} /></Form.Item><Form.Item name="startPage" label="从哪一面开始" rules={[{ required: true }]}><Select options={Array.from({ length: value.sides }, (_, i) => ({ label: i === 0 ? '正面' : '背面', value: i + 1 }))} /></Form.Item></div>
+  const layoutFields = <div className="editor-form-grid"><Form.Item name="columns" label="每栏客观题列数" rules={[{ required: true }]}><InputNumber min={1} max={10} /></Form.Item><Form.Item name="startPage" label="从哪一面开始" rules={[{ required: true }]}><Select options={Array.from({ length: value.sides }, (_, i) => ({ label: i === 0 ? '正面' : '背面', value: i + 1 }))} /></Form.Item></div>
   return <div className="editor-section">
     <div className="section-actions"><Button type="primary" icon={<PlusOutlined />} disabled={readOnly} onClick={() => { batchForm.setFieldsValue({ ...defaults, numbers: `${nextNumber}-${nextNumber + 19}`, type: 'single', options: 4, points: 2 }); setBatchOpen(true) }}>批量添加</Button><Button disabled={!rows.length || readOnly} onClick={() => { setIndex(0); setPasted(''); setPasteError(''); setAnswerOpen(true) }}>集中录入答案</Button><Button disabled={!rows.length || readOnly} onClick={() => { layoutForm.setFieldsValue(defaults); setLayoutOpen(true) }}>重新排布</Button></div>
     {!!rows.length && <Text type="secondary">{rows.length} 题 · {rows.reduce((sum, q) => sum + q.points, 0)} 分 · 已录入 {rows.filter(q => q.answer.length).length} 题答案</Text>}
