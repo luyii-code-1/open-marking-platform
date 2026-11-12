@@ -24,8 +24,16 @@ def user(authorization: Annotated[str | None, Header()] = None,request:Request=N
 
 
 def admin(current=Depends(user)):
-    if current['role']!='admin':
-        raise HTTPException(403,'需要管理员权限')
+    if not is_manager(current):
+        raise HTTPException(403,'需要管理权限')
+    return current
+
+
+def is_manager(current):return current['role'] in ('admin','manager')
+
+
+def system_admin(current=Depends(user)):
+    if current['role']!='admin':raise HTTPException(403,'需要系统管理员权限')
     return current
 
 
@@ -37,7 +45,7 @@ def scan_user(authorization:Annotated[str|None,Header()]=None,request:Request=No
 
 
 def scan_admin(current=Depends(scan_user)):
-    if current['role'] not in ('admin','scanner'):raise HTTPException(403,'需要管理员或扫描设备权限')
+    if current['role'] not in ('admin','manager','scanner'):raise HTTPException(403,'需要管理人员或扫描设备权限')
     return current
 
 

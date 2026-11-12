@@ -1,7 +1,7 @@
 import json
 from fastapi import APIRouter,Depends,Query,Request
 from .db import connect
-from .dependencies import admin
+from .dependencies import system_admin,admin
 
 router=APIRouter(prefix='/api/v1/system')
 HIDDEN={'password','new_password','token','token_hash','digest','public_key','private_key','challenge','nonce','credential_id','secret','secret_key'}
@@ -22,7 +22,7 @@ def filters(before,actor,object_id):
 
 
 @router.get('/audit')
-def audits(before:int|None=Query(None,ge=1),limit:int=Query(50,ge=1,le=200),actor:str=Query('',max_length=100),object_id:str=Query('',max_length=100),kind:str=Query('',max_length=100),action:str=Query('',max_length=100),current=Depends(admin)):
+def audits(before:int|None=Query(None,ge=1),limit:int=Query(50,ge=1,le=200),actor:str=Query('',max_length=100),object_id:str=Query('',max_length=100),kind:str=Query('',max_length=100),action:str=Query('',max_length=100),current=Depends(system_admin)):
     clauses,params=filters(before,actor,object_id)
     if kind:clauses.append('o.kind=?');params.append(kind)
     if action:clauses.append('a.action=?');params.append(action)
@@ -34,7 +34,7 @@ def audits(before:int|None=Query(None,ge=1),limit:int=Query(50,ge=1,le=200),acto
 
 
 @router.get('/requests')
-def requests(request:Request,before:int|None=Query(None,ge=1),limit:int=Query(50,ge=1,le=200),actor:str=Query('',max_length=100),object_id:str=Query('',max_length=100),status:int|None=Query(None,ge=100,le=599),current=Depends(admin)):
+def requests(request:Request,before:int|None=Query(None,ge=1),limit:int=Query(50,ge=1,le=200),actor:str=Query('',max_length=100),object_id:str=Query('',max_length=100),status:int|None=Query(None,ge=100,le=599),current=Depends(system_admin)):
     journal=request.app.state.request_journal;journal.flush()
     clauses,params=filters(before,actor,object_id)
     if status is not None:clauses.append('a.status=?');params.append(status)

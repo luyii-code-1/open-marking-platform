@@ -8,15 +8,15 @@ public sealed partial class LocalQueue
     private static void LoadDesktopFields(SqliteConnection db,BatchRow batch)
     {
         using var command=db.CreateCommand();
-        command.CommandText="SELECT project_id,subject_id,config_sha256,template_json,roster_json,local_pairs_json FROM batches WHERE id=$id";
+        command.CommandText="SELECT project_id,subject_id,config_sha256,template_json,roster_json,local_pairs_json,room_tags_json FROM batches WHERE id=$id";
         command.Parameters.AddWithValue("$id",batch.Id);using var row=command.ExecuteReader();row.Read();
         batch.ProjectId=row.GetString(0);batch.SubjectId=row.GetString(1);batch.ConfigSha256=row.GetString(2);
-        batch.TemplateJson=row.GetString(3);batch.RosterJson=row.GetString(4);batch.LocalPairsJson=row.GetString(5);
+        batch.TemplateJson=row.GetString(3);batch.RosterJson=row.GetString(4);batch.LocalPairsJson=row.GetString(5);batch.RoomTagsJson=row.GetString(6);
     }
 
     public void SaveDesktopBatch(BatchRow batch)=>Execute("""
-        UPDATE batches SET project_id=$project,subject_id=$subject,config_sha256=$hash,template_json=$template,roster_json=$roster,local_pairs_json=$pairs WHERE id=$id
-        """,("$id",batch.Id),("$project",batch.ProjectId),("$subject",batch.SubjectId),("$hash",batch.ConfigSha256),("$template",batch.TemplateJson),("$roster",batch.RosterJson),("$pairs",batch.LocalPairsJson));
+        UPDATE batches SET project_id=$project,subject_id=$subject,config_sha256=$hash,template_json=$template,roster_json=$roster,local_pairs_json=$pairs,room_tags_json=$tags WHERE id=$id
+        """,("$id",batch.Id),("$project",batch.ProjectId),("$subject",batch.SubjectId),("$hash",batch.ConfigSha256),("$template",batch.TemplateJson),("$roster",batch.RosterJson),("$pairs",batch.LocalPairsJson),("$tags",batch.RoomTagsJson));
 
     public void PageRecognized(string captureId,string result)=>Execute("UPDATE pages SET recognition_json=$result,status='pending',error='' WHERE capture_id=$id AND status!='excluded'",("$id",captureId),("$result",result));
 

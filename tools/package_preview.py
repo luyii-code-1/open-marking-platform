@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -74,8 +75,9 @@ def main() -> None:
                 'source_commit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(),
                 'source_modified': bool(subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT, text=True).strip()),
                 'scanner_framework': framework, 'scanner_runtime': 'win-x64',
-                'scanner_self_contained': False,
-                'scanner_ui': 'WebView2', 'scanner_protocol': 'omp-scanner-2',
+                'scanner_self_contained': True,
+                'scanner_pairing': 'one-time-code-and-uri',
+                'scanner_ui': 'WebView2', 'scanner_protocol': 'omp-scanner-3',
                 'recognition_engine': 'omp-omr-2', 'recognition_runtime_bundled': True,
                 'offline_project_workspaces': True,
                 'pending': ['User UI acceptance', 'Real Hi-5100S scanner acceptance',
@@ -92,9 +94,19 @@ def main() -> None:
     with tempfile.TemporaryDirectory(prefix='omp-scanner-publish-') as temporary:
         staging = Path(temporary)
         run(['dotnet', 'publish', str(ROOT / 'scanner/OMP.Scanner.csproj'), '-c', 'Release',
-             '-r', 'win-x64', '--self-contained', 'false', '-o', str(staging), '--nologo'], ROOT)
+             '-r', 'win-x64', '--self-contained', 'true', '-o', str(staging), '--nologo'], ROOT)
         if not (staging / 'OMP.Scanner.exe').is_file():
             raise RuntimeError('Scanner publish did not produce OMP.Scanner.exe')
+        runtime=json.loads((staging/'OMP.Scanner.runtimeconfig.json').read_text(encoding='utf-8'))
+        packages=Path(os.getenv('NUGET_PACKAGES',Path.home()/'.nuget/packages'))
+        frameworks=runtime['runtimeOptions']['includedFrameworks']
+        for framework in frameworks:
+            package=framework['name'].lower()+'.runtime.win-x64'
+            source=packages/package/framework['version']
+            destination=staging/'third-party-licenses/dotnet'/(package+'-'+framework['version']);destination.mkdir(parents=True)
+            licenses=[source/name for name in ('LICENSE.TXT','LICENSE','THIRD-PARTY-NOTICES.TXT') if (source/name).is_file()]
+            if not any(path.name.startswith('LICENSE') for path in licenses):raise RuntimeError('Missing .NET runtime license: '+str(source))
+            for path in licenses:shutil.copyfile(path,destination/path.name)
         from tools.build_recognition import build as build_recognition
         build_recognition(staging / 'recognition')
         shutil.copyfile(ROOT / 'docs/扫描端.md', staging / '扫描端说明.md')
@@ -104,6 +116,13 @@ def main() -> None:
         results.append(pack(output / 'OpenMarkingPlatform-scanner-win-x64-preview.zip',
                             ((path, path.relative_to(staging).as_posix())
                              for path in sorted(staging.rglob('*')) if path.is_file()), metadata))
+        installer_name='OpenMarkingPlatform-Scanner-'+metadata['source_commit'][:10]+'-win-x64-Setup'
+        run(['ISCC', '/Qp', '/DPublishDir='+str(staging), '/DOutputDir='+str(output), '/DOutputName='+installer_name,
+             str(ROOT/'scanner/installer/Scanner.iss')],ROOT)
+        installer=output/(installer_name+'.exe')
+        if not installer.is_file():raise RuntimeError('扫描端安装包未生成')
+        with installer.open('rb') as stream:installer_digest=hashlib.file_digest(stream,'sha256').hexdigest()
+        results.append({'file':installer.name,'size':installer.stat().st_size,'sha256':installer_digest,'kind':'windows-installer'})
     (output / 'SHA256SUMS.txt').write_text(
         ''.join(f"{item['sha256']}  {item['file']}\n" for item in results), encoding='utf-8')
     (output / 'release.json').write_text(json.dumps({**metadata, 'artifacts': results},

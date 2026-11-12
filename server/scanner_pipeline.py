@@ -53,7 +53,8 @@ def project_package(identifier: str, current=Depends(scan_admin)):
             packaged.append({'id': group['id'], 'name': group['name'], 'subject_id': group['subject_id'], 'frozen': bool(group.get('frozen')),
                              'template': configuration(template), 'config_sha256': config_hash(template),
                              'roster': [{'candidate_number': s['candidate_number'], 'name': s['name']} for s in roster['students']] if roster else None})
-        return {'protocol': 'omp-scanner-2', 'engine_version': ENGINE_VERSION,
+        return {'protocol': 'omp-scanner-3', 'engine_version': ENGINE_VERSION,
+                'room_tags':find(db,'room-tags',project_id=identifier),
                 'project': {k: project[k] for k in ('id', 'name', 'status')},
                 'subjects': [{k: s[k] for k in ('id', 'name', 'default_group_id') if k in s} for s in subjects], 'groups': packaged}
 
@@ -76,15 +77,18 @@ def register_batch(identifier: str, body: dict, current=Depends(scan_admin)):
         if existing:
             batch, _, template = batch_context(db, identifier, current)
             if any(body.get(k) != batch.get(k) for k in ('group_id', 'template_id', 'template_revision', 'config_sha256', 'back_order', 'capture_mode')): raise HTTPException(409, '本地批次与服务器记录不一致')
+            if sorted(body.get('room_tag_ids',[]))!=sorted(t['id'] for t in batch.get('room_tags',[])):raise HTTPException(409,'本地考场标签与批次记录不一致')
             return batch
         group = require(db, body.get('group_id'), 'groups'); writable(db, 'groups', group)
         if group.get('frozen'): raise HTTPException(409, '成绩已经发布，请先在管理端发起复核')
         template = require(db, group.get('template_id'), 'templates')
         if template['status'] != 'published' or template['id'] != body.get('template_id') or template['revision'] != body.get('template_revision') or config_hash(template) != body.get('config_sha256'): raise HTTPException(409, '题卡配置已变化，请重新下载项目配置')
+        from .room_tags import snapshot,project_for_group
+        labels=snapshot(db,project_for_group(db,group['id']),body.get('room_tag_ids',[]))
         mode = body.get('capture_mode', 'separate'); order = body.get('back_order', 'same'); room = body.get('room', '')
         if mode not in ('duplex', 'separate') or order not in ('same', 'reverse') or (mode == 'duplex' and (template['sides'] != 2 or order != 'same')) or not isinstance(room, str) or len(room) > 100: raise HTTPException(422, '采集方式、背面顺序或考场备注无效')
         return put(db, 'scan-batches', {'id': identifier, 'group_id': group['id'], 'template_id': template['id'], 'template_revision': template['revision'],
-                                      'config_sha256': body['config_sha256'], 'room': room, 'capture_mode': mode, 'back_order': order,
+                                      'config_sha256': body['config_sha256'], 'room_tags':labels, 'room': room, 'capture_mode': mode, 'back_order': order,
                                       'status': 'front', **({'scanner_device_id': current['id']} if current['role'] == 'scanner' else {})}, current['id'])
 
 

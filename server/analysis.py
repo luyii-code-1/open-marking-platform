@@ -25,11 +25,12 @@ def describe(values,maximum,pass_ratio,excellent_ratio):
     return {'analyzed':count,'average':rounded(sum(amounts)/count) if count else None,'median':rounded(median(values)) if count else None,'minimum':min(values) if count else None,'maximum':max(values) if count else None,'standard_deviation':rounded(pstdev(values)) if count else None,'score_rate':rounded(100*sum(amounts)/(full*count)) if count and full>0 else None,'pass_count':passed,'pass_rate':rounded(100*Decimal(passed)/count) if count else None,'excellent_count':excellent,'excellent_rate':rounded(100*Decimal(excellent)/count) if count else None}
 
 
-def analyze(db,group_id,current,metric='raw',include_absent=False,pass_ratio=.6,excellent_ratio=.85):
+def analyze(db,group_id,current,metric='raw',include_absent=False,pass_ratio=.6,excellent_ratio=.85,room_tag_id=None):
     if metric not in ('raw','converted') or not math.isfinite(pass_ratio) or not math.isfinite(excellent_ratio) or not 0<=pass_ratio<=excellent_ratio<=1:raise HTTPException(422,'统计口径或比例无效')
     group=require(db,group_id,'groups')
     template=require(db,group.get('template_id'),'templates')
-    rows=results_for(db,group_id,current)
+    from .room_tags import includes
+    rows=[r for r in results_for(db,group_id,current) if includes(r,room_tag_id)]
     maximum=sum(q['points'] for q in template['questions'])
     if metric=='converted':
         if not group.get('conversion_id'):raise HTTPException(422,'本题卡组尚未配置赋分')
@@ -70,31 +71,31 @@ def analyze(db,group_id,current,metric='raw',include_absent=False,pass_ratio=.6,
     buckets=max(1,(high-low+width-1)//width)
     distribution=[{'lower':(low+i*width)/100,'upper':min(high,low+(i+1)*width)/100,'upper_inclusive':i==buckets-1,'count':0} for i in range(buckets)]
     for value in values:distribution[min(buckets-1,max(0,(cents(value)-low)//width))]['count']+=1
-    return {'group_id':group_id,'group_name':group['name'],'roster_configured':bool(group.get('roster_id')),'metric':metric,'full_score':maximum,'include_absent':include_absent,'pass_ratio':pass_ratio,'excellent_ratio':excellent_ratio,'rank_scope':'group' if current['role']=='admin' else 'assigned_classes','summary':summarize(rows),'classes':by_class,'questions':questions,'distribution':distribution,'students':ranked}
+    return {'room_tag_id':room_tag_id,'group_id':group_id,'group_name':group['name'],'roster_configured':bool(group.get('roster_id')),'metric':metric,'full_score':maximum,'include_absent':include_absent,'pass_ratio':pass_ratio,'excellent_ratio':excellent_ratio,'rank_scope':'group' if current['role'] in ('admin','manager') else 'assigned_classes','summary':summarize(rows),'classes':by_class,'questions':questions,'distribution':distribution,'students':ranked}
 
 
 @router.get('/analysis/group')
-def group_analysis(group_id:str,metric:str='raw',include_absent:bool=False,pass_ratio:float=.6,excellent_ratio:float=.85,current=Depends(user)):
+def group_analysis(group_id:str,metric:str='raw',include_absent:bool=False,pass_ratio:float=.6,excellent_ratio:float=.85,current=Depends(user),room_tag_id:str|None=None):
     with connect() as db:
         db.execute('BEGIN')
-        return analyze(db,group_id,current,metric,include_absent,pass_ratio,excellent_ratio)
+        return analyze(db,group_id,current,metric,include_absent,pass_ratio,excellent_ratio,room_tag_id)
 
 
 def project_rows(db,identifier,current):
     project=require(db,identifier,'projects')
     subjects={s['id']:s for s in find(db,'subjects',project_id=identifier)}
     groups=[g for g in objects(db,'groups') if g.get('subject_id') in subjects and g.get('template_id')]
-    if current['role']!='admin' and not any(current['id'] in c.get('teacher_ids',[]) for c in objects(db,'classes')):raise HTTPException(403,'未配置任教班级')
-    if current['role']!='admin':
+    if current['role'] not in ('admin','manager') and not any(current['id'] in c.get('teacher_ids',[]) for c in objects(db,'classes')):raise HTTPException(403,'未配置任教班级')
+    if current['role'] not in ('admin','manager'):
         from .visibility import result_groups
         visible=result_groups(db,current['id'])
         groups=[g for g in groups if g['id'] in visible]
         if not groups:raise HTTPException(403,'本考试暂无任教班级已发布成绩')
     columns=[];students={}
     for group in groups:
-        if current['role']!='admin' and not group.get('frozen'):continue
+        if current['role'] not in ('admin','manager') and not group.get('frozen'):continue
         rows=results_for(db,group['id'],current)
-        if not rows and current['role']!='admin':continue
+        if not rows and current['role'] not in ('admin','manager'):continue
         columns.append({'id':group['id'],'subject_id':group['subject_id'],'subject':subjects[group['subject_id']]['name'],'group':group['name'],'published':bool(group.get('frozen'))})
         for row in rows:
             student=students.setdefault(row['student_id'],{k:row[k] for k in ('student_id','candidate_number','name','class_id','class_name','grade')})
@@ -121,10 +122,10 @@ def csv_response(headers,rows,filename):
 
 
 @router.get('/analysis/group/export')
-def export_group(group_id:str,view:str='classes',metric:str='raw',include_absent:bool=False,pass_ratio:float=.6,excellent_ratio:float=.85,current=Depends(user)):
-    data=group_analysis(group_id,metric,include_absent,pass_ratio,excellent_ratio,current)
+def export_group(group_id:str,view:str='classes',metric:str='raw',include_absent:bool=False,pass_ratio:float=.6,excellent_ratio:float=.85,current=Depends(user),room_tag_id:str|None=None):
+    data=group_analysis(group_id,metric,include_absent,pass_ratio,excellent_ratio,current,room_tag_id)
     if view=='students':
-        return csv_response(['考号','姓名','班级','状态','原始分','赋分','当前可见范围排名','班级排名'],[[STATUS_NAMES.get(r.get(k),r.get(k)) if k=='status' else r.get(k) for k in ('candidate_number','name','class_name','status','total','converted_score','scope_rank','class_rank')] for r in data['students']],'student-analysis')
+        return csv_response(['考号','姓名','班级','状态','原始分','赋分','当前可见范围排名','班级排名','考场标签'],[[STATUS_NAMES.get(r.get(k),r.get(k)) if k=='status' else r.get(k) for k in ('candidate_number','name','class_name','status','total','converted_score','scope_rank','class_rank')]+['、'.join(t['name'] for t in r.get('room_tags',[]))] for r in data['students']],'student-analysis')
     if view=='distribution':
         return csv_response(['下界（含）','上界','上界包含','人数'],[[r['lower'],r['upper'],r['upper_inclusive'],r['count']] for r in data['distribution']],'score-distribution')
     if view not in ('classes','questions'):raise HTTPException(422,'导出类型无效')

@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse,Response
 from . import db as database
 from .db import connect,get,objects,put,find
-from .dependencies import admin,user,require,password_hash
+from .dependencies import system_admin,admin,user,require,password_hash
 from .review import results
 
 router=APIRouter(prefix='/api/v1')
@@ -99,7 +99,10 @@ def reset_password(identifier:str,body:dict,current=Depends(admin)):
     password=body.get('password','')
     if not isinstance(password,str) or not 10<=len(password)<=200: raise HTTPException(422,'密码需10至200个字符')
     with connect() as db:
-        if not db.execute('SELECT 1 FROM users WHERE id=?',(identifier,)).fetchone(): raise HTTPException(404,'账号不存在')
+        db.execute('BEGIN IMMEDIATE')
+        person=db.execute('SELECT role FROM users WHERE id=?',(identifier,)).fetchone()
+        if not person: raise HTTPException(404,'账号不存在')
+        if current['role']=='manager' and person['role']!='teacher':raise HTTPException(403,'管理教师只能重置普通教师密码')
         db.execute('UPDATE users SET password=? WHERE id=?',(password_hash(password),identifier))
         db.execute('DELETE FROM sessions WHERE user_id=?',(identifier,))
         put(db,'account-events',{'user_id':identifier,'action':'password_reset'},current['id'])
@@ -109,12 +112,14 @@ def reset_password(identifier:str,body:dict,current=Depends(admin)):
 @router.put('/users/{identifier}')
 def edit_user(identifier:str,body:dict,current=Depends(admin)):
     with connect() as db:
+        db.execute('BEGIN IMMEDIATE')
         row=db.execute('SELECT id,username,name,role FROM users WHERE id=?',(identifier,)).fetchone()
         if not row: raise HTTPException(404,'账号不存在')
         value=dict(row)
         for key in ('name','role'):
             if key in body: value[key]=body[key]
-        if value['role'] not in ('admin','teacher') or not value['name']: raise HTTPException(422,'姓名或角色无效')
+        if value['role'] not in ('admin','manager','teacher') or not value['name']: raise HTTPException(422,'姓名或角色无效')
+        if current['role']=='manager' and (row['role']!='teacher' or value['role']!='teacher'):raise HTTPException(403,'管理教师只能维护普通教师账号')
         if row['role']=='admin' and value['role']!='admin' and db.execute("SELECT COUNT(*) FROM users WHERE role='admin'").fetchone()[0]<=1: raise HTTPException(409,'至少保留一名管理员')
         db.execute('UPDATE users SET name=?,role=? WHERE id=?',(value['name'],value['role'],identifier))
         put(db,'account-events',{'user_id':identifier,'action':'profile_update','name':value['name'],'role':value['role']},current['id'])
@@ -127,13 +132,13 @@ def csv_cell(value):
 
 
 @router.get('/results/export')
-def export_results(group_id:str,current=Depends(user)):
-    rows=results(group_id,current)
+def export_results(group_id:str,room_tag_id:str|None=None,current=Depends(user)):
+    rows=results(group_id,room_tag_id,current)
     numbers=sorted({n for row in rows for n in row['scores']},key=lambda n:(len(n),n))
     output=io.StringIO(newline=''); writer=csv.writer(output)
-    writer.writerow(['准考证号','姓名','班级','状态','总分','赋分']+[f'第{n}题' for n in numbers])
+    writer.writerow(['准考证号','姓名','班级','状态','总分','赋分']+[f'第{n}题' for n in numbers]+['考场标签'])
     from .analysis import STATUS_NAMES
-    for row in rows: writer.writerow([csv_cell(STATUS_NAMES.get(row.get(key),row.get(key)) if key=='status' else row.get(key)) for key in ('candidate_number','name','class_id','status','total','converted_score')]+[row['scores'].get(n) for n in numbers])
+    for row in rows: writer.writerow([csv_cell(STATUS_NAMES.get(row.get(key),row.get(key)) if key=='status' else row.get(key)) for key in ('candidate_number','name','class_id','status','total','converted_score')]+[row['scores'].get(n) for n in numbers]+[csv_cell('、'.join(t['name'] for t in row.get('room_tags',[])))])
     return Response(('\ufeff'+output.getvalue()).encode('utf-8'),media_type='text/csv; charset=utf-8',headers={'Content-Disposition':'attachment; filename=results.csv'})
 
 
@@ -182,19 +187,19 @@ def stream_archive(token:str):
 
 
 @router.post('/system/backup')
-def backup(current=Depends(admin)):
+def backup(current=Depends(system_admin)):
     from .backups import create
     return create(current['id'])
 
 
 @router.get('/system/backups')
-def backup_list(current=Depends(admin)):
+def backup_list(current=Depends(system_admin)):
     with connect() as db:
         return [{**record,'available':(database.ROOT/'backups'/(record['id']+'.sqlite3')).is_file()} for record in objects(db,'database-backups')]
 
 
 @router.get('/system/backups/{identifier}/download')
-def download_backup(identifier:str,current=Depends(admin)):
+def download_backup(identifier:str,current=Depends(system_admin)):
     from .backups import checksum
     with connect() as db:record=require(db,identifier,'database-backups')
     path=database.ROOT/'backups'/(record['id']+'.sqlite3')

@@ -99,7 +99,7 @@ def login(body: Login,request:Request=None):
         if not hmac.compare_digest(stored,password_hash(body.password,stored.split(':')[0])) or row is None:
             raise HTTPException(401,'账号或密码错误')
         if body.portal not in (None,'admin','marking'):raise HTTPException(422,'登录入口无效')
-        if body.portal=='admin' and row['role']!='admin':raise HTTPException(403,'此账号没有管理后台权限，请使用阅卷台入口')
+        if body.portal=='admin' and row['role'] not in ('admin','manager'):raise HTTPException(403,'此账号没有管理后台权限，请使用阅卷台入口')
         token=secrets.token_urlsafe(40)
         db.execute('INSERT INTO sessions VALUES(?,?,?)',(hashlib.sha256(token.encode()).hexdigest(),row['id'],time.time()+43200))
         put(db,'account-events',{'user_id':row['id'],'action':'login','method':'password'},row['id'])
@@ -120,8 +120,9 @@ def users(current=Depends(admin)):
 
 @app.post('/api/v1/users')
 def create_user(body: Account,current=Depends(admin)):
-    if body.role not in ('admin','teacher') or len(body.password)<10:
+    if body.role not in ('admin','manager','teacher') or len(body.password)<10:
         raise HTTPException(422,'角色无效或密码不足10位')
+    if current['role']=='manager' and body.role!='teacher':raise HTTPException(403,'管理教师只能创建普通教师账号')
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
         if db.execute('SELECT 1 FROM users WHERE username=?',(body.username,)).fetchone():
@@ -139,7 +140,8 @@ def list_route(kind):
     def endpoint(current=Depends(scan_user if kind in ('projects','subjects','groups','templates','scan-batches') else user)):
         with connect() as db:
             values=objects(db,kind)
-            if current['role']=='admin': return values
+            if current['role'] in ('admin','manager'):
+                return values
             if current['role']=='scanner':
                 if kind=='scan-batches':return [v for v in values if v.get('scanner_device_id')==current['id']]
                 if kind=='templates':return [{k:v[k] for k in ('id','name','group_id','paper','sides','status','revision','layout_version') if k in v} for v in values]
@@ -163,6 +165,7 @@ def list_route(kind):
 
 def create_route(kind):
     def endpoint(body:dict,current=Depends(scan_admin if kind=='scan-batches' else admin)):
+        if kind=='score-conversions' and current['role']!='admin':raise HTTPException(403,'需要系统管理员权限')
         with connect() as db:
             db.execute('BEGIN IMMEDIATE')
             parent=KINDS[kind]
@@ -170,7 +173,7 @@ def create_route(kind):
                 if not isinstance(body.get(parent[0]),str):raise HTTPException(422,'所属记录编号无效')
                 require(db,body.get(parent[0]),parent[1])
             value=dict(body)
-            if kind=='scan-batches':value={k:body[k] for k in ('group_id','room','back_order') if k in body}
+            if kind=='scan-batches':value={k:body[k] for k in ('group_id','room','back_order','room_tag_ids') if k in body}
             value.pop('id',None)
             if kind in ('projects','subjects','groups','classes','students','templates') and not str(value.get('name','')).strip():
                 raise HTTPException(422,'请填写名称')
@@ -214,6 +217,10 @@ def create_route(kind):
                 value.pop('scanner_device_id',None)
                 if current['role']=='scanner':value['scanner_device_id']=current['id']
                 group=require(db,value['group_id'],'groups')
+                from .room_tags import snapshot,project_for_group
+                tag_ids=value.pop('room_tag_ids',[])
+                if not isinstance(tag_ids,list):raise HTTPException(422,'考场标签应为编号列表')
+                value['room_tags']=snapshot(db,project_for_group(db,group['id']),tag_ids) if tag_ids else []
                 if group.get('frozen'):raise HTTPException(409,'成绩已冻结，请先发起复核')
                 if not group.get('template_id'):
                     raise HTTPException(422,'请先发布题卡')
@@ -238,7 +245,7 @@ for kind in KINDS:
 @app.get('/api/v1/dashboard')
 def dashboard(current=Depends(user)):
     with connect() as db:
-        if current['role']!='admin':
+        if current['role'] not in ('admin','manager'):
             assigned={a['template_id'] for a in objects(db,'assignments') if current['id'] in (a.get('user_ids',[])+a.get('arbitrator_ids',[]))}
             templates=[t for t in objects(db,'templates') if t['id'] in assigned]
             return {'groups':len({t['group_id'] for t in templates}),'pending_tasks':sum(t['user_id']==current['id'] and t['status']=='claimed' for t in objects(db,'tasks'))}
@@ -402,7 +409,7 @@ def pair(identifier:str,body:dict|None=Body(default=None),current=Depends(scan_a
             from .student_history import snapshot
             student=snapshot(db,student)
             if any(s['group_id']==batch['group_id'] and s['student_id']==student['id'] for s in objects(db,'submissions')): raise HTTPException(409,'已有该学生答卷，请明确执行补扫替换')
-            submission=put(db,'submissions',{'group_id':batch['group_id'],'template_id':template['id'],'student_id':student['id'],'student_snapshot':student,'candidate_number':front['candidate_number'],'pages':[front['id']]+([backs[index]['id']] if template['sides']==2 else []),'status':'absent' if front.get('absent_mark') else 'ready','attendance_source':'scan_mark' if front.get('absent_mark') else 'scan'},current['id'])
+            submission=put(db,'submissions',{'group_id':batch['group_id'],'template_id':template['id'],'student_id':student['id'],'student_snapshot':student,'room_tags':batch.get('room_tags',[]),'candidate_number':front['candidate_number'],'pages':[front['id']]+([backs[index]['id']] if template['sides']==2 else []),'status':'absent' if front.get('absent_mark') else 'ready','attendance_source':'scan_mark' if front.get('absent_mark') else 'scan'},current['id'])
             from .answer_slices import sync
             submission=sync(db,submission,template,current['id'])
             from .anomalies import check_submission
@@ -449,6 +456,10 @@ from .deletion import router as deletion_router
 app.include_router(deletion_router)
 from .scanner_pipeline import router as scanner_pipeline_router
 app.include_router(scanner_pipeline_router)
+from .room_tags import router as room_tags_router
+app.include_router(room_tags_router)
+from .scanner_workbench import router as scanner_workbench_router
+app.include_router(scanner_workbench_router)
 
 web_distribution=Path(__file__).resolve().parents[1]/'web'/'dist'
 if web_distribution.exists():

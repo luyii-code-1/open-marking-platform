@@ -8,7 +8,7 @@ namespace OMP.Scanner;
 
 public sealed partial class ApiClient
 {
-    public Task<JsonElement> RegisterBatch(BatchRow batch,CancellationToken cancel=default)=>Post($"scanner/batches/{batch.Id}",new{group_id=batch.GroupId,template_id=batch.TemplateId,template_revision=batch.TemplateRevision,config_sha256=batch.ConfigSha256,capture_mode=batch.CaptureMode,back_order=batch.BackOrder,room=batch.Room},cancel);
+    public Task<JsonElement> RegisterBatch(BatchRow batch,CancellationToken cancel=default)=>Post($"scanner/batches/{batch.Id}",new{group_id=batch.GroupId,template_id=batch.TemplateId,template_revision=batch.TemplateRevision,config_sha256=batch.ConfigSha256,capture_mode=batch.CaptureMode,back_order=batch.BackOrder,room=batch.Room,room_tag_ids=JsonSerializer.Deserialize<JsonElement>(batch.RoomTagsJson).EnumerateArray().Select(t=>t.GetProperty("id").GetString()).ToArray()},cancel);
 
     public async Task<JsonElement> UploadProcessed(PageRow page,string queueRoot,CancellationToken cancel=default)
     {

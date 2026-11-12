@@ -14,7 +14,7 @@ from PIL import Image
 
 from . import db as database
 from .db import connect, find, get, objects, put
-from .dependencies import admin, require
+from .dependencies import admin,system_admin, require
 
 router=APIRouter(prefix='/api/v1')
 PUBLIC=('id','name','kind','endpoint','bucket','prefix','region','addressing','media_url','media_enabled','revision','last_test')
@@ -81,10 +81,15 @@ def validated(body,old=None):
 
 
 @router.get('/storage-connections')
-def listing(current=Depends(admin)):
+def listing(current=Depends(system_admin)):
     with connect() as db:
         projects=objects(db,'projects')
         return [{**public(v),'project_count':sum(p.get('storage_connection_id')==v['id'] for p in projects)} for v in objects(db,'storage-connections')]
+
+
+@router.get('/storage-connections/choices')
+def choices(current=Depends(admin)):
+    with connect() as db:return [{k:v[k] for k in ('id','name','kind','bucket')} for v in objects(db,'storage-connections')]
 
 
 def save(body,current,identifier=None):
@@ -102,15 +107,15 @@ def save(body,current,identifier=None):
 
 
 @router.post('/storage-connections',status_code=201)
-def create(body:dict,current=Depends(admin)):return save(body,current)
+def create(body:dict,current=Depends(system_admin)):return save(body,current)
 
 
 @router.put('/storage-connections/{identifier}')
-def update(identifier:str,body:dict,current=Depends(admin)):return save(body,current,identifier)
+def update(identifier:str,body:dict,current=Depends(system_admin)):return save(body,current,identifier)
 
 
 @router.delete('/storage-connections/{identifier}')
-def remove(identifier:str,current=Depends(admin)):
+def remove(identifier:str,current=Depends(system_admin)):
     with connect() as db:
         db.execute('BEGIN IMMEDIATE');require(db,identifier,'storage-connections')
         if find(db,'storage-assets',connection_id=identifier) or find(db,'projects',storage_connection_id=identifier):raise HTTPException(409,'连接仍被考试项目或文件引用，请保留以便读取和清理')
@@ -164,13 +169,13 @@ def probe(value,media=False):
 
 
 @router.post('/storage-connections/test')
-def draft_test(body:dict,current=Depends(admin)):
+def draft_test(body:dict,current=Depends(system_admin)):
     old=config(body['id']) if body.get('id') else None
     return probe(validated(body,old),body.get('test_media') is True)
 
 
 @router.post('/storage-connections/{identifier}/test')
-def saved_test(identifier:str,body:dict,current=Depends(admin)):
+def saved_test(identifier:str,body:dict,current=Depends(system_admin)):
     value=config(identifier);result=probe(value,body.get('media') is True)
     with connect() as db:
         db.execute('BEGIN IMMEDIATE');row=require(db,identifier,'storage-connections')
