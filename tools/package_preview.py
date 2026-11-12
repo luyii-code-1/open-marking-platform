@@ -86,6 +86,7 @@ def main() -> None:
     # Publish into a disposable directory; existing queues and registered keys are untouched.
     run(['npm', 'ci'], ROOT / 'web')
     run(['npm', 'run', 'build'], ROOT / 'web')
+    run(['npm', 'run', 'test:actions'], ROOT / 'web')
     run(['npm', 'run', 'test:navigation'], ROOT / 'web')
     run(['npm', 'run', 'test:objective'], ROOT / 'web')
     run(['npm', 'run', 'test:pwa'], ROOT / 'web')
