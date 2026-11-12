@@ -44,17 +44,17 @@ export async function downloadArchive(identifier:string,filename:string) {
   const link=document.createElement('a');link.href=result.url;link.download=filename;link.rel='noreferrer';link.click()
 }
 export function useResource<T>(path: string | null, initial: T, options:{live?:boolean}={}) {
-  const [data, setData] = useState<T>(initial), [loading, setLoading] = useState(false), [error, setError] = useState('')
+  const [data, setData] = useState<T>(initial), [loading, setLoading] = useState(false), [loaded, setLoaded] = useState(false), [error, setError] = useState('')
   const version=useRef(0),currentPath=useRef(path),initialData=useRef(initial);currentPath.current=path
   const reload = useCallback(async () => {
     if (!path) return
     const sequence=++version.current
     setLoading(true); setError('')
-    try { const next=await request<T>(path);if(sequence===version.current&&path===currentPath.current)setData(next) } catch (e) { if(sequence===version.current&&path===currentPath.current){setError(e instanceof Error ? e.message : '请求失败');if(e instanceof ApiError&&[401,403,404].includes(e.status))setData(initialData.current)} } finally { if(sequence===version.current&&path===currentPath.current)setLoading(false) }
+    try { const next=await request<T>(path);if(sequence===version.current&&path===currentPath.current)setData(next) } catch (e) { if(sequence===version.current&&path===currentPath.current){setError(e instanceof Error ? e.message : '请求失败');if(e instanceof ApiError&&[401,403,404].includes(e.status))setData(initialData.current)} } finally { if(sequence===version.current&&path===currentPath.current){setLoading(false);setLoaded(true)} }
   }, [path])
-  useEffect(() => { if(!path){setData(initialData.current);setLoading(false);setError('')}else void reload();return()=>{version.current++} }, [path,reload])
+  useEffect(() => { setLoaded(false);if(!path){setData(initialData.current);setLoading(false);setError('')}else void reload();return()=>{version.current++} }, [path,reload])
   useEffect(()=>watchChanges(roots=>{if(options.live!==false&&path&&(!roots||roots.includes(path.split('/')[1].split('?')[0])))void reload()}),[path,reload,options.live])
-  return { data, loading, error, reload, setData }
+  return { data, loading, loaded, error, reload, setData }
 }
 export function newQuestion(number: number): Question { return { id: crypto.randomUUID(), number, type: 'subjective', options: 4, answer: [], points: 10, regions: [], rule: { mode: 'exact' }, review_mode: 'single', threshold: 2 } }
 export const describeStatus = (status?: string) => ({ draft: '草稿', published: '已发布', active: '进行中', pending: '待处理', processed: '已处理', completed: '已完成', confirmed: '已确认', uploading: '上传中', paired: '已配对', frozen: '已冻结', error: '异常', open: '待处理', resolved: '已解决', scored: '已评分', claimed: '评阅中', ready: '待评阅', archived: '已归档' }[status || ''] || status || '—')

@@ -2,12 +2,13 @@ import { useEffect, useState } from 'react'
 import { Alert, App, Button, Card, Descriptions, Form, Input, InputNumber, Modal, Select, Space, Switch, Table, Tabs, Tag, Typography } from 'antd'
 import { send, useResource, type Row } from './api'
 import { AssetImage } from './components'
+import { HierarchyPicker } from './HierarchyPicker'
 
 const kinds:Record<string,string>={automatic:'自动检查',recognition:'定位识别失败',wrong_paper:'混卷或正反面不符',scan_quality:'扫描页面质量',exception:'教师报告',excellent:'优秀卷'}
 const rules:Record<string,string>={blank_answers:'客观题留空数量',same_answer_run:'连续相同选项',invalid_single:'单选题多选'}
 
-export function Exceptions() {
-  const [group,setGroup]=useState(''),[status,setStatus]=useState<string|undefined>('open'),[selected,setSelected]=useState<string[]>([]),[detailId,setDetailId]=useState(''),[resolution,setResolution]=useState(''),[bulk,setBulk]=useState(false),[busy,setBusy]=useState(false),[form]=Form.useForm()
+export function Exceptions({groupId}:{groupId?:string}) {
+  const [selectedGroup,setGroup]=useState(groupId || ''),group=groupId || selectedGroup,[status,setStatus]=useState<string|undefined>('open'),[selected,setSelected]=useState<string[]>([]),[detailId,setDetailId]=useState(''),[resolution,setResolution]=useState(''),[bulk,setBulk]=useState(false),[busy,setBusy]=useState(false),[form]=Form.useForm()
   const groups=useResource<Row[]>('/groups',[])
   const list=useResource<Row[]>(`/exceptions?${new URLSearchParams({...group?{group_id:group}:{},...status?{status}:{}})}`,[])
   const configuration=useResource<Record<string,any>>(group?`/groups/${group}/anomaly-rules`:null,{},{live:false})
@@ -22,7 +23,7 @@ export function Exceptions() {
   const item=details.data?.exception
   return <Space direction="vertical" size="large" style={{width:'100%'}}>
     <Card title="异常与优秀卷" extra={<Button onClick={list.reload}>刷新</Button>}>
-      <Space wrap style={{marginBottom:16}}><Select allowClear placeholder="全部题卡组" value={group||undefined} style={{width:260}} options={groups.data.map(g=>({label:g.name,value:g.id}))} onChange={value=>{setGroup(value||'');setSelected([])}}/><Select allowClear placeholder="全部状态" value={status} style={{width:150}} options={[{label:'待核查',value:'open'},{label:'已处理',value:'resolved'}]} onChange={value=>{setStatus(value);setSelected([])}}/><Button disabled={!selected.length} onClick={()=>{setBulk(true);setResolution('')}}>批量处理（{selected.length}）</Button></Space>
+      <Space wrap style={{marginBottom:16}}>{!groupId && <HierarchyPicker allowClear placeholder="全部题卡组" value={group} onChange={value=>{setGroup(value);setSelected([])}}/>}<Select allowClear placeholder="全部状态" value={status} style={{width:150}} options={[{label:'待核查',value:'open'},{label:'已处理',value:'resolved'}]} onChange={value=>{setStatus(value);setSelected([])}}/><Button disabled={!selected.length} onClick={()=>{setBulk(true);setResolution('')}}>批量处理（{selected.length}）</Button></Space>
       {list.error&&<Alert type="error" message={list.error}/>}
       <Table rowKey="id" loading={list.loading} dataSource={list.data} rowSelection={{selectedRowKeys:selected,onChange:keys=>setSelected(keys.map(String))}} columns={[{title:'类型',dataIndex:'kind',render:value=>kinds[value]||value},{title:'题卡组',dataIndex:'group_id',render:id=>groups.data.find(g=>g.id===id)?.name||'—'},{title:'说明',dataIndex:'reason'},{title:'状态',dataIndex:'status',render:value=><Tag color={value==='open'?'orange':'green'}>{value==='open'?'待核查':'已处理'}</Tag>},{title:'操作',render:(_,row)=><Button onClick={()=>{setDetailId(row.id);setResolution('')}}>查看与处理</Button>}]}/>
     </Card>
