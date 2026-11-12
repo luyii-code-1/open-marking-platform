@@ -103,6 +103,26 @@ def test_local_pipeline_rejects_changed_config_and_malformed_result(pipeline):
         assert response.status_code in (409,422),response.text
     with db.connect() as connection:assert not db.objects(connection,'pages')
     response=f['upload'](page);assert response.status_code==200,response.text
+
+
+def test_project_storage_schedules_all_local_recognition_outputs(pipeline,monkeypatch):
+    from pathlib import Path
+    f=pipeline;monkeypatch.setenv('OMP_STORAGE','local')
+    remote={}
+    class S3:
+        def upload_file(self,source,bucket,key):remote[(bucket,key)]=Path(source).read_bytes()
+    monkeypatch.setattr(storage.Storage,'s3',lambda self:S3())
+    connection=f['post']('storage-connections',{'name':'考试专用桶','kind':'ros','endpoint':'https://s3.example.test','bucket':'exam-bucket','prefix':'exam','access_key':'fake-access','secret_key':'fake-secret'},status=201)
+    response=f['client'].put('/api/v1/projects/'+f['project']['id']+'/storage',json={'connection_id':connection['id']},headers=f['headers']);assert response.status_code==200
+    page=f['pages'][0];response=f['upload'](page);assert response.status_code==200,response.text
+    with db.connect() as conn:queued=db.find(conn,'jobs',project_id=f['project']['id'])
+    assert len(queued)==3 and {j['payload']['relative'] for j in queued}=={'pages/'+page['id']+suffix for suffix in ('.image','.png','.cuts.zip')}
+    for job in queued:jobs.execute(job['id'])
+    assert len(remote)==3 and all(bucket=='exam-bucket' for bucket,key in remote)
+    with db.connect() as conn:
+        refs=db.objects(conn,'storage-assets');assert len(refs)==3 and all(r['connection_id']==connection['id'] for r in refs)
+    assert f['upload'](page).status_code==200
+    with db.connect() as conn:assert len(db.find(conn,'jobs',project_id=f['project']['id']))==3
     bad=copy.deepcopy(page['result']);bad['cuts'][0]['region']['x']+=1
     assert f['upload'](page,bad).status_code==422
 

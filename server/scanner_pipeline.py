@@ -180,9 +180,9 @@ def upload_processed(identifier: str, file: UploadFile = File(), normalized: Upl
             from .anomalies import check_candidate
             check_candidate(db, page, current['id'])
             from .jobs import create_job
-            from .storage import backend
+            from .storage import Storage
             subject = require(db, group['subject_id'], 'subjects')
-            if backend() != 'local':
+            if Storage(project_id=subject['project_id']).kind != 'local':
                 for path in written: jobs.append(create_job(db, 'mirror', {'relative': 'pages/' + path.name, 'project_id': subject['project_id']}, subject['project_id'], current['id']))
     except BaseException:
         for path in written: path.unlink(missing_ok=True)
