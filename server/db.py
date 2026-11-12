@@ -65,6 +65,7 @@ def initialize(root=None):
         CREATE INDEX IF NOT EXISTS object_group ON objects(kind,deleted,json_extract(body,'$.group_id'));
         CREATE INDEX IF NOT EXISTS object_relative ON objects(kind,deleted,json_extract(body,'$.relative'));
         CREATE INDEX IF NOT EXISTS object_token_hash ON objects(kind,deleted,json_extract(body,'$.token_hash'));
+        CREATE INDEX IF NOT EXISTS object_deleted_plan ON objects(json_extract(body,'$.deletion_plan_id')) WHERE deleted=1;
         ''')
         from .identifiers import initialize as initialize_identifiers
         initialize_identifiers(db)

@@ -202,7 +202,10 @@ public partial class MainWindow : Window
 
     private async Task CheckBatch(BatchRow batch, bool allowLocalReview = false)
     {
-        var result = await RequireApi(batch).Get($"scan-batches/{batch.Id}", _lifetime.Token);
+        JsonElement result;
+        try { result = await RequireApi(batch).Get($"scan-batches/{batch.Id}", _lifetime.Token); }
+        catch (ApiException ex) when (ex.StatusCode == 404)
+        { Freeze(batch, "扫描批次已删除或不可访问，采集已停止，本地原图保留。"); throw new InvalidOperationException(batch.Error); }
         if (result.TryGetProperty("group_frozen", out var groupFrozen) && groupFrozen.ValueKind == JsonValueKind.True) { Freeze(batch, "成绩已经发布，请先在管理端发起复核。"); throw new InvalidOperationException(batch.Error); }
         var status = Field(result, "status", "open");
         if (status is "frozen" or "blocked" or "error") { Freeze(batch, Field(result, "error", "服务器已冻结该批次，请联系管理员。")); throw new InvalidOperationException(batch.Error); }

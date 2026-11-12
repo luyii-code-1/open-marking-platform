@@ -10,6 +10,7 @@ import { Account } from './Account'
 import { PwaStatus } from './PwaStatus'
 import { RealtimeStatus } from './RealtimeStatus'
 import { Login, type Portal } from './Login'
+import { ArchiveManager } from './ArchiveManager'
 
 const { Text, Title } = Typography
 export function App() {
@@ -32,6 +33,7 @@ export function App() {
     ] },
     ...(management ? [{ type: 'group' as const, key: 'management', label: '基础管理', children: [
       { key: 'people', icon: <TeamOutlined />, label: '人员与班级' },
+      { key: 'archives', icon: <BookOutlined />, label: '归档文件' },
       { key: 'settings', icon: <SettingOutlined />, label: '系统设置' },
     ] }] : []),
     { key: 'account', icon: <SettingOutlined />, label: '个人账号' },
@@ -50,6 +52,7 @@ export function App() {
         {page === 'marking' && <Marking admin={management} />}
         {page === 'exceptions' && <Exceptions />}
         {page === 'results' && <Results admin={management} />}
+        {page === 'archives' && <ArchiveManager/>}
         {page === 'people' && <DataManagement />}
         {page === 'settings' && <Settings />}
         {page === 'account' && <Account user={user} onProfile={setUser} onLogout={()=>{setToken('');setUser(null)}}/>}

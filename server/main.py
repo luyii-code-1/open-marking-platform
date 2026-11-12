@@ -438,6 +438,8 @@ from .audit import router as audit_router
 app.include_router(audit_router)
 from .conversion_routes import router as conversion_router
 app.include_router(conversion_router)
+from .deletion import router as deletion_router
+app.include_router(deletion_router)
 
 web_distribution=Path(__file__).resolve().parents[1]/'web'/'dist'
 if web_distribution.exists():

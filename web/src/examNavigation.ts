@@ -7,7 +7,7 @@ export const groupSections = [
 export type GroupSection = typeof groupSections[number][0]
 export type ExamLocation = { projectId?: string; subjectId?: string; groupId?: string; section?: string }
 export type Location = ExamLocation & { page: string }
-const pages = new Set(['dashboard', 'exams', 'marking', 'exceptions', 'results', 'people', 'settings', 'account', 'login'])
+const pages = new Set(['dashboard', 'exams', 'marking', 'exceptions', 'results', 'people', 'settings', 'account', 'login', 'archives'])
 
 export function examPath(location: ExamLocation = {}) {
   const { projectId, subjectId, groupId, section } = location

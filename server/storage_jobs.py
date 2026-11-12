@@ -22,6 +22,7 @@ def submit(project_id,kind,payload,current):
         if kind=='preview-release':value['new_plan_id']=str(uuid4())
         if kind=='release-project':
             plan=require(db,value['plan_id'],'release-plans')
+            if plan.get('invalidated_by_deletion'):raise HTTPException(409,'考试层级已变化，请重新预览释放清单')
             if plan['project_id']!=project_id or plan['actor']!=current['id']:raise HTTPException(403,'释放清单不属于当前操作')
             if plan['status']=='preview' and plan['expires_at']<time.time():raise HTTPException(409,'释放清单已过期，请重新预览')
             if plan['status']!='completed':

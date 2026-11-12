@@ -192,3 +192,12 @@ Frontend must show server validation and loading states. Scanner freezes batch o
 `portal`可选`admin`或`marking`。管理后台仅管理员可登录，阅卷台允许教师和管理员；未传portal的现有设备/API登录保持原权限。Passkey的`/auth/passkeys/login/options`也接受portal并随挑战保存，完成验证时再次检查管理权限。
 
 `POST /auth/recovery-reset`接收`{username,code,new_password}`：验证一次性恢复码、设置10至200字符的新密码并撤销旧会话，操作在同一事务完成；返回`{status:"reset"}`，不签发登录令牌。无效恢复码不消耗有效码，重放返回401。恢复码不再作为独立登录方式。
+
+## 考试层级删除
+
+- `POST /{kind}/{id}/deletion-preview`：管理员预览，kind仅支持`projects`、`subjects`、`groups`。返回预览编号、目标、完整路径、分类数量、保留评分/归档数量、后台任务及运行状态影响、阻塞事项和10分钟有效期。预览不删除业务数据。
+- `GET /deletion-plans/{id}`：管理员查看预览或完成结果。
+- `GET /deletion-plans/{id}/manifest`：下载完整JSON清单，包含`summary`、`target`、`records`、`questions`、`background_tasks`、`release_plans`；从一致读快照生成临时文件并发送后清理，不把完整清单重复写入预览和审计。已完成删除的清单仍可下载。
+- `POST /deletion-plans/{id}/confirm` `{confirm:true,reason}`：仅生成预览的管理员确认。过期、范围数据变化或后台任务运行中返回409；已完成的相同请求幂等返回原结果。删除记录、审计、编号退役、任务取消及重阅状态清理均在一个事务内完成。
+
+当前采用逻辑删除，保留扫描文件、原始评分、审计、共享资产及归档。相关后台任务标记`cancelled_by_deletion`后不能重试；相关释放清单标记`invalidated_by_deletion`后不能确认或执行。项目归档保留`project_name`及`project_deleted`，供独立归档入口展示。详见《删除与数据保留》。

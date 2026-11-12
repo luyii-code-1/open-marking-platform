@@ -154,6 +154,7 @@ def create(identifier,actor,progress=None,archive_id=None,ownership=None):
             db.execute('BEGIN IMMEDIATE')
             from .jobs import guard
             guard(db,ownership)
+            project=require(db,identifier,'projects')
             temporary.replace(target)
             result=put(db,'archives',{'id':archive_id,'project_id':identifier,'status':'verified','format':'omp-project-2','created_at':time.time(),'asset_count':sum(e['path'].startswith(('pages/','assets/')) for e in manifest),'size':target.stat().st_size,'sha256':archive_sha,'download_url':f'/api/v1/archives/{archive_id}/download'},actor)
             for entry in manifest:

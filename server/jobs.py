@@ -30,6 +30,9 @@ def create_job(db,kind,payload,project_id=None,actor=None):
 
 def queue(kind,payload,background=False):
     with connect() as db:
+        db.execute('BEGIN IMMEDIATE')
+        if kind=='process-page' and not get(db,payload.get('page_id'),'pages'):return None
+        if kind=='mirror' and payload.get('project_id') and not get(db,payload['project_id'],'projects'):return None
         job=create_job(db,kind,payload)
     dispatch(job['id'],background)
     return job
@@ -50,11 +53,12 @@ def project_for_page(db,page):
     return subject.get('project_id') if subject else None
 
 
-def process_page(identifier):
+def process_page(identifier,ownership=None):
     import cv2
     from .paper import decode,recognize,absent_mark
     from .storage import materialize,mirror
     with connect() as db:
+        guard(db,ownership)
         page=get(db,identifier,'pages')
         if not page or page['status']=='quarantined':return
         batch=get(db,page['batch_id'],'scan-batches');template=get(db,batch['template_id'],'templates');project_id=project_for_page(db,page)
@@ -67,7 +71,10 @@ def process_page(identifier):
     except ValueError as error:
         with connect() as db:
             db.execute('BEGIN IMMEDIATE')
-            page=get(db,identifier,'pages');page['status']='needs_review';put(db,'pages',page)
+            guard(db,ownership)
+            page=get(db,identifier,'pages')
+            if not page:return
+            page['status']='needs_review';put(db,'pages',page)
             if not any(e.get('page_id')==identifier and e['kind']=='recognition' and e['status']=='open' for e in objects(db,'exceptions')):put(db,'exceptions',{'batch_id':page['batch_id'],'page_id':identifier,'kind':'recognition','status':'open','reason':str(error)})
         mirror('pages/'+identifier+'.image',project_id)
         return
@@ -76,7 +83,9 @@ def process_page(identifier):
     with path.open('rb') as stream:normalized_digest=hashlib.file_digest(stream,'sha256').hexdigest()
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
+        guard(db,ownership)
         page=get(db,identifier,'pages')
+        if not page:return
         if page['status']=='received':
             page.update(status='recognized',candidate_number=candidate,selections=selections,absent_mark=absent_mark(normalized,page['side'],template),normalized_sha256=normalized_digest);put(db,'pages',page)
             from .anomalies import check_candidate
@@ -118,7 +127,7 @@ def execute(identifier):
     result=None
     try:
         with Execution(identifier,token) as execution:
-            if job['kind']=='process-page':process_page(job['payload']['page_id'])
+            if job['kind']=='process-page':process_page(job['payload']['page_id'],(identifier,token))
             elif job['kind']=='mirror':
                 from .storage import mirror
                 mirror(job['payload']['relative'],job['payload'].get('project_id'))
@@ -130,7 +139,7 @@ def execute(identifier):
     except Exception as error:
         with connect() as db:
             job=get(db,identifier,'jobs')
-            if job.get('run_token')==token:
+            if job and job.get('run_token')==token and job['status']=='running':
                 from fastapi import HTTPException
                 permanent=isinstance(error,HTTPException) and not getattr(error,'retryable',False)
                 retryable=not permanent and job['attempts']<10
@@ -138,7 +147,7 @@ def execute(identifier):
         return
     with connect() as db:
         job=get(db,identifier,'jobs')
-        if job.get('run_token')==token:job.update(status='completed',lease_until=0,phase='已完成',result=result);put(db,'jobs',job)
+        if job and job.get('run_token')==token and job['status']=='running':job.update(status='completed',lease_until=0,phase='已完成',result=result);put(db,'jobs',job)
 
 
 @celery.task(name='omp.run')

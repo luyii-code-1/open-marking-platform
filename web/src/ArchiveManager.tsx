@@ -10,8 +10,11 @@ export function ArchiveManager({ projectId }: { projectId?: string }) {
   const projects=useResource<Row[]>('/projects',[]),archives=useResource<Row[]>('/archives',[])
   const [selectedProject,setProject]=useState(projectId || ''), project=projectId || selectedProject,[mode,setMode]=useState('all'),[plan,setPlan]=useState<Row|null>(null),[outcome,setOutcome]=useState<any>(null),[busy,setBusy]=useState(false),{message}=App.useApp()
   const jobs=useFileJobs(project)
+  const deletedProjects=[...new Map(archives.data.filter(a=>a.project_deleted).map(a=>[a.project_id,{id:a.project_id,name:`${a.project_name||a.project_id}（已删除）`}])).values()]
+  const projectOptions=[...projects.data,...deletedProjects.filter(p=>!projects.data.some(active=>active.id===p.id))]
+  const projectDeleted=archives.data.some(a=>a.project_id===project&&a.project_deleted)
   useEffect(()=>{
-    const job=jobs.finished;if(!job)return
+    const job=jobs.finished;if(!job||job.cancelled_by_deletion)return
     void archives.reload();void projects.reload()
     if(job.status==='failed'){message.error(job.error_detail||'任务失败，可核查后重试');return}
     if(job.kind==='preview-release'){setPlan(job.result);setOutcome(null)}
@@ -26,10 +29,11 @@ export function ArchiveManager({ projectId }: { projectId?: string }) {
   async function restore(id:string){await enqueue(`/archives/${id}/restore-jobs`)}
   return <Space direction="vertical" size="large" style={{width:'100%'}}><Card title="归档与扫描文件管理" extra={<Button disabled={busy} onClick={()=>{void projects.reload();void archives.reload()}}>刷新</Button>}>
     {(projects.error||archives.error||jobs.error)&&<Alert type="error" message={projects.error||archives.error||jobs.error}/>}
-    <Space wrap>{!projectId && <Select style={{width:300}} placeholder="选择考试项目" disabled={busy} value={project||undefined} onChange={setProject} options={projects.data.map(p=>({label:p.name,value:p.id}))}/>}<Button type="primary" loading={busy} disabled={!project||jobs.active} onClick={create}>生成归档</Button><Select style={{width:260}} disabled={busy} value={mode} onChange={setMode} options={[{label:'释放本地及远端扫描文件',value:'all'},{label:'仅释放本地活动扫描文件',value:'local'}]}/></Space>
-    <Typography.Paragraph type="secondary" style={{marginTop:16}}>归档、清单核对、释放和恢复在后台执行，关闭页面后任务继续处理。任务完成后可下载归档；释放前需先发布项目各题卡组，再核对清单并确认。</Typography.Paragraph>
-    <Alert type="info" message="释放的是活动扫描文件副本，归档ZIP仍保留并占用空间。查看原卷时会从归档取回所需文件；恢复入口可一次恢复扫描文件和题卡资产，保留当前数据库中的最新成绩。"/>
-    <Table rowKey="id" loading={archives.loading} dataSource={scoped} scroll={{x:'max-content'}} columns={[{title:'创建时间',dataIndex:'created_at',render:value=>new Date(value*1000).toLocaleString()},{title:'归档大小',dataIndex:'size',render:value=>value===undefined?'—':bytes(value)},{title:'扫描及题卡文件',dataIndex:'asset_count'},{title:'SHA-256',dataIndex:'sha256',ellipsis:true},{title:'操作',render:(_,row)=><Space wrap><Button disabled={busy} onClick={async()=>{try{await downloadArchive(row.id,'考试归档.zip')}catch(e){message.error((e as Error).message)}}}>下载</Button><Button disabled={busy||jobs.active} onClick={()=>preview(row.id)}>预览释放</Button><Popconfirm title="从此归档恢复扫描文件？" description="逐项校验；现有文件与归档不一致时不会覆盖，当前评分记录保留。" onConfirm={()=>restore(row.id)}><Button disabled={busy||jobs.active}>恢复扫描文件</Button></Popconfirm></Space>}]} />
+    <Space wrap>{!projectId && <Select style={{width:300}} placeholder="选择考试项目" disabled={busy} value={project||undefined} onChange={setProject} options={projectOptions.map(p=>({label:p.name,value:p.id}))}/>}{!projectDeleted&&<><Button type="primary" loading={busy} disabled={!project||jobs.active||projectDeleted} onClick={create}>生成归档</Button><Select style={{width:260}} disabled={busy||projectDeleted} value={mode} onChange={setMode} options={[{label:'释放本地及远端扫描文件',value:'all'},{label:'仅释放本地活动扫描文件',value:'local'}]}/></>}</Space>
+    {projectDeleted&&<Alert type="info" message="原考试项目已删除，已有归档保留，可在此下载。" style={{marginTop:20}}/>}
+    {!projectDeleted&&<><Typography.Paragraph type="secondary" style={{marginTop:16}}>归档、清单核对、释放和恢复在后台执行，关闭页面后任务继续处理。任务完成后可下载归档；释放前需先发布项目各题卡组，再核对清单并确认。</Typography.Paragraph>
+    <Alert type="info" message="释放的是活动扫描文件副本，归档ZIP仍保留并占用空间。查看原卷时会从归档取回所需文件；恢复入口可一次恢复扫描文件和题卡资产，保留当前数据库中的最新成绩。"/></>}
+    <Table rowKey="id" loading={archives.loading} dataSource={scoped} scroll={{x:'max-content'}} columns={[{title:'创建时间',dataIndex:'created_at',render:value=>new Date(value*1000).toLocaleString()},{title:'归档大小',dataIndex:'size',render:value=>value===undefined?'—':bytes(value)},{title:'扫描及题卡文件',dataIndex:'asset_count'},{title:'SHA-256',dataIndex:'sha256',ellipsis:true},{title:'操作',render:(_,row)=><Space wrap><Button disabled={busy} onClick={async()=>{try{await downloadArchive(row.id,'考试归档.zip')}catch(e){message.error((e as Error).message)}}}>下载</Button>{!projectDeleted&&<><Button disabled={busy||jobs.active||projectDeleted} onClick={()=>preview(row.id)}>预览释放</Button><Popconfirm title="从此归档恢复扫描文件？" description="逐项校验；现有文件与归档不一致时不会覆盖，当前评分记录保留。" onConfirm={()=>restore(row.id)}><Button disabled={busy||jobs.active||projectDeleted}>恢复扫描文件</Button></Popconfirm></>}</Space>}]} />
   </Card>
     {project&&<FileJobTable jobs={jobs}/>}
     <Modal width={900} title="核对释放清单并再次确认" open={!!plan} onCancel={()=>!busy&&setPlan(null)} maskClosable={!busy} closable={!busy} confirmLoading={busy} onOk={outcome?.status==='completed'?()=>setPlan(null):release} okText={outcome?.status==='completed'?'完成':outcome?.status==='partial'?'重试未完成文件':'确认释放清单中的扫描文件'} okButtonProps={{danger:outcome?.status!=='completed',disabled:outcome?.status!=='completed'&&(!plan?.can_confirm||jobs.active||(plan?.status==='preview'&&plan.expires_at<Date.now()/1000))}} cancelButtonProps={{disabled:busy}}>

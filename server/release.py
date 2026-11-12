@@ -17,7 +17,7 @@ class Busy(HTTPException):
 
 def summary(plan,current):
     files=plan['files']
-    return {'id':plan['id'],'archive_id':plan['archive_id'],'mode':plan['mode'],'expires_at':plan['expires_at'],'status':plan['status'],'can_confirm':plan['actor']==current['id'],'file_count':len(files),'local_bytes':sum(f['size'] for f in files if f['local']),'remote_files':sum(bool(f['remote_id']) for f in files),'files':files[:100],'last_result':{'status':plan['status'],'released_files':plan.get('released_files',0),'failed':plan.get('failed',[])}}
+    return {'id':plan['id'],'archive_id':plan['archive_id'],'mode':plan['mode'],'expires_at':plan['expires_at'],'status':plan['status'],'can_confirm':plan['actor']==current['id'] and not plan.get('invalidated_by_deletion'),'file_count':len(files),'local_bytes':sum(f['size'] for f in files if f['local']),'remote_files':sum(bool(f['remote_id']) for f in files),'files':files[:100],'last_result':{'status':plan['status'],'released_files':plan.get('released_files',0),'failed':plan.get('failed',[])}}
 
 
 @router.get('/release-plans/{identifier}')
@@ -88,6 +88,7 @@ def execute_release(identifier,body,current,progress=None):
     if body.get('confirm') is not True:raise HTTPException(422,'请再次确认释放操作')
     with connect() as db:
         plan=require(db,body.get('plan_id'),'release-plans')
+        if plan.get('invalidated_by_deletion'):raise HTTPException(409,'考试层级已变化，请重新预览释放清单')
         project=require(db,identifier,'projects')
         if plan['project_id']!=identifier or plan['actor']!=current['id']:raise HTTPException(403,'释放清单不属于当前操作')
         if plan['status']=='completed':return {'status':'completed','released_files':plan['released_files'],'failed':[]}
@@ -103,6 +104,7 @@ def execute_release(identifier,body,current,progress=None):
     with connect() as db:
         db.execute('BEGIN IMMEDIATE');scope(db,identifier)
         project=require(db,identifier,'projects');plan=require(db,plan['id'],'release-plans')
+        if plan.get('invalidated_by_deletion'):raise HTTPException(409,'考试层级已变化，请重新预览释放清单')
         if plan['status']=='running' and plan.get('lease_until',0)>time.time():raise Busy('该释放操作仍在运行')
         if project.get('storage_operation',{}).get('until',0)>time.time():raise Busy('项目已有文件操作正在运行')
         operation_token=str(uuid4())
