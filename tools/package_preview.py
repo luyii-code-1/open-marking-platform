@@ -76,7 +76,7 @@ def main() -> None:
                 'scanner_framework': framework, 'scanner_runtime': 'win-x64',
                 'scanner_self_contained': False,
                 'scanner_ui': 'WebView2', 'scanner_protocol': 'omp-scanner-2',
-                'recognition_engine': 'omp-omr-1', 'recognition_runtime_bundled': True,
+                'recognition_engine': 'omp-omr-2', 'recognition_runtime_bundled': True,
                 'offline_project_workspaces': True,
                 'pending': ['User UI acceptance', 'Real Hi-5100S scanner acceptance',
                             'ROS online crop specification and private-bucket validation',

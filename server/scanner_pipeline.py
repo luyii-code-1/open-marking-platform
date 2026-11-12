@@ -23,7 +23,7 @@ def checksum(content): return hashlib.sha256(content).hexdigest()
 def configuration(template):
     fields = ('id', 'name', 'paper', 'sides', 'revision', 'layout_version', 'candidate_length')
     result = {k: template[k] for k in fields if k in template}
-    result['questions'] = [{k: q[k] for k in ('id', 'number', 'type', 'options', 'regions') if k in q} for q in template['questions']]
+    result['questions'] = [{k: q[k] for k in ('id', 'number', 'type', 'options', 'regions', 'choice_style') if k in q} for q in template['questions']]
     return result
 
 
@@ -104,7 +104,8 @@ def image_bytes(file, expected_shape=None):
 
 
 def verify_result(template, side, result, original, normalized, cuts):
-    if result.get('engine_version') != ENGINE_VERSION or result.get('template_id') != template['id'] or result.get('template_revision') != template['revision'] or result.get('config_sha256') != config_hash(template): raise HTTPException(409, '本地识读引擎或题卡版本不匹配')
+    supported={ENGINE_VERSION} if any(q.get('choice_style')=='bracket' for q in template['questions']) else {ENGINE_VERSION,'omp-omr-1'}
+    if result.get('engine_version') not in supported or result.get('template_id') != template['id'] or result.get('template_revision') != template['revision'] or result.get('config_sha256') != config_hash(template): raise HTTPException(409, '本地识读引擎或题卡版本不匹配，请更新扫描端并下载配置')
     if any(result.get(key) != checksum(data) for key, data in (('source_sha256', original), ('normalized_sha256', normalized), ('local_cuts_sha256', cuts))): raise HTTPException(422, '上传文件与本地识读校验值不一致')
     candidate = result.get('candidate_number')
     if side == 'front' and (not isinstance(candidate, str) or len(candidate) != template.get('candidate_length', 8) or any(c not in '0123456789?' for c in candidate)): raise HTTPException(422, '本地考号识读结果无效')
@@ -170,7 +171,7 @@ def upload_processed(identifier: str, file: UploadFile = File(), normalized: Upl
                                    'sha256': result['source_sha256'], 'normalized_sha256': result['normalized_sha256'],
                                    'local_cuts_sha256': result['local_cuts_sha256'], 'local_cuts_normalized_sha256': result['normalized_sha256'],
                                    'local_cuts': result['cuts'], 'candidate_number': result['candidate_number'], 'selections': result['selections'],
-                                   'absent_mark': result['absent_mark'], 'recognition_engine': ENGINE_VERSION, 'recognition_source': 'device',
+                                   'absent_mark': result['absent_mark'], 'recognition_engine': result['engine_version'], 'recognition_source': 'device',
                                    'image_url': f'/api/v1/pages/{capture_id}/image'}, current['id'])
             from .anomalies import check_candidate
             check_candidate(db, page, current['id'])

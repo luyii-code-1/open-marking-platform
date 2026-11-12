@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { Alert, Button, Space, Typography } from 'antd'
 import { requestBlob, type Region, type Template } from './api'
+import { choiceCenters, compactChoice } from './objectiveLayout'
 
 type Drag = { x:number;y:number;qid:string;index?:number;region?:Region }
-export function Paper({value,page,selected,draw,readOnly=false,onSelect,onRegion}:{value:Template;page:number;selected?:string;draw:boolean;readOnly?:boolean;onSelect:(id:string)=>void;onRegion:(id:string,region:Region,index?:number)=>void}) {
+export function Paper({value,page,selected,draw,answerMode=false,readOnly=false,onSelect,onRegion,onAnswer}:{value:Template;page:number;selected?:string;draw:boolean;answerMode?:boolean;readOnly?:boolean;onSelect:(id:string)=>void;onRegion:(id:string,region:Region,index?:number)=>void;onAnswer?:(id:string,letter:string)=>void}) {
   const width=value.paper==='A3'?420:210,height=297,svg=useRef<SVGSVGElement>(null),start=useRef<Drag|null>(null)
+  const [zoom,setZoom]=useState(100)
   const [draft,setDraft]=useState<Region|null>(null),[preview,setPreview]=useState<{url:string;paper:string;page:number;key:string}|null>(null),[error,setError]=useState(''),[retry,setRetry]=useState(0)
-  const currentUrl=useRef(''),payload=JSON.stringify(value),key=`${page}:${payload}`
+  const currentUrl=useRef(''),payload=JSON.stringify({...value,questions:value.questions.map(q=>({...q,answer:[]}))}),key=`${page}:${payload}`
   useEffect(()=>{
     const abort=new AbortController();let cancelled=false
     setError('')
@@ -23,16 +25,29 @@ export function Paper({value,page,selected,draw,readOnly=false,onSelect,onRegion
   },[payload,page,key,retry])
   useEffect(()=>()=>{if(currentUrl.current)URL.revokeObjectURL(currentUrl.current)},[])
   useEffect(()=>{start.current=null;setDraft(null)},[page,value.id])
+  useEffect(()=>{if(answerMode&&selected)svg.current?.querySelector(`[data-question-id="${selected}"]`)?.scrollIntoView({block:'nearest',inline:'nearest'})},[selected,page,answerMode])
+  const objective=value.questions.filter(q=>q.type!=='subjective').sort((a,b)=>a.number-b.number)
+  function answerKey(event:React.KeyboardEvent){
+    if(!answerMode||readOnly||event.ctrlKey||event.metaKey||event.altKey)return
+    const index=Math.max(0,objective.findIndex(q=>q.id===selected)),q=objective[index];if(!q)return
+    const letter=/^[1-5]$/.test(event.key)?'ABCDE'[Number(event.key)-1]:/^[a-e]$/i.test(event.key)?event.key.toUpperCase():''
+    if(letter&&'ABCDE'.slice(0,q.options).includes(letter)){event.preventDefault();onAnswer?.(q.id,letter)}
+    else if(['Enter','6','ArrowRight','ArrowLeft'].includes(event.key)){event.preventDefault();onSelect(objective[Math.max(0,Math.min(objective.length-1,index+(event.key==='ArrowLeft'?-1:1)))].id)}
+  }
   const visible=preview?.paper===value.paper&&preview.page===page?preview:null,pending=preview?.key!==key
   function point(event:React.PointerEvent){const rect=svg.current!.getBoundingClientRect();return{x:Math.max(0,Math.min(width-8,(event.clientX-rect.left)/rect.width*width)),y:Math.max(100,Math.min(height-8,(event.clientY-rect.top)/rect.height*height))}}
   function regionAt(p:{x:number;y:number},s:Drag):Region{return s.region?{...s.region,x:Math.max(0,Math.min(width-8-s.region.width,s.region.x+p.x-s.x)),y:Math.max(100,Math.min(height-8-s.region.height,s.region.y+p.y-s.y))}:{page,x:Math.min(s.x,p.x),y:Math.min(s.y,p.y),width:Math.abs(s.x-p.x),height:Math.abs(s.y-p.y)}}
   function finish(event:React.PointerEvent){const s=start.current;if(s){const next=regionAt(point(event),s);if(next.width>2&&next.height>2)onRegion(s.qid,Object.fromEntries(Object.entries(next).map(([k,v])=>[k,Math.round(v*10)/10])) as Region,s.index)}start.current=null;setDraft(null)}
   return <Space direction="vertical" style={{width:'100%'}}>
+    <Space size={8}><Button size="small" disabled={zoom<=100} onClick={()=>setZoom(v=>v-25)}>缩小</Button><Button size="small" onClick={()=>setZoom(100)}>{zoom}%</Button><Button size="small" disabled={zoom>=300} onClick={()=>setZoom(v=>v+25)}>放大</Button></Space>
     {error?<Alert type="warning" showIcon message="打印预览尚未更新" description={error} action={<Button size="small" onClick={()=>setRetry(v=>v+1)}>重试</Button>}/>:<Typography.Text type="secondary" role="status">{pending?'正在更新打印预览…':'预览已更新'}{pending&&visible?'，下方暂显示上次生成的打印稿。':''}{value.status!=='published'?' · 草稿预览，发布后可导出打印稿。':''}</Typography.Text>}
-    <div className="paper-scroll"><svg ref={svg} className={`paper-svg ${draw?'drawing':''}`} viewBox={`0 0 ${width} ${height}`} aria-label="题卡打印预览与答题区域编辑" onPointerDown={e=>{if(readOnly||!draw||!selected)return;start.current={...point(e),qid:selected};setDraft(null);e.currentTarget.setPointerCapture(e.pointerId)}} onPointerMove={e=>{if(start.current)setDraft(regionAt(point(e),start.current))}} onPointerUp={finish} onPointerCancel={()=>{start.current=null;setDraft(null)}}>
+    <div className="paper-scroll"><svg ref={svg} tabIndex={answerMode?0:undefined} onKeyDown={answerKey} style={{width:`${zoom}%`}} className={`paper-svg ${draw?'drawing':''}`} viewBox={`0 0 ${width} ${height}`} aria-label={answerMode?'点击选项或使用数字键设置标准答案':'题卡打印预览与答题区域编辑'} onPointerDown={e=>{if(answerMode){e.currentTarget.focus();return}if(readOnly||!draw||!selected)return;start.current={...point(e),qid:selected};setDraft(null);e.currentTarget.setPointerCapture(e.pointerId)}} onPointerMove={e=>{if(start.current)setDraft(regionAt(point(e),start.current))}} onPointerUp={finish} onPointerCancel={()=>{start.current=null;setDraft(null)}}>
       <rect width={width} height={height} fill="white"/>
       {visible&&<image href={visible.url} x={0} y={0} width={width} height={height} preserveAspectRatio="none" pointerEvents="none"/>}
-      {value.questions.flatMap(q=>q.regions.map((r,index)=>r.page!==page?null:<rect key={`${q.id}-${index}`} x={r.x} y={r.y} width={r.width} height={r.height} fill={selected===q.id?'#17655b12':'transparent'} stroke={selected===q.id?'#17655b':'transparent'} strokeWidth={.65} onPointerDown={e=>{e.stopPropagation();onSelect(q.id);if(!readOnly&&!draw){start.current={...point(e),qid:q.id,index,region:r};svg.current!.setPointerCapture(e.pointerId)}}}><title>第{q.number}题 · 区域{index+1}</title></rect>))}
+      {value.questions.flatMap(q=>q.regions.map((r,index)=>r.page!==page?null:<g key={`${q.id}-${index}`}>
+        <rect data-question-id={q.id} x={r.x} y={r.y} width={r.width} height={r.height} fill={selected===q.id?'#17655b12':'transparent'} stroke={selected===q.id?'#17655b':'transparent'} strokeWidth={.4} onPointerDown={e=>{e.stopPropagation();onSelect(q.id);svg.current?.focus();if(!readOnly&&!draw&&!answerMode){start.current={...point(e),qid:q.id,index,region:r};svg.current!.setPointerCapture(e.pointerId)}}}><title>第{q.number}题 · 区域{index+1}</title></rect>
+        {answerMode&&q.type!=='subjective'&&choiceCenters(q,r).map(({letter,x,y})=><rect key={letter} role="button" aria-label={`第${q.number}题选项${letter}`} aria-pressed={q.answer.includes(letter)} x={x-(q.choice_style==='bracket'?4:2)} y={y-1.5} width={q.choice_style==='bracket'?compactChoice.width:4} height={3} rx={.4} fill={q.answer.includes(letter)?'#17655b35':'transparent'} stroke={q.answer.includes(letter)?'#17655b':'transparent'} strokeWidth={.3} style={{cursor:readOnly?'default':'pointer'}} onPointerDown={e=>{e.stopPropagation();svg.current?.focus()}} onClick={()=>{if(!readOnly)onAnswer?.(q.id,letter)}}><title>第{q.number}题 · {letter}</title></rect>)}
+      </g>))}
       {draft&&<rect x={draft.x} y={draft.y} width={draft.width} height={draft.height} stroke="#17655b" fill="#17655b20" strokeDasharray="2 1" strokeWidth={.6} pointerEvents="none"/>}
     </svg></div>
   </Space>

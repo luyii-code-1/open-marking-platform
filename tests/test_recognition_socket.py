@@ -25,7 +25,7 @@ def test_worker_authentication_message_bound_and_parent_exit(tmp_path):
                 size=struct.unpack('<I',read(4))[0];return json.loads(read(size))
         assert request({'token':'wrong','method':'ping'})['ok'] is False
         assert request({},length=2*1024*1024+1)['ok'] is False
-        assert request({'token':token,'method':'ping'})['result']['engine_version']=='omp-omr-1'
+        assert request({'token':token,'method':'ping'})['result']['engine_version']=='omp-omr-2'
         assert not list(tmp_path.iterdir())
         process.stdin.close();assert process.wait(timeout=5)==0,process.stderr.read()
     finally:

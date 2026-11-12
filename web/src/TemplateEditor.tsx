@@ -16,6 +16,7 @@ export function TemplateEditor({ groupId }: { groupId?: string }) {
   const templates = useResource<Template[]>('/templates', []), groups = useResource<Row[]>('/groups', [])
   const [value, setValue] = useState<Template>(() => emptyTemplate(groupId)), [questionId, setQuestionId] = useState(''), [page, setPage] = useState(1), [draw, setDraw] = useState(true)
   const [saving, setSaving] = useState(false), [dirty, setDirty] = useState(false), [pane, setPane] = useState('objective'), [settingsOpen, setSettingsOpen] = useState(false)
+  const [answerMode,setAnswerMode]=useState(true)
   const initialized = useRef(''), { message, modal } = App.useApp()
   const saved = templates.data.filter(t => !groupId || t.group_id === groupId), readOnly = value.status === 'published'
   const question = value.questions.find(q => q.id === questionId), total = value.questions.reduce((sum, q) => sum + Number(q.points || 0), 0)
@@ -38,6 +39,13 @@ export function TemplateEditor({ groupId }: { groupId?: string }) {
     if (q) { setPane(q.type === 'subjective' ? 'subjective' : 'objective'); if (q.regions[0]) setPage(q.regions[0].page) }
     if (edit) setSettingsOpen(true)
   }
+  function answerOnCard(id:string,letter:string){
+    const q=value.questions.find(q=>q.id===id);if(!q||readOnly)return
+    const answer=q.type==='single'?[letter]:q.answer.includes(letter)?q.answer.filter(a=>a!==letter):[...q.answer,letter].sort()
+    change({questions:value.questions.map(item=>item.id===id?{...item,answer}:item)})
+    const rows=value.questions.filter(item=>item.type!=='subjective').sort((a,b)=>a.number-b.number),index=rows.findIndex(item=>item.id===id)
+    select(q.type==='single'?rows[Math.min(index+1,rows.length-1)].id:id)
+  }
   function patchQuestion(patch: Partial<Question>) {
     if (!question) return
     if (patch.number && value.questions.some(q => q.id !== question.id && q.number === patch.number)) { message.warning('该题号已存在'); return }
@@ -45,7 +53,7 @@ export function TemplateEditor({ groupId }: { groupId?: string }) {
     if (patch.type) setPane(patch.type === 'subjective' ? 'subjective' : 'objective')
   }
   function load(template: Template) {
-    const apply = () => { setValue(structuredClone(template)); setQuestionId(''); setPage(1); setDirty(false); setSettingsOpen(false); setPane(template.questions.some(q => q.type !== 'subjective') ? 'objective' : template.questions.length ? 'subjective' : 'setup') }
+    const apply = () => { setValue(structuredClone(template)); setQuestionId(''); setPage(1); setDirty(false); setSettingsOpen(false); setAnswerMode(template.questions.some(q=>q.type!=='subjective')); setPane(template.questions.some(q => q.type !== 'subjective') ? 'objective' : template.questions.length ? 'subjective' : 'setup') }
     if (dirty) modal.confirm({ title: '切换题卡前放弃未保存修改？', onOk: apply }); else apply()
   }
   async function save(publish = false) {
@@ -84,16 +92,16 @@ export function TemplateEditor({ groupId }: { groupId?: string }) {
       <Space wrap><Text type="secondary">{value.questions.length} 题 · {total} 分</Text><Tag color={readOnly ? 'green' : dirty ? 'orange' : 'default'}>{readOnly ? '已发布' : dirty ? '未保存' : '草稿'}</Tag><Button icon={<SaveOutlined />} disabled={readOnly} loading={saving} onClick={() => save()}>保存草稿</Button><Button type="primary" disabled={readOnly} loading={saving} onClick={() => modal.confirm({ title: '审查并发布题卡？', content: '发布后固定版式与评分定义，后续修改需复制为新草稿。', onOk: () => save(true) })}>审查发布</Button><Button icon={<DownloadOutlined />} disabled={!value.id || dirty || !readOnly} aria-label="导出打印PDF" onClick={async () => { try { await download(`/templates/${value.id}/pdf`, `${value.name}.pdf`) } catch (e) { message.error((e as Error).message) } }}>打印稿</Button></Space>
     </div></Card>
     <div className="template-workbench">
-      <Card className="template-config"><Tabs activeKey={pane} onChange={setPane} items={[
+      <Card className="template-config"><Tabs activeKey={pane} onChange={key=>{setPane(key);setAnswerMode(key==='objective')}} items={[
         { key: 'setup', label: '题卡设置', children: setup },
         { key: 'objective', label: '客观题', children: <ObjectiveEditor value={value} page={page} readOnly={readOnly} selected={questionId} onChange={questions => change({ questions })} onSelect={id => select(id)} onEdit={id => select(id, true)} /> },
         { key: 'subjective', label: '主观题', children: <div className="editor-section"><Button icon={<PlusOutlined />} disabled={readOnly} onClick={() => { const q = newQuestion(Math.max(0, ...value.questions.map(q => q.number)) + 1); change({ questions: [...value.questions, q] }); setQuestionId(q.id); setSettingsOpen(true) }}>添加主观题</Button><Table rowKey="id" size="middle" dataSource={subjective} pagination={{ defaultPageSize: 10 }} locale={{ emptyText: <Empty description="添加主观题后，在预览中框选答题区域" /> }} columns={[{ title: '题号', dataIndex: 'number' }, { title: '分值', dataIndex: 'points' }, { title: '区域', render: (_, q) => q.regions.length ? `${q.regions.length} 个` : '待框选' }, { title: '', render: (_, q) => <Button type="link" onClick={() => select(q.id, true)}>设置</Button> }]} /></div> },
       ]} /></Card>
-      <Card className="template-preview" title="打印预览" extra={<Space wrap><Radio.Group value={page} onChange={event => setPage(event.target.value)} options={Array.from({ length: value.sides }, (_, i) => ({ label: i === 0 ? '正面' : '背面', value: i + 1 }))} />{!readOnly && <Radio.Group value={draw} onChange={event => setDraw(event.target.value)} options={[{ label: '框选', value: true }, { label: '移动', value: false }]} />}</Space>}>
-        <Paper value={value} page={page} selected={questionId} draw={draw} readOnly={readOnly} onSelect={id => { setQuestionId(id); const q=value.questions.find(q=>q.id===id); if(q)setPane(q.type==='subjective'?'subjective':'objective') }} onRegion={(id, region, index) => change({ questions: value.questions.map(q => q.id === id ? { ...q, regions: index === undefined ? [...q.regions, region] : q.regions.map((r, i) => i === index ? region : r) } : q) })} />
-        {!readOnly && question && <Text type="secondary" className="preview-selection">当前选择第 {question.number} 题 · 在预览上拖动可{draw ? '添加答题区' : '移动已有区域'}</Text>}
+      <Card className="template-preview" title="打印预览" extra={<Space wrap><Radio.Group value={page} onChange={event => setPage(event.target.value)} options={Array.from({ length: value.sides }, (_, i) => ({ label: i === 0 ? '正面' : '背面', value: i + 1 }))} />{!readOnly && <Radio.Group value={answerMode?'answer':draw?'draw':'move'} onChange={event=>{setAnswerMode(event.target.value==='answer');setDraw(event.target.value==='draw')}} options={[{label:'设答案',value:'answer'},{label:'框选',value:'draw'},{label:'移动',value:'move'}]} />}</Space>}>
+        <Paper value={value} page={page} selected={questionId} draw={draw&&!answerMode} answerMode={answerMode} readOnly={readOnly} onAnswer={answerOnCard} onSelect={id=>select(id)} onRegion={(id, region, index) => change({ questions: value.questions.map(q => q.id === id ? { ...q, regions: index === undefined ? [...q.regions, region] : q.regions.map((r, i) => i === index ? region : r) } : q) })} />
+        {!readOnly && <Text type="secondary" className="preview-selection">{answerMode?'点选图卡选项，或按1–5/A–E设答案；单选自动下一题，多选按Enter继续。':question?`当前选择第 ${question.number} 题 · 在预览上拖动可${draw?'添加答题区':'移动已有区域'}`:''}</Text>}
       </Card>
     </div>
-    <QuestionSettings question={question} open={settingsOpen} readOnly={readOnly} onClose={() => setSettingsOpen(false)} onChange={patchQuestion} onDraw={() => { setDraw(true); setSettingsOpen(false) }} onDelete={() => { if (!question) return; change({ questions: value.questions.filter(q => q.id !== question.id) }); setQuestionId(''); setSettingsOpen(false) }} />
+    <QuestionSettings question={question} open={settingsOpen} readOnly={readOnly} onClose={() => setSettingsOpen(false)} onChange={patchQuestion} onDraw={() => { setDraw(true); setAnswerMode(false); setSettingsOpen(false) }} onDelete={() => { if (!question) return; change({ questions: value.questions.filter(q => q.id !== question.id) }); setQuestionId(''); setSettingsOpen(false) }} />
   </div>
 }

@@ -23,6 +23,7 @@ from .omr import ABSENT_X, ABSENT_Y, dimensions, code, bubbles, decode, align, m
 
 def validate(template):
     w,h=dimensions(template)
+    compact=any(q.get('choice_style')=='bracket' for q in template.get('questions',[]))
     if not isinstance(template.get('candidate_length',8),int) or not 1<=template.get('candidate_length',8)<=20: raise ValueError('准考证号长度应为1至20位')
     occupied=[]
     for question in template.get('questions',[]):
@@ -34,7 +35,11 @@ def validate(template):
                 raise ValueError('答题区超出纸张有效范围')
             if region['y']<100:
                 raise ValueError('请将答题区放在100毫米以下，保留标题及考号区域')
-            if question['type']!='subjective' and (region['width']<12+question.get('options',4)*6 or region['height']<14): raise ValueError('客观题区域不足以容纳选项')
+            bracket=question.get('choice_style')=='bracket'
+            if question.get('choice_style') not in (None,'bracket'):raise ValueError('选择题填涂样式无效')
+            minimum_width=20+(question.get('options',4)-1)*9.5 if bracket else 12+question.get('options',4)*6
+            if question['type']!='subjective' and (region['width']<minimum_width or region['height']<(6 if bracket else 14)): raise ValueError('客观题区域不足以容纳选项')
+            if compact and region['x']<110 and region['x']+region['width']>12 and region['y']<h-26 and region['y']+region['height']>h-38:raise ValueError('答题区与页脚灰度校准区域重叠')
             for previous in occupied:
                 if previous['page']==region['page'] and region['x']<previous['x']+previous['width'] and previous['x']<region['x']+region['width'] and region['y']<previous['y']+previous['height'] and previous['y']<region['y']+region['height']: raise ValueError('答题区域重叠')
             occupied.append(region)
@@ -90,6 +95,13 @@ def pdf(template):
                     y=57+digit*3.5
                     c.rect((x-1.6)*mm,(h-y-1.2)*mm,3.2*mm,2.4*mm)
                     c.setFont('Helvetica',5); c.drawCentredString(x*mm,(h-y-.6)*mm,str(digit))
+        column_tops={}
+        for q in template.get('questions',[]):
+            if q.get('choice_style')=='bracket' and q['type']!='subjective':
+                for r in q['regions']:
+                    if int(r['page'])==page:column_tops[r['x']]=min(column_tops.get(r['x'],r['y']),r['y'])
+        c.setFont('STSong-Light',8)
+        for x,top in column_tops.items():c.drawString((x+2)*mm,(h-top+2)*mm,'题号')
         for question in template.get('questions',[]):
             for region in question['regions']:
                 if int(region['page'])!=page: continue
@@ -97,12 +109,21 @@ def pdf(template):
                 c.setFont('STSong-Light',9)
                 if question['type']!='subjective':
                     c.setFillColorRGB(1,1,1);c.rect(x*mm,(h-y-rh)*mm,rw*mm,rh*mm,fill=1,stroke=0);c.setFillColorRGB(0,0,0)
-                c.rect(x*mm,(h-y-rh)*mm,rw*mm,rh*mm)
-                c.drawString((x+2)*mm,(h-y-5)*mm,str(question['number']))
+                bracket=question['type']!='subjective' and question.get('choice_style')=='bracket'
+                if not bracket:c.rect(x*mm,(h-y-rh)*mm,rw*mm,rh*mm)
+                if bracket:c.setFont('Helvetica',2.8*mm)
+                c.drawString((x+2)*mm,(h-y-(3.8 if bracket else 5))*mm,str(question['number']))
                 if question['type']!='subjective':
                     for label,bx,by in bubbles(question,region):
-                        c.rect((bx-2)*mm,(h-by-1.5)*mm,4*mm,3*mm)
-                        c.setFont('Helvetica',6); c.drawCentredString(bx*mm,(h-by-.8)*mm,label)
+                        if bracket:
+                            c.setLineWidth(.17*mm)
+                            for direction in (-1,1):
+                                edge=bx+direction*4;inner=edge-direction*.7
+                                path=c.beginPath();path.moveTo(inner*mm,(h-by+1.15)*mm);path.lineTo(edge*mm,(h-by+1.15)*mm);path.lineTo(edge*mm,(h-by-1.15)*mm);path.lineTo(inner*mm,(h-by-1.15)*mm);c.drawPath(path)
+                            c.setFont('Helvetica',1.95*mm);c.drawCentredString(bx*mm,(h-by-.6)*mm,label);c.setLineWidth(1)
+                        else:
+                            c.rect((bx-2)*mm,(h-by-1.5)*mm,4*mm,3*mm)
+                            c.setFont('Helvetica',6); c.drawCentredString(bx*mm,(h-by-.8)*mm,label)
                 else:
                     c.setStrokeColorRGB(.7,.7,.7)
                     style=question.get('style','none' if background_id else 'line')
@@ -124,6 +145,13 @@ def pdf(template):
                         try:asset=materialize('assets/'+question['image_asset_id']+'.png')
                         except FileNotFoundError:raise ValueError('题卡插图不存在')
                         c.drawImage(str(asset),(x+3)*mm,(h-y-rh+3)*mm,width=(rw-6)*mm,height=min(rh-12,question.get('image_height',25))*mm,preserveAspectRatio=True,anchor='c',mask='auto')
+        if any(q.get('choice_style')=='bracket' for q in template.get('questions',[])):
+            c.setFillGray(1);c.rect(12*mm,26*mm,98*mm,12*mm,fill=1,stroke=0);c.setFillGray(0)
+            c.setFont('STSong-Light',8);c.drawString(12*mm,30*mm,'灰度校准 · 请勿填涂')
+            for index,gray in enumerate((255,192,128,64,0)):
+                c.setFillGray(gray/255);c.rect((62+index*8)*mm,29*mm,6*mm,5*mm,fill=1,stroke=0)
+                c.setFillGray(0);c.setLineWidth(.12*mm);c.rect((62+index*8)*mm,29*mm,6*mm,5*mm,fill=0,stroke=1)
+            c.setLineWidth(1)
         c.showPage()
     c.save()
     return output.getvalue()

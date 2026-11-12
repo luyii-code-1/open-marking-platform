@@ -50,8 +50,8 @@ def run(scanner_dll=None,bundled=False):
                 project=post('projects',{'name':'离线工作区验证'});subject=post('subjects',{'project_id':project['id'],'name':'语文','group_mode':'default'});group_id=subject['default_group_id']
                 cls=post('classes',{'name':'一班','grade':'10'});post('students',{'class_id':cls['id'],'name':'学生','candidate_number':'123'})
                 template=post('templates',{'group_id':group_id,'name':'本机双面卷','paper':'A4','sides':2,'candidate_length':3,'questions':[
-                    {'number':1,'type':'single','points':3,'options':4,'answer':['B'],'regions':[{'page':1,'x':15,'y':110,'width':90,'height':20},{'page':1,'x':15,'y':140,'width':90,'height':20}]},
-                    {'number':2,'type':'single','points':2,'options':4,'answer':['A'],'regions':[{'page':2,'x':15,'y':110,'width':90,'height':20}]}]})
+                    {'number':1,'type':'single','choice_style':'bracket','points':3,'options':4,'answer':['B'],'regions':[{'page':1,'x':15,'y':110,'width':90,'height':20},{'page':1,'x':15,'y':140,'width':90,'height':20}]},
+                    {'number':2,'type':'single','choice_style':'bracket','points':2,'options':4,'answer':['A'],'regions':[{'page':2,'x':15,'y':110,'width':90,'height':20}]}]})
                 template=post('templates/'+template['id']+'/publish',None)
                 pdf=root/'sheet.pdf';pdf.write_bytes(paper.pdf(template));renderer=shutil.which('pdftoppm')
                 if not renderer:raise RuntimeError('需要Poppler生成扫描样本')

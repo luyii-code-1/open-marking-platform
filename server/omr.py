@@ -5,7 +5,7 @@ import numpy as np
 import zxingcpp
 
 ABSENT_X, ABSENT_Y = 124, 45
-ENGINE_VERSION = "omp-omr-1"
+ENGINE_VERSION = "omp-omr-2"
 
 
 def dimensions(template):
@@ -18,6 +18,7 @@ def code(template,side):
 
 def bubbles(question,region):
     count=int(question.get('options',4))
+    if question.get('choice_style')=='bracket':return [(chr(65+i),region['x']+14+i*9.5,region['y']+3) for i in range(count)]
     spacing=min(12,(region['width']-12)/count)
     return [(chr(65+i),region['x']+12+i*spacing,region['y']+7) for i in range(count)]
 
@@ -96,9 +97,15 @@ def absent_mark(normalized,side,template=None):
 
 def recognize(image,template,side,corners=None):
     normalized=manual_align(image,template,corners) if corners is not None else align(image,template)
-    def ink(x,y):
-        crop=normalized[round((y-.75)*4):round((y+.75)*4),round((x-1.1)*4):round((x+1.1)*4)]
-        return float(np.mean(crop<135)) if crop.size else 0
+    calibrated=135
+    if any(q.get('choice_style')=='bracket' for q in template.get('questions',[])):
+        _,height=dimensions(template)
+        levels=[float(np.median(normalized[round((height-33)*4):round((height-30)*4),round((63+i*8)*4):round((67+i*8)*4)])) for i in range(5)]
+        if levels[0]-levels[4]>60 and all(a>=b-12 for a,b in zip(levels,levels[1:])):calibrated=(levels[0]+levels[1])/2
+    def ink(x,y,compact=False):
+        radius=2.6 if compact else 1.1
+        crop=normalized[round((y-.75)*4):round((y+.75)*4),round((x-radius)*4):round((x+radius)*4)]
+        return float(np.mean(crop<(calibrated if compact else 135))) if crop.size else 0
     candidate=None
     if side=='front':
         digits=[]
@@ -111,6 +118,6 @@ def recognize(image,template,side,corners=None):
         if question['type']=='subjective': continue
         for region in question['regions']:
             if int(region['page'])==(1 if side=='front' else 2):
-                selections[question['id']]=[label for label,x,y in bubbles(question,region) if ink(x,y)>.45]
+                selections[question['id']]=[label for label,x,y in bubbles(question,region) if ink(x,y,question.get('choice_style')=='bracket')>.45]
     return normalized,candidate,selections
 
