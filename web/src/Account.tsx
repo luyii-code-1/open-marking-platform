@@ -4,7 +4,6 @@ import { Button } from './Button'
 import { send, useResource, type Row, type User } from './api'
 import { registerPasskey } from './passkeys'
 import { useAction } from './useAction'
-import { InstallApplication } from './PwaStatus'
 
 export function Account({user,onProfile,onLogout}:{user:User;onProfile:(user:User)=>void;onLogout:()=>void}) {
   const [password,setPassword]=useState(''),[codes,setCodes]=useState<string[]>([])
@@ -36,7 +35,6 @@ export function Account({user,onProfile,onLogout}:{user:User;onProfile:(user:Use
         {title:'操作',width:100,render:(_,row)=><Button danger disabled={action.busy||passwordAction.busy} loading={action.pending===`revoke:${row.id}`} onClick={()=>act(`revoke:${row.id}`,async()=>{await send(`/auth/passkeys/${row.id}/revoke`,{password});await passkeys.reload();message.success('密钥已撤销')})}>撤销</Button>},
       ]}/>
     </Card>
-    <Card title="应用"><InstallApplication/></Card>
     <Modal title="保存恢复码" open={!!codes.length} onCancel={()=>setCodes([])} footer={<Button onClick={()=>setCodes([])}>已保存，关闭</Button>}>
       <Typography.Paragraph>这些恢复码只在此时展示，请保存到你可以安全取用的位置。</Typography.Paragraph><Input.TextArea readOnly rows={8} value={codes.join('\n')}/>
     </Modal>
