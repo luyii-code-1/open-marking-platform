@@ -44,7 +44,7 @@ export function TemplateEditor({ groupId }: { groupId?: string }) {
     const answer=q.type==='single'?[letter]:q.answer.includes(letter)?q.answer.filter(a=>a!==letter):[...q.answer,letter].sort()
     change({questions:value.questions.map(item=>item.id===id?{...item,answer}:item)})
     const rows=value.questions.filter(item=>item.type!=='subjective').sort((a,b)=>a.number-b.number),index=rows.findIndex(item=>item.id===id)
-    select(q.type==='single'?rows[Math.min(index+1,rows.length-1)].id:id)
+    if(q.type==='single')select(rows[Math.min(index+1,rows.length-1)].id);else setQuestionId(id)
   }
   function patchQuestion(patch: Partial<Question>) {
     if (!question) return
@@ -98,7 +98,7 @@ export function TemplateEditor({ groupId }: { groupId?: string }) {
         { key: 'subjective', label: '主观题', children: <div className="editor-section"><Button icon={<PlusOutlined />} disabled={readOnly} onClick={() => { const q = newQuestion(Math.max(0, ...value.questions.map(q => q.number)) + 1); change({ questions: [...value.questions, q] }); setQuestionId(q.id); setSettingsOpen(true) }}>添加主观题</Button><Table rowKey="id" size="middle" dataSource={subjective} pagination={{ defaultPageSize: 10 }} locale={{ emptyText: <Empty description="添加主观题后，在预览中框选答题区域" /> }} columns={[{ title: '题号', dataIndex: 'number' }, { title: '分值', dataIndex: 'points' }, { title: '区域', render: (_, q) => q.regions.length ? `${q.regions.length} 个` : '待框选' }, { title: '', render: (_, q) => <Button type="link" onClick={() => select(q.id, true)}>设置</Button> }]} /></div> },
       ]} /></Card>
       <Card className="template-preview" title="打印预览" extra={<Space wrap><Radio.Group value={page} onChange={event => setPage(event.target.value)} options={Array.from({ length: value.sides }, (_, i) => ({ label: i === 0 ? '正面' : '背面', value: i + 1 }))} />{!readOnly && <Radio.Group value={answerMode?'answer':draw?'draw':'move'} onChange={event=>{setAnswerMode(event.target.value==='answer');setDraw(event.target.value==='draw')}} options={[{label:'设答案',value:'answer'},{label:'框选',value:'draw'},{label:'移动',value:'move'}]} />}</Space>}>
-        <Paper value={value} page={page} selected={questionId} draw={draw&&!answerMode} answerMode={answerMode} readOnly={readOnly} onAnswer={answerOnCard} onSelect={id=>select(id)} onRegion={(id, region, index) => change({ questions: value.questions.map(q => q.id === id ? { ...q, regions: index === undefined ? [...q.regions, region] : q.regions.map((r, i) => i === index ? region : r) } : q) })} />
+        <Paper value={value} page={page} selected={questionId} draw={draw&&!answerMode} answerMode={answerMode} readOnly={readOnly} onAnswer={answerOnCard} onSelect={(id,targetPage)=>{setQuestionId(id);const q=value.questions.find(q=>q.id===id);if(q)setPane(q.type==='subjective'?'subjective':'objective');if(targetPage)setPage(targetPage)}} onRegion={(id, region, index) => change({ questions: value.questions.map(q => q.id === id ? { ...q, regions: index === undefined ? [...q.regions, region] : q.regions.map((r, i) => i === index ? region : r) } : q) })} />
         {!readOnly && <Text type="secondary" className="preview-selection">{answerMode?'点选图卡选项，或按1–5/A–E设答案；单选自动下一题，多选按Enter继续。':question?`当前选择第 ${question.number} 题 · 在预览上拖动可${draw?'添加答题区':'移动已有区域'}`:''}</Text>}
       </Card>
     </div>

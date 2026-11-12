@@ -4,7 +4,7 @@ import { requestBlob, type Region, type Template } from './api'
 import { choiceCenters, compactChoice } from './objectiveLayout'
 
 type Drag = { x:number;y:number;qid:string;index?:number;region?:Region }
-export function Paper({value,page,selected,draw,answerMode=false,readOnly=false,onSelect,onRegion,onAnswer}:{value:Template;page:number;selected?:string;draw:boolean;answerMode?:boolean;readOnly?:boolean;onSelect:(id:string)=>void;onRegion:(id:string,region:Region,index?:number)=>void;onAnswer?:(id:string,letter:string)=>void}) {
+export function Paper({value,page,selected,draw,answerMode=false,readOnly=false,onSelect,onRegion,onAnswer}:{value:Template;page:number;selected?:string;draw:boolean;answerMode?:boolean;readOnly?:boolean;onSelect:(id:string,page?:number)=>void;onRegion:(id:string,region:Region,index?:number)=>void;onAnswer?:(id:string,letter:string)=>void}) {
   const width=value.paper==='A3'?420:210,height=297,svg=useRef<SVGSVGElement>(null),start=useRef<Drag|null>(null)
   const [zoom,setZoom]=useState(100)
   const [draft,setDraft]=useState<Region|null>(null),[preview,setPreview]=useState<{url:string;paper:string;page:number;key:string}|null>(null),[error,setError]=useState(''),[retry,setRetry]=useState(0)
@@ -32,7 +32,7 @@ export function Paper({value,page,selected,draw,answerMode=false,readOnly=false,
     const index=Math.max(0,objective.findIndex(q=>q.id===selected)),q=objective[index];if(!q)return
     const letter=/^[1-5]$/.test(event.key)?'ABCDE'[Number(event.key)-1]:/^[a-e]$/i.test(event.key)?event.key.toUpperCase():''
     if(letter&&'ABCDE'.slice(0,q.options).includes(letter)){event.preventDefault();onAnswer?.(q.id,letter)}
-    else if(['Enter','6','ArrowRight','ArrowLeft'].includes(event.key)){event.preventDefault();onSelect(objective[Math.max(0,Math.min(objective.length-1,index+(event.key==='ArrowLeft'?-1:1)))].id)}
+    else if(['Enter','6','ArrowRight','ArrowLeft'].includes(event.key)){event.preventDefault();const next=objective[Math.max(0,Math.min(objective.length-1,index+(event.key==='ArrowLeft'?-1:1)))];onSelect(next.id,next.regions[0]?.page)}
   }
   const visible=preview?.paper===value.paper&&preview.page===page?preview:null,pending=preview?.key!==key
   function point(event:React.PointerEvent){const rect=svg.current!.getBoundingClientRect();return{x:Math.max(0,Math.min(width-8,(event.clientX-rect.left)/rect.width*width)),y:Math.max(100,Math.min(height-8,(event.clientY-rect.top)/rect.height*height))}}
