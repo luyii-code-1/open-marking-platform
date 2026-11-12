@@ -10,6 +10,7 @@
     "test:pwa": "node tools/test-worker.mjs",
     "test:navigation": "node tools/test-exam-navigation.mjs",
     "test:objective": "node tools/test-objective-layout.mjs",
+    "test:review-interaction": "node tools/test-review-interaction.mjs",
     "test:review-offline": "node tools/test-review-offline.mjs",
     "test:auto-update": "node tools/test-auto-update.mjs",
     "test:actions": "node tools/test-actions.mjs",
