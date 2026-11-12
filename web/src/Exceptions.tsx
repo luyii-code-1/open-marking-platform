@@ -45,7 +45,7 @@ export function Exceptions({groupId}:{groupId?:string}) {
         {item.evidence&&<Alert type="info" message="触发依据" description={<pre style={{whiteSpace:'pre-wrap'}}>{JSON.stringify(item.evidence,null,2)}</pre>}/>}
         {details.data.answer_image_url&&<AssetImage src={details.data.answer_image_url}/>}
         <Tabs items={details.data.pages.map((page:Row)=>({key:page.id,label:`${page.side==='front'?'正面':'背面'} · 序号 ${page.sequence}`,children:<><Typography.Paragraph>识读选项：{Object.entries(page.selections).map(([number,answer])=>`第${number}题 ${(answer as string[]).join('、')||'空白'}`).join('；')||'无客观题记录'}</Typography.Paragraph><AssetImage src={page.image_url}/></>}))}/>
-        <Typography.Paragraph type="secondary">需要修改考号、选项、补扫或答题区域时，请先在“扫描批次 → 纠正与补扫”保存更正，再记录核查结论。</Typography.Paragraph>
+        <Typography.Paragraph type="secondary">需要修改考号、选项、补扫或答题区域时，请先在“扫描批次 / 纠正与补扫”保存更正，再记录核查结论。</Typography.Paragraph>
       </Space>}
       <Input.TextArea rows={3} value={resolution} onChange={e=>setResolution(e.target.value)} placeholder="填写核查结论与处理结果"/>
     </Modal>

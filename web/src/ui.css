@@ -2,10 +2,11 @@
 *{box-sizing:border-box}body{margin:0}button,input{font:inherit}
 :focus-visible{outline:2px solid #0866ff;outline-offset:2px}
 .ant-btn{white-space:nowrap}
-.ant-btn-loading{position:relative}
-.ant-btn-loading>.ant-btn-loading-icon{position:absolute!important;inset-inline-start:50%;top:50%;transform:translate(-50%,-50%);width:1em!important;max-width:1em!important;margin:0!important;visibility:visible!important;transition:none!important}
-.ant-btn-loading>span:not(.ant-btn-loading-icon){opacity:0}
-.ant-btn-loading>.ant-btn-loading-icon .anticon{margin:0!important}
+.ant-btn.ant-btn-loading{position:relative;overflow:hidden}
+.ant-btn.ant-btn-loading>.ant-btn-icon{position:absolute!important;inset:0!important;display:grid!important;place-items:center;transform:none!important;width:auto!important;max-width:none!important;height:auto!important;margin:0!important;opacity:1!important;pointer-events:none;transition:none!important;letter-spacing:normal!important}
+.ant-btn.ant-btn-loading>span:not(.ant-btn-icon){opacity:0}
+.ant-btn.ant-btn-loading>.ant-btn-icon .anticon{margin:0!important;display:inline-flex;line-height:1}
+.ant-btn .anticon{flex-shrink:0;vertical-align:-.125em}
 .ant-table-content{overflow-x:auto}
 .ant-table-cell .ant-space{flex-wrap:nowrap!important;white-space:nowrap}
 .ant-table-thead>tr>th{white-space:nowrap}

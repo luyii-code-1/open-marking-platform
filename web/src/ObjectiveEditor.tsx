@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import { Alert, App, Collapse, Empty, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd'
 import { Button } from './Button'
-import { PlusOutlined } from '@ant-design/icons'
+import { PlusOutlined, LeftOutlined, RightOutlined } from '@ant-design/icons'
 import type { Question, Template } from './api'
 import { addObjective, applyAnswers, arrangeObjective, answerLetters, parseAnswer } from './objectiveLayout'
 
@@ -60,7 +60,7 @@ export function ObjectiveEditor({ value, page, readOnly, selected, onChange, onE
         <Text type="secondary">{index + 1} / {rows.length} · {current.type === 'single' ? '单选题' : '多选题'}</Text><Title level={3}>第 {current.number} 题</Title>
         <div className="answer-buttons">{[...answerLetters.slice(0, current.options)].map(letter => <Button size="large" key={letter} type={current.answer.includes(letter) ? 'primary' : 'default'} onClick={() => choose(letter)}>{letter}</Button>)}</div>
         <Text type="secondary">数字 1–5 对应 A–E。单选自动下一题，多选按 Enter 或 6 继续。</Text>
-        <Space className="answer-pagination"><Button disabled={index === 0} onClick={() => { setIndex(i => i - 1); keys.current?.focus() }}>上一题</Button><Button disabled={index >= rows.length - 1} onClick={() => { setIndex(i => i + 1); keys.current?.focus() }}>下一题</Button></Space>
+        <Space className="answer-pagination"><Button icon={<LeftOutlined />} disabled={index === 0} onClick={() => { setIndex(i => i - 1); keys.current?.focus() }}>上一题</Button><Button icon={<RightOutlined />} iconPosition="end" disabled={index >= rows.length - 1} onClick={() => { setIndex(i => i + 1); keys.current?.focus() }}>下一题</Button></Space>
       </div>}
       <Collapse items={[{ key: 'paste', label: '粘贴整组答案', children: <Space direction="vertical" size={16} style={{ width: '100%' }}><Text type="secondary">按题号顺序用空格或换行分隔，例如 A BC D；也可每行填写“1: A”。全为单选时支持连续字母。</Text><Input.TextArea rows={6} value={pasted} onChange={event => { setPasted(event.target.value); setPasteError('') }} aria-label="整组答案" />{pasteError && <Alert type="error" message={pasteError} />}<Button onClick={() => { try { onChange(applyAnswers(value.questions, pasted)); setPasteError(''); message.success('答案已校验并填入') } catch (e) { setPasteError((e as Error).message) } }}>校验并填入答案</Button></Space> }]} />
     </Modal>

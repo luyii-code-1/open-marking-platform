@@ -1,3 +1,4 @@
+import { MoreOutlined, DownOutlined } from '@ant-design/icons'
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { Alert, App, Breadcrumb, Card, Checkbox, Collapse, ConfigProvider, Descriptions, Drawer, Dropdown, Empty, Form, Input, Modal, Select, Space, Table, Tabs, Tag, Typography } from 'antd'
@@ -76,7 +77,7 @@ function Scanner() {
       { key: 'connect', label: '连接服务器', disabled: locked, onClick: () => { connectForm.setFieldsValue({ server_url: state?.server_url }); setConnection(true) } },
       { key: 'online', label: '打开服务端页面', disabled: !state?.server_url || locked, onClick: () => action('onlinePage') },
       { key: 'offline', label: '打开离线页面', disabled: locked, onClick: () => action('offlinePage') },
-    ] }}><Button>连接设置</Button></Dropdown></Space></header>
+    ] }}><Button icon={<DownOutlined />} iconPosition="end">连接设置</Button></Dropdown></Space></header>
     <main className="scanner-content"><Breadcrumb items={crumbs} />
       {!state?.online && <Typography.Paragraph className="scanner-offline" type="secondary">已下载的项目可继续扫描；联网后校验版本并上传。</Typography.Paragraph>}
       {error && <Alert type="error" message={error} />}
@@ -95,14 +96,14 @@ function Scanner() {
                 { key: 'pair', label: '核对并确认本批次', disabled: locked || batch.status !== 'open', onClick: () => modal.confirm({ title: '已核对本批次纸张与考号？', content: '客户端完成本地配页后，继续上传剩余文件；服务器确认后进入阅卷。', okText: '确认批次', onOk: () => action('pair', { batch_id: batchId }) }) },
                 { key: 'upload', label: state.syncing ? '正在同步队列' : '立即同步队列', disabled: busy || state.syncing, onClick: () => action('upload', { batch_id: batchId }) },
                 { key: 'refresh', label: '刷新服务端状态', disabled: locked || !state.online, onClick: () => action('refreshBatch', { batch_id: batchId }) },
-              ] }}><Button>更多操作</Button></Dropdown>
+              ] }}><Button icon={<DownOutlined />} iconPosition="end">更多操作</Button></Dropdown>
             </Space></div>
               {batch.error && <Alert type="warning" message={batch.error} />}
               <Collapse defaultActiveKey={['device']} items={[{ key: 'device', label: '设备设置', children: <Space wrap size={12}><Select aria-label="驱动接口" value={driver} disabled={locked} style={{ width: 130 }} onChange={value => { setDriver(value); setDevices([]); setDevice('') }} options={[{ value: 'Twain', label: 'TWAIN' }, { value: 'Wia', label: 'WIA' }, { value: 'Escl', label: 'eSCL' }]} /><Button loading={busyKey===actionKey('devices')} disabled={locked} onClick={() => action('devices', { driver }, rows => { setDevices(rows); setDevice(rows[0]?.id || '') })}>发现扫描仪</Button><Select aria-label="扫描仪" placeholder="选择扫描仪" disabled={locked} value={device || undefined} style={{ minWidth: 260 }} options={devices.map(d => ({ value: d.id, label: d.name }))} onChange={setDevice} />{batch.capture_mode !== 'duplex' && batch.sides === 2 && <Select aria-label="扫描面" disabled={locked} value={side} onChange={setSide} options={[{ value: 'front', label: '正面' }, { value: 'back', label: '背面' }]} />}</Space> }]} />
               <Typography.Paragraph className="scanner-progress" type="secondary" role="status" aria-live="polite">{state.message || '\u00a0'}</Typography.Paragraph>
               <Table<Row> rowKey="id" dataSource={state.pages} pagination={{ current: page, pageSize: 50, total: state.page_total, showSizeChanger: false, onChange: setPage }} columns={[
                 { title: '纸张序号', dataIndex: 'sequence', width: 100 }, { title: '扫描面', dataIndex: 'side', width: 90, render: value => value === 'front' ? '正面' : '背面' }, { title: '考号', dataIndex: 'candidate' }, { title: '状态', dataIndex: 'status', render: value => <Status value={value} /> },
-                { title: '核查信息', render: (_, row) => row.error || row.quality }, { title: '操作', width: 110, render: (_, row) => <Space><Button type="link" onClick={() => showPreview(row)}>查看</Button><Dropdown menu={{ items: [{ key: 'retry', label: '重试本地识读', disabled: locked || row.status === 'excluded' || batch.status === 'paired', onClick: () => action('retryPage', { batch_id: batchId, page_id: row.id }) }, { key: 'review', label: '上传原图供核查', disabled: locked || !state.online || row.status !== 'blocked', onClick: () => modal.confirm({ title: '将原图和质量报告送交管理员核查？', okText: '上传待核查原图', onOk: () => action('sendForReview', { batch_id: batchId, page_id: row.id }) }) }, { key: 'exclude', label: batch.capture_mode === 'duplex' ? '排除整张重扫' : '排除此面', danger: true, disabled: locked || row.status === 'excluded' || batch.status === 'paired', onClick: () => exclude(row) }] }}><Button type="text">⋯</Button></Dropdown></Space> },
+                { title: '核查信息', render: (_, row) => row.error || row.quality }, { title: '操作', width: 110, render: (_, row) => <Space><Button type="link" onClick={() => showPreview(row)}>查看</Button><Dropdown menu={{ items: [{ key: 'retry', label: '重试本地识读', disabled: locked || row.status === 'excluded' || batch.status === 'paired', onClick: () => action('retryPage', { batch_id: batchId, page_id: row.id }) }, { key: 'review', label: '上传原图供核查', disabled: locked || !state.online || row.status !== 'blocked', onClick: () => modal.confirm({ title: '将原图和质量报告送交管理员核查？', okText: '上传待核查原图', onOk: () => action('sendForReview', { batch_id: batchId, page_id: row.id }) }) }, { key: 'exclude', label: batch.capture_mode === 'duplex' ? '排除整张重扫' : '排除此面', danger: true, disabled: locked || row.status === 'excluded' || batch.status === 'paired', onClick: () => exclude(row) }] }}><Button type="text" icon={<MoreOutlined />} aria-label={`第${row.sequence}张扫描图更多操作`} /></Dropdown></Space> },
               ]} />
             </section>}
     </main>

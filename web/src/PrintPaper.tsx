@@ -1,3 +1,4 @@
+import { ZoomInOutlined, ZoomOutOutlined } from '@ant-design/icons'
 import { useEffect, useRef, useState } from 'react'
 import { Alert, Space, Typography } from 'antd'
 import { Button } from './Button'
@@ -41,7 +42,7 @@ export function Paper({value,page,selected,draw,answerMode=false,readOnly=false,
   function regionAt(p:{x:number;y:number},s:Drag):Region{const x=s.region?Math.max(0,Math.min(width-8-s.region.width,s.region.x+p.x-s.x)):Math.min(s.x,p.x);return s.region?{...s.region,x,y:Math.max(minimumY(x),Math.min(height-8-s.region.height,s.region.y+p.y-s.y))}:{page,x,y:Math.max(minimumY(x),Math.min(s.y,p.y)),width:Math.abs(s.x-p.x),height:Math.abs(s.y-p.y)}}
   function finish(event:React.PointerEvent){const s=start.current;if(s){const next=regionAt(point(event),s);if(next.width>2&&next.height>2)onRegion(s.qid,Object.fromEntries(Object.entries(next).map(([k,v])=>[k,Math.round(v*10)/10])) as Region,s.index)}start.current=null;setDraft(null)}
   return <Space direction="vertical" style={{width:'100%'}}>
-    <Space size={8}><Button size="small" disabled={zoom<=100} onClick={()=>setZoom(v=>v-25)}>缩小</Button><Button size="small" onClick={()=>setZoom(100)}>{zoom}%</Button><Button size="small" disabled={zoom>=300} onClick={()=>setZoom(v=>v+25)}>放大</Button></Space>
+    <Space size={8}><Button size="small" icon={<ZoomOutOutlined />} disabled={zoom<=100} onClick={()=>setZoom(v=>v-25)}>缩小</Button><Button size="small" onClick={()=>setZoom(100)}>{zoom}%</Button><Button size="small" icon={<ZoomInOutlined />} disabled={zoom>=300} onClick={()=>setZoom(v=>v+25)}>放大</Button></Space>
     {error?<Alert type="warning" showIcon message="打印预览尚未更新" description={error} action={<Button size="small" onClick={()=>setRetry(v=>v+1)}>重试</Button>}/>:<Typography.Text type="secondary" role="status">{pending?'正在更新打印预览…':'预览已更新'}{pending&&visible?'，下方暂显示上次生成的打印稿。':''}{value.status!=='published'?' · 草稿预览，发布后可导出打印稿。':''}</Typography.Text>}
     <div className="paper-scroll"><svg ref={svg} tabIndex={answerMode?0:undefined} onKeyDown={answerKey} style={{width:`${zoom}%`}} className={`paper-svg ${draw?'drawing':''}`} viewBox={`0 0 ${width} ${height}`} aria-label={answerMode?'点击选项或使用数字键设置标准答案':'题卡打印预览与答题区域编辑'} onPointerDown={e=>{if(answerMode){e.currentTarget.focus();return}if(readOnly||!draw||!selected)return;start.current={...point(e),qid:selected};setDraft(null);e.currentTarget.setPointerCapture(e.pointerId)}} onPointerMove={e=>{if(start.current)setDraft(regionAt(point(e),start.current))}} onPointerUp={finish} onPointerCancel={()=>{start.current=null;setDraft(null)}}>
       <rect width={width} height={height} fill="white"/>
