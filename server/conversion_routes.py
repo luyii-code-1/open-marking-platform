@@ -1,7 +1,7 @@
 from copy import deepcopy
 from fastapi import APIRouter,Depends,HTTPException,File,Form,UploadFile
 from .db import connect,objects,put
-from .dependencies import admin,require
+from .dependencies import system_admin,admin,require
 from .review import results_for
 from .conversion import validate_conversion,apply,import_table
 
@@ -14,7 +14,7 @@ def validate_existing(db,group,config,current):
 
 
 @router.post('/score-conversions/import-preview')
-def preview_table(file:UploadFile=File(),name:str=Form('外部对照表'),precision:int=Form(2),current=Depends(admin)):
+def preview_table(file:UploadFile=File(),name:str=Form('外部对照表'),precision:int=Form(2),current=Depends(system_admin)):
     if not 1<=len(name.strip())<=100:raise HTTPException(422,'请填写100字以内方案名称')
     try:config=import_table(file.file.read(2*1024*1024+1),name.strip(),precision)
     except ValueError as error:raise HTTPException(422,str(error))
@@ -24,7 +24,7 @@ def preview_table(file:UploadFile=File(),name:str=Form('外部对照表'),precis
 
 
 @router.put('/score-conversions/{identifier}')
-def edit_conversion(identifier:str,body:dict,current=Depends(admin)):
+def edit_conversion(identifier:str,body:dict,current=Depends(system_admin)):
     reason=body.get('reason','')
     if not isinstance(reason,str) or not reason.strip():raise HTTPException(422,'请填写修改原因')
     with connect() as db:

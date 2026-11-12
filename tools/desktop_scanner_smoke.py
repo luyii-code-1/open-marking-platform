@@ -45,10 +45,15 @@ def run(scanner_dll=None,bundled=False):
             with httpx.Client(base_url=base+'/api/v1/',timeout=30) as api:
                 account={'username':'desktop-admin','password':secrets.token_urlsafe(20),'name':'本机验证管理员'}
                 api.post('auth/bootstrap',json=account).raise_for_status();session=api.post('auth/login',json=account);session.raise_for_status();api.headers['Authorization']='Bearer '+session.json()['token']
+                manager={**account,'username':'desktop-manager','role':'manager'}
+                response=api.post('users',json=manager);response.raise_for_status()
+                session=api.post('auth/login',json=manager);session.raise_for_status();api.headers['Authorization']='Bearer '+session.json()['token']
                 def post(path,body):
                     result=api.post(path,json=body);result.raise_for_status();return result.json()
                 project=post('projects',{'name':'离线工作区验证'});subject=post('subjects',{'project_id':project['id'],'name':'语文','group_mode':'default'});group_id=subject['default_group_id']
                 cls=post('classes',{'name':'一班','grade':'10'});post('students',{'class_id':cls['id'],'name':'学生','candidate_number':'123'})
+                post('projects/'+project['id']+'/room-tags',{'name':'第一考场'});post('projects/'+project['id']+'/room-tags',{'name':'二楼'})
+                pairing=post('scanner/pairings',None)
                 template=post('templates',{'group_id':group_id,'name':'本机双面卷','paper':'A4','sides':2,'candidate_length':3,'questions':[
                     {'number':1,'type':'single','choice_style':'bracket','points':3,'options':4,'answer':['B'],'regions':[{'page':1,'x':15,'y':110,'width':90,'height':20},{'page':1,'x':15,'y':140,'width':90,'height':20}]},
                     {'number':2,'type':'single','choice_style':'bracket','points':2,'options':4,'answer':['A'],'regions':[{'page':2,'x':15,'y':110,'width':90,'height':20}]}]})
@@ -66,7 +71,8 @@ def run(scanner_dll=None,bundled=False):
                     for region in question['regions']:
                         _,x,y=paper.bubbles(question,region)[1 if index==0 else 0];fill(x,y)
                     path=root/f'filled-{index}.png';path.write_bytes(cv2.imencode('.png',image)[1].tobytes());images.append(path)
-                native=subprocess.Popen(['dotnet',str(dll),'--desktop-self-test',base,str(root/'client'),str(images[0]),str(images[1]),project['id'],account['username'],account['password'],'-' if bundled else sys.executable,str(repo)],cwd=repo,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding='utf-8',creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
+                entry=[str(dll.with_suffix('.exe'))] if bundled else ['dotnet',str(dll)]
+                native=subprocess.Popen([*entry,'--desktop-self-test',base,str(root/'client'),str(images[0]),str(images[1]),project['id'],'pair-code',pairing['code'],'-' if bundled else sys.executable,str(repo)],cwd=repo,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding='utf-8',creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
                 messages=queue.Queue()
                 def collect():
                     for line in native.stdout:messages.put(line)
@@ -86,7 +92,9 @@ def run(scanner_dll=None,bundled=False):
                 else:raise TimeoutError('本地识读验证未能完成')
                 assert native.wait(timeout=10)==0,native.stderr.read()[-2000:]
                 response=api.get('results',params={'group_id':group_id});response.raise_for_status();rows=response.json();assert len(rows)==1 and rows[0]['candidate_number']=='123' and rows[0]['total']==5
-                result={'status':'passed','scope':'headless desktop controller','offline_server_outage_and_restart':True,'bundled_engine':bundled,'pages':2,'candidate_number':'123','final_score':5,'batch_id':batch}
+                assert {t['name'] for t in rows[0]['room_tags']}=={'第一考场','二楼'}
+                status=api.get('scanner/pairings/'+pairing['id']);status.raise_for_status();assert status.json()['status']=='paired'
+                result={'status':'passed','scope':'headless desktop controller','manager_pairing':True,'uri_and_single_instance':True,'offline_room_tags':True,'offline_server_outage_and_restart':True,'bundled_engine':bundled,'pages':2,'candidate_number':'123','final_score':5,'batch_id':batch}
                 print(json.dumps(result,ensure_ascii=False),flush=True);return result
         finally:
             if native and native.poll() is None:stop(native)

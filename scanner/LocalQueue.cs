@@ -38,6 +38,7 @@ public sealed partial class LocalQueue
         EnsureColumn(db, "batches", "template_json", "TEXT NOT NULL DEFAULT '{}'");
         EnsureColumn(db, "batches", "roster_json", "TEXT NOT NULL DEFAULT 'null'");
         EnsureColumn(db, "batches", "local_pairs_json", "TEXT NOT NULL DEFAULT '[]'");
+        EnsureColumn(db, "batches", "room_tags_json", "TEXT NOT NULL DEFAULT '[]'");
         EnsureColumn(db, "pages", "recognition_json", "TEXT NOT NULL DEFAULT '{}'");
     }
 

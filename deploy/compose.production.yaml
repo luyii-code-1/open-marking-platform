@@ -1,0 +1,38 @@
+# Use with compose.yaml and an environment file naming the imported images.
+x-production-logging: &production-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  api:
+    image: ${OMP_IMAGE:?Set OMP_IMAGE to the verified application image}
+    pull_policy: never
+    mem_limit: 1536m
+    cpus: 1.5
+    logging: *production-logging
+  worker:
+    image: ${OMP_IMAGE:?Set OMP_IMAGE to the verified application image}
+    pull_policy: never
+    mem_limit: 3g
+    cpus: 2.0
+    logging: *production-logging
+  scheduler:
+    image: ${OMP_IMAGE:?Set OMP_IMAGE to the verified application image}
+    pull_policy: never
+    mem_limit: 256m
+    cpus: 0.2
+    logging: *production-logging
+  redis:
+    image: ${OMP_REDIS_IMAGE:?Set OMP_REDIS_IMAGE to the imported Redis image}
+    pull_policy: never
+    mem_limit: 256m
+    cpus: 0.15
+    logging: *production-logging
+  proxy:
+    image: ${OMP_CADDY_IMAGE:?Set OMP_CADDY_IMAGE to the imported Caddy image}
+    pull_policy: never
+    mem_limit: 256m
+    cpus: 0.15
+    logging: *production-logging

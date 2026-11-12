@@ -1,3 +1,4 @@
+import { RoomTagManager } from './RoomTags'
 import { useEffect } from 'react'
 import { App, Breadcrumb, Card, Empty, Space, Spin, Tabs, Tag, Typography } from 'antd'
 import { Button } from './Button'
@@ -65,6 +66,7 @@ export function Exams({ location, navigate }: { location: ExamLocation; navigate
       ]} /> },
       { key: 'summary', label: '跨科成绩', children: <Results admin projectId={project.id} projectOnly /> },
       { key: 'archives', label: '归档与释放', children: <ArchiveManager projectId={project.id} /> },
+      {key:'rooms',label:'考场标签',children:<RoomTagManager projectId={project.id}/>},
       { key: 'storage', label: '存储设置', children: <ProjectStorage project={project} onSaved={refresh} /> },
     ]} />}
   </div>

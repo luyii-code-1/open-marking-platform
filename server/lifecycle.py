@@ -5,6 +5,7 @@ from fastapi import HTTPException
 
 _operation = ContextVar('omp_deletion_operation', default=None)
 PARENTS = {
+    'room-tags': ('project_id',),
     'subjects': ('project_id',), 'groups': ('subject_id',),
     'templates': ('group_id',), 'scan-batches': ('group_id',), 'rosters': ('group_id',),
     'pages': ('batch_id',), 'submissions': ('group_id',),

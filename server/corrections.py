@@ -152,6 +152,8 @@ def replace_page(identifier:str,body:dict,current=Depends(admin)):
         invalidate(db,submission,affected,current['id'])
         submission.setdefault('page_history',[]).append({'page':index+1,'old_page_id':submission['pages'][index],'new_page_id':page['id'],'reason':body['reason'],'at':time.time()})
         submission['pages'][index]=page['id']; submission['status']='ready'
+        from .room_tags import from_pages
+        submission['room_tags']=from_pages(db,submission['pages'])
         page['linked_submission_id']=identifier;put(db,'pages',page,current['id'])
         from .anomalies import check_submission
         check_submission(db,submission,current['id'])
@@ -191,7 +193,8 @@ def attach_pages(identifier:str,body:dict,current=Depends(admin)):
             page['linked_submission_id']=identifier;put(db,'pages',page,current['id'])
         invalidate(db,submission,{q['id'] for q in template['questions']},current['id'])
         submission.setdefault('page_history',[]).append({'old_pages':submission['pages'],'new_pages':ids,'reason':body['reason'],'at':time.time()})
-        submission.update(pages=ids,status='ready',attendance_source='manual',attendance_reason=body['reason'])
+        from .room_tags import from_pages
+        submission.update(room_tags=from_pages(db,ids),pages=ids,status='ready',attendance_source='manual',attendance_reason=body['reason'])
         from .anomalies import check_submission
         check_submission(db,submission,current['id'])
         return sync_answer_slices(db,put(db,'submissions',submission,current['id']),template,current['id'])
