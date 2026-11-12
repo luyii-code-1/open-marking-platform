@@ -120,9 +120,13 @@ def recognize(image,template,side,corners=None):
     normalized=manual_align(image,template,corners) if corners is not None else align(image,template)
     calibrated=135
     if any(q.get('choice_style') in ('bracket','compact') for q in template.get('questions',[])):
-        _,height=dimensions(template)
-        levels=[float(np.median(normalized[round((height-33)*4):round((height-30)*4),round((63+i*8)*4):round((67+i*8)*4)])) for i in range(5)]
-        if levels[0]-levels[4]>60 and all(a>=b-12 for a,b in zip(levels,levels[1:])):calibrated=(levels[0]+levels[1])/2
+        width,height=dimensions(template)
+        samples=[]
+        if manual_binding(template):samples.append([float(np.median(normalized[25:29,round((width-43+i*5)*4):round((width-41+i*5)*4)])) for i in range(5)])
+        samples.append([float(np.median(normalized[round((height-33)*4):round((height-30)*4),round((63+i*8)*4):round((67+i*8)*4)])) for i in range(5)])
+        for levels in samples:
+            if levels[0]-levels[4]>60 and all(a>=b-12 for a,b in zip(levels,levels[1:])):
+                calibrated=(levels[0]+levels[1])/2;break
     def ink(x,y,style=None):
         radius=2.6 if style=='bracket' else 1.5 if style=='compact' else 1.1
         crop=normalized[round((y-.75)*4):round((y+.75)*4),round((x-radius)*4):round((x+radius)*4)]

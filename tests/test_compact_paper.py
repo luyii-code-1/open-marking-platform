@@ -30,7 +30,8 @@ def test_compact_frontend_layout_embedded_text_and_local_recognition(tmp_path,la
         width,height=paper.dimensions(template);sx=image.shape[1]/width;sy=image.shape[0]/height
         if page==1:
             ax,_=paper.absent_position(template)
-            for x,y,w,h in ((15,14,60,7),(ax-23,42,18,5),(ax-24,48,25,4)):
+            pw=(width-24-(paper.panels(template)-1)*8)/paper.panels(template)
+            for x,y,w,h in ((12,14,pw,7),(ax-23,42,18,5),(ax-24,48,25,4)):
                 crop=image[round(y*sy):round((y+h)*sy),round(x*sx):round((x+w)*sx)]
                 assert (crop<150).sum()>30,'Chinese title/absence text was not rendered'
         def fill(x,y):cv2.rectangle(image,(round((x-1.4)*sx),round((y-.9)*sy)),(round((x+1.4)*sx),round((y+.9)*sy)),0,-1)

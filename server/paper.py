@@ -46,7 +46,7 @@ def validate(template):
             if question.get('choice_style') not in (None,'bracket','compact'):raise ValueError('选择题填涂样式无效')
             minimum_width=12+(question.get('options',4)-1)*5 if tight else 20+(question.get('options',4)-1)*9.5 if bracket else 12+question.get('options',4)*6
             if question['type']!='subjective' and (region['width']<minimum_width or region['height']<(4.6 if tight else 6 if bracket else 14)): raise ValueError('客观题区域不足以容纳选项')
-            if compact and region['x']<110 and region['x']+region['width']>12 and region['y']<h-26 and region['y']+region['height']>h-38:raise ValueError('答题区与页脚灰度校准区域重叠')
+            if compact and not manual_binding(template) and region['x']<110 and region['x']+region['width']>12 and region['y']<h-26 and region['y']+region['height']>h-38:raise ValueError('答题区与页脚灰度校准区域重叠')
             for previous in occupied:
                 if previous['page']==region['page'] and region['x']<previous['x']+previous['width'] and previous['x']<region['x']+region['width'] and region['y']<previous['y']+previous['height'] and previous['y']<region['y']+region['height']: raise ValueError('答题区域重叠')
             occupied.append(region)
@@ -107,11 +107,14 @@ def pdf(template):
         title_size=min(16,16*(title_width-6)/max(1,pdfmetrics.stringWidth(template['name'],FONT,16)/mm))
         if page==1 or not manual_binding(template):
             c.setFont(FONT,title_size)
-            c.drawString(15*mm,(h-20)*mm,template['name'])
+            if manual_binding(template):c.drawCentredString((12+title_width/2)*mm,(h-20)*mm,template['name'])
+            else:c.drawString(15*mm,(h-20)*mm,template['name'])
             if template.get('subtitle'):
-                c.setFont(FONT,10);c.drawString(15*mm,(h-25)*mm,template['subtitle'])
+                c.setFont(FONT,10)
+                if manual_binding(template):c.drawCentredString((12+title_width/2)*mm,(h-25)*mm,template['subtitle'])
+                else:c.drawString(15*mm,(h-25)*mm,template['subtitle'])
         c.setFont(FONT,9)
-        c.drawString(15*mm,(h-29)*mm,f"第{page}面 · 按实际大小打印，保留定位标记")
+        if not manual_binding(template):c.drawString(15*mm,(h-29)*mm,f"第{page}面 · 按实际大小打印，保留定位标记")
         if not manual_binding(template):
             widget=qr.QrCodeWidget(code(template,side)); x0,y0,x1,y1=widget.getBounds()
             drawing=Drawing(26*mm,26*mm,transform=[26*mm/(x1-x0),0,0,26*mm/(y1-y0),0,0]); drawing.add(widget)
@@ -202,11 +205,16 @@ def pdf(template):
             c.setFillGray(1);c.rect((x+rw/2)*mm-label_width/2-3,(h-y-rh/2)*mm-4,label_width+6,font_size+4,fill=1,stroke=0)
             c.setFillGray(.35);c.setFont(FONT,font_size);c.drawCentredString((x+rw/2)*mm,(h-y-rh/2)*mm,label);c.restoreState()
         if any(q.get('choice_style') in ('bracket','compact') for q in template.get('questions',[])):
-            c.setFillGray(1);c.rect(12*mm,26*mm,98*mm,12*mm,fill=1,stroke=0);c.setFillGray(0)
-            c.setFont(FONT,8);c.drawString(12*mm,30*mm,'灰度校准 · 请勿填涂')
-            for index,gray in enumerate((255,192,128,64,0)):
-                c.setFillGray(gray/255);c.rect((62+index*8)*mm,29*mm,6*mm,5*mm,fill=1,stroke=0)
-                c.setFillGray(0);c.setLineWidth(.12*mm);c.rect((62+index*8)*mm,29*mm,6*mm,5*mm,fill=0,stroke=1)
+            if manual_binding(template):
+                for index,gray in enumerate((255,192,128,64,0)):
+                    c.setFillGray(gray/255);c.rect((w-44+index*5)*mm,(h-7.5)*mm,4*mm,1.5*mm,fill=1,stroke=0)
+                c.setFillGray(0)
+            else:
+                c.setFillGray(1);c.rect(12*mm,26*mm,98*mm,12*mm,fill=1,stroke=0);c.setFillGray(0)
+                c.setFont(FONT,8);c.drawString(12*mm,30*mm,'灰度校准 · 请勿填涂')
+                for index,gray in enumerate((255,192,128,64,0)):
+                    c.setFillGray(gray/255);c.rect((62+index*8)*mm,29*mm,6*mm,5*mm,fill=1,stroke=0)
+                    c.setFillGray(0);c.setLineWidth(.12*mm);c.rect((62+index*8)*mm,29*mm,6*mm,5*mm,fill=0,stroke=1)
             c.setLineWidth(1)
         c.showPage()
     c.save()
