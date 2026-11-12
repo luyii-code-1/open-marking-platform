@@ -76,6 +76,7 @@ def main() -> None:
                 'scanner_framework': framework, 'scanner_runtime': 'win-x64',
                 'scanner_self_contained': False,
                 'pending': ['User UI acceptance', 'Real Hi-5100S scanner acceptance',
+                            'ROS online crop specification and private-bucket validation',
                             'Production deployment acceptance']}
     # Publish into a disposable directory; existing queues and registered keys are untouched.
     run(['npm', 'ci'], ROOT / 'web')

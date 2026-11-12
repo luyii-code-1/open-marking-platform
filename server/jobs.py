@@ -25,7 +25,20 @@ def guard(db,ownership):
 
 
 def create_job(db,kind,payload,project_id=None,actor=None):
+    if kind!='delete-hierarchy':
+        from .lifecycle import project_writable
+        project_writable(db,job_project(db,{'project_id':project_id,'payload':payload}))
     return put(db,'jobs',{'kind':kind,'payload':payload,'project_id':project_id,'actor':actor,'status':'pending','attempts':0,'created_at':time.time(),'lease_until':0,'available_at':0},actor)
+
+
+def job_project(db,job):
+    payload=job.get('payload',{})
+    project=job.get('project_id') or payload.get('project_id')
+    if project:return project
+    page=get(db,payload.get('page_id'),'pages')
+    if not page and payload.get('relative','').startswith('pages/'):
+        page=get(db,payload['relative'].split('/')[-1].split('.')[0],'pages')
+    return project_for_page(db,page) if page else None
 
 
 def queue(kind,payload,background=False):
@@ -123,6 +136,8 @@ def execute(identifier):
     with connect() as db:
         db.execute('BEGIN IMMEDIATE');job=get(db,identifier,'jobs')
         if not job or job['status'] in ('completed','failed') or job.get('available_at',0)>time.time() or (job['status']=='running' and job['lease_until']>time.time()):return
+        if job['kind']!='delete-hierarchy' and db.execute('SELECT 1 FROM deletion_locks WHERE project_id=?',(job_project(db,job),)).fetchone():
+            job.update(status='pending',lease_until=0,available_at=time.time()+15);put(db,'jobs',job);return
         job.update(status='running',lease_until=time.time()+600,run_token=token,attempts=job['attempts']+1,phase='开始执行');job.pop('error',None);job.pop('error_detail',None);put(db,'jobs',job)
     result=None
     try:
@@ -134,10 +149,14 @@ def execute(identifier):
             elif job['kind'] in ('archive-project','preview-release','release-project','restore-archive'):
                 from .storage_jobs import perform
                 result=perform(job,execution.progress)
+            elif job['kind']=='delete-hierarchy':
+                from .deletion import perform
+                result=perform(job,execution.progress)
             else:raise ValueError('任务类型无效')
     except LostLease:return
     except Exception as error:
         with connect() as db:
+            db.execute('BEGIN IMMEDIATE')
             job=get(db,identifier,'jobs')
             if job and job.get('run_token')==token and job['status']=='running':
                 from fastapi import HTTPException
@@ -146,6 +165,7 @@ def execute(identifier):
                 job.update(status='pending' if retryable else 'failed',error=type(error).__name__,error_detail=str(error.detail) if isinstance(error,HTTPException) else '执行失败，等待重试' if retryable else '执行失败，请核查后手动重试',available_at=time.time()+min(300,2**job['attempts']),lease_until=0);put(db,'jobs',job)
         return
     with connect() as db:
+        db.execute('BEGIN IMMEDIATE')
         job=get(db,identifier,'jobs')
         if job and job.get('run_token')==token and job['status']=='running':job.update(status='completed',lease_until=0,phase='已完成',result=result);put(db,'jobs',job)
 

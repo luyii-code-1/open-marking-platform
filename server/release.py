@@ -27,6 +27,8 @@ def plan_details(identifier:str,current=Depends(admin)):
 
 def scope(db,identifier):
     require(db,identifier,'projects')
+    from .lifecycle import project_writable
+    project_writable(db,identifier)
     subjects={s['id'] for s in find(db,'subjects',project_id=identifier)}
     groups=[g for g in objects(db,'groups') if g.get('subject_id') in subjects]
     if any(not g.get('frozen') for g in groups):raise HTTPException(409,'请先完成并发布本项目各题卡组，再释放扫描卷')

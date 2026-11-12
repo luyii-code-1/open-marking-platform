@@ -99,10 +99,11 @@ def collect(db,identifier):
     people=[dict(r) for r in db.execute('SELECT id,username,name,role FROM users') if r['id'] in user_ids]
     owners=selected|user_ids
     identifiers=[dict(r) for r in db.execute('SELECT * FROM identifiers') if r['owner_id'] in owners]
-    return project,records,{'format':'omp-project-2','project_id':identifier,'records':records,'score_history':scores,'audit':audit,'people':people,'identifiers':identifiers}
+    results=[dict(r) for r in db.execute('SELECT * FROM review_results') if r['submission_id'] in selected]
+    return project,records,{'format':'omp-project-2','project_id':identifier,'records':records,'score_history':scores,'review_results':results,'audit':audit,'people':people,'identifiers':identifiers}
 
 
-def create(identifier,actor,progress=None,archive_id=None,ownership=None):
+def create(identifier,actor,progress=None,archive_id=None,ownership=None,preserve_status=False):
     from .storage import materialize
     from .paper import pdf
     with connect() as db:
@@ -113,6 +114,8 @@ def create(identifier,actor,progress=None,archive_id=None,ownership=None):
                 return existing
         db.execute('BEGIN')
         project,records,data=collect(db,identifier)
+        from .lifecycle import project_writable
+        project_writable(db,identifier)
     archive_id=archive_id or str(uuid4());target=package_path(archive_id);target.parent.mkdir(parents=True,exist_ok=True)
     temporary=target.with_name(target.stem+'.'+str(uuid4())+'.tmp');manifest=[]
     try:
@@ -159,7 +162,8 @@ def create(identifier,actor,progress=None,archive_id=None,ownership=None):
             result=put(db,'archives',{'id':archive_id,'project_id':identifier,'status':'verified','format':'omp-project-2','created_at':time.time(),'asset_count':sum(e['path'].startswith(('pages/','assets/')) for e in manifest),'size':target.stat().st_size,'sha256':archive_sha,'download_url':f'/api/v1/archives/{archive_id}/download'},actor)
             for entry in manifest:
                 if entry['path'].startswith(('pages/','assets/')):put(db,'archive-files',{'archive_id':archive_id,'project_id':identifier,'relative':entry['path'],'sha256':entry['sha256'],'size':entry['size'],'created_at':result['created_at']},actor)
-            project=require(db,identifier,'projects');project['status']='archived';put(db,'projects',project,actor)
+            if not preserve_status:
+                project=require(db,identifier,'projects');project['status']='archived';put(db,'projects',project,actor)
         return result
     finally:temporary.unlink(missing_ok=True)
 
@@ -167,6 +171,8 @@ def create(identifier,actor,progress=None,archive_id=None,ownership=None):
 def restore(identifier,actor,progress=None):
     from .storage import local_path
     record,manifest,_=verify(identifier,progress)
+    from .lifecycle import project_writable
+    with connect() as db:project_writable(db,record['project_id'])
     restored=0;pending=[]
     for index,entry in enumerate(manifest):
         if progress:progress(index,len(manifest),'核对现有文件')
@@ -182,7 +188,9 @@ def restore(identifier,actor,progress=None):
     with zipfile.ZipFile(package_path(identifier)) as package:
         for index,entry in enumerate(pending):
             if progress:progress(index,len(pending),'恢复文件')
-            extract_file(identifier,entry['path'],local_path(entry['path']),entry,package);restored+=1
+            with connect() as db:
+                db.execute('BEGIN IMMEDIATE');project_writable(db,record['project_id'])
+                extract_file(identifier,entry['path'],local_path(entry['path']),entry,package);restored+=1
     if progress:progress(len(pending),len(pending),'恢复文件')
     with connect() as db:put(db,'storage-operations',{'project_id':record['project_id'],'archive_id':identifier,'action':'restore_files','restored':restored},actor)
     return {'restored_files':restored}

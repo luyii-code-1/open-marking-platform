@@ -335,6 +335,8 @@ def upload_page(identifier:str,file:UploadFile=File(),capture_id:str=Form(),side
         template=require(db,batch['template_id'],'templates')
         if side=='back' and template['sides']==1: raise HTTPException(422,'单面题卡不需要背面')
         if any(p['batch_id']==identifier and p['side']==side and p['sequence']==sequence and not p.get('excluded') for p in objects(db,'pages')): raise HTTPException(409,'该顺序已采集，请处理补扫')
+        from .lifecycle import writable
+        writable(db,'scan-batches',batch)
         storage=database.ROOT/'pages'; storage.mkdir(parents=True,exist_ok=True)
         path=storage/(capture_id+'.image')
         temporary=path.with_suffix('.tmp'); temporary.write_bytes(data); temporary.replace(path)

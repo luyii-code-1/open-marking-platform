@@ -30,6 +30,7 @@ def job_details(identifier:str,current=Depends(admin)):
 @router.post('/jobs/{identifier}/retry')
 def retry_job(identifier:str,current=Depends(admin)):
     with connect() as db:
+        db.execute('BEGIN IMMEDIATE')
         job=require(db,identifier,'jobs')
         if job.get('cancelled_by_deletion'):raise HTTPException(409,'原考试层级已删除或变更，请重新提交任务')
         if job['status']=='completed' or job['status']=='running' and job['lease_until']>time.time():raise HTTPException(409,'任务已完成或正在执行')

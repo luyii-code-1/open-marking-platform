@@ -66,6 +66,8 @@ def initialize(root=None):
         CREATE INDEX IF NOT EXISTS object_relative ON objects(kind,deleted,json_extract(body,'$.relative'));
         CREATE INDEX IF NOT EXISTS object_token_hash ON objects(kind,deleted,json_extract(body,'$.token_hash'));
         CREATE INDEX IF NOT EXISTS object_deleted_plan ON objects(json_extract(body,'$.deletion_plan_id')) WHERE deleted=1;
+        CREATE TABLE IF NOT EXISTS deletion_locks(project_id TEXT PRIMARY KEY,plan_id TEXT UNIQUE NOT NULL,created_at REAL NOT NULL);
+        CREATE TABLE IF NOT EXISTS deletion_files(plan_id TEXT NOT NULL,relative TEXT NOT NULL,sha256 TEXT NOT NULL,size INTEGER NOT NULL,remote_refs TEXT NOT NULL,done INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(plan_id,relative));
         ''')
         from .identifiers import initialize as initialize_identifiers
         initialize_identifiers(db)
@@ -90,12 +92,16 @@ def get(db, identifier, kind=None):
 
 
 def put(db, kind, body, actor=None):
+    if not db.in_transaction: db.execute('BEGIN IMMEDIATE')
     body = dict(body)
     body.setdefault('id', str(uuid4()))
     old = db.execute('SELECT kind,deleted,body FROM objects WHERE id=?',(body['id'],)).fetchone()
     if old and (old['kind'] != kind or old['deleted']):
         from .identifiers import IdentifierConflict
         raise IdentifierConflict('编号已被使用，不能复用')
+    from .lifecycle import writable
+    if old: writable(db, kind, json.loads(old['body']))
+    writable(db, kind, body)
     from .identifiers import reserve,template_questions
     reserve(db,body['id'],kind,body['id'])
     if kind=='templates':template_questions(db,body,json.loads(old['body']) if old else None)

@@ -1,4 +1,4 @@
-"""Preview and atomically retire an exam hierarchy while retaining its evidence."""
+"""Archive, verify, remove scoped scans, then retire an exam hierarchy."""
 import hashlib
 import json
 from pathlib import Path
@@ -33,7 +33,8 @@ CHILDREN = (
     ('page-alignments', ('page_id',)), ('publication-events', ('group_id',)),
     ('regrade-events', ('template_id', 'task_id')),
 )
-FILE_JOBS = ('archive-project', 'preview-release', 'release-project', 'restore-archive')
+FILE_JOBS = ('archive-project', 'preview-release', 'release-project', 'restore-archive', 'delete-hierarchy')
+POLICY = 'archive-and-remove-scans-v1'
 
 
 def scope(db, kind, identifier):
@@ -58,6 +59,7 @@ def scope(db, kind, identifier):
     db.execute("INSERT OR IGNORE INTO deletion_questions SELECT json_extract(q.value,'$.id') FROM objects t JOIN deletion_scope s ON s.id=t.id,json_each(t.body,'$.questions') q WHERE t.kind='templates'")
     db.execute('''INSERT INTO deletion_jobs
         SELECT id FROM objects WHERE kind='jobs' AND deleted=0
+        AND json_extract(body,'$.kind')!='delete-hierarchy'
         AND json_extract(body,'$.status') IN ('pending','running') AND (
           json_extract(body,'$.payload.page_id') IN (SELECT id FROM deletion_scope)
           OR (substr(json_extract(body,'$.payload.relative'),1,6)='pages/' AND substr(json_extract(body,'$.payload.relative'),7,36) IN (SELECT id FROM deletion_scope))
@@ -94,6 +96,13 @@ def information(db, kind, identifier):
         job = json.loads(row['body']); blockers.append({'id': row['id'], 'reason': f"后台任务正在执行：{job['kind']}"})
     if project.get('storage_operation', {}).get('until', 0) > time.time():
         blockers.append({'id': project['id'], 'reason': '项目正在释放扫描文件，请等待操作结束'})
+    lock = db.execute('SELECT plan_id FROM deletion_locks WHERE project_id=?', (project['id'],)).fetchone()
+    if lock: blockers.append({'id': lock['plan_id'], 'reason': '本考试已有删除任务，请等待完成或重试原任务'})
+    from .jobs import job_project
+    for row in db.execute("SELECT body FROM objects WHERE kind='jobs' AND deleted=0 AND json_extract(body,'$.status')='running' AND json_extract(body,'$.kind')!='delete-hierarchy'"):
+        job = json.loads(row['body'])
+        if job_project(db,job)==project['id'] and job['id'] not in {b['id'] for b in blockers}:
+            blockers.append({'id':job['id'],'reason':f"本考试后台任务正在执行：{job['kind']}"})
     # Ancestor storage leases are outside a subgroup's owned records.
     digest.update(json.dumps(project.get('storage_operation', {}), sort_keys=True).encode())
     return {
@@ -103,13 +112,14 @@ def information(db, kind, identifier):
         'retained_score_history': totals['scores'], 'retained_score_results': totals['review_results'],
         'runtime_allocations': totals['review_allocations'], 'runtime_regrades': totals['regrade_queue'],
         'retained_archives': db.execute("SELECT COUNT(*) FROM objects WHERE kind='archives' AND deleted=0 AND json_extract(body,'$.project_id')=?", (project['id'],)).fetchone()[0],
-        'cancel_pending_jobs': totals['jobs'] - len([b for b in blockers if b['id'] != project['id']]),
+        'scan_pages': counts.get('pages',0),
+        'cancel_pending_jobs': totals['jobs'] - db.execute("SELECT COUNT(*) FROM deletion_jobs j JOIN objects o ON o.id=j.id WHERE json_extract(o.body,'$.status')='running'").fetchone()[0],
         'invalidate_release_plans': len(release_plans), 'blockers': blockers, 'fingerprint': digest.hexdigest(),
     }, release_plans, subject
 
 
 def public(plan):
-    return {key: value for key, value in plan.items() if key != 'fingerprint'}
+    return {key: value for key, value in plan.items() if key not in ('fingerprint','locked_fingerprint')}
 
 
 @router.post('/{kind}/{identifier}/deletion-preview')
@@ -117,7 +127,9 @@ def preview(kind: Hierarchy, identifier: str, current=Depends(admin)):
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
         value, _, _ = information(db, kind, identifier)
-        plan = put(db, 'deletion-plans', {**value, 'actor': current['id'], 'status': 'preview', 'created_at': time.time(), 'expires_at': time.time() + 600}, current['id'])
+        lock=db.execute('SELECT plan_id FROM deletion_locks WHERE project_id=?',(value['project_id'],)).fetchone()
+        if lock:return public(require(db,lock['plan_id'],'deletion-plans'))
+        plan = put(db, 'deletion-plans', {**value, 'policy':POLICY,'actor': current['id'], 'status': 'preview', 'created_at': time.time(), 'expires_at': time.time() + 600}, current['id'])
     return public(plan)
 
 
@@ -140,7 +152,7 @@ def manifest(identifier: str, current=Depends(admin)):
                 rows = db.execute(sql, (identifier,))
             else:
                 value, _, _ = information(db, plan['target']['kind'], plan['target']['id'])
-                if value['fingerprint'] != plan['fingerprint']: raise HTTPException(409, '数据已变化，请重新预览删除范围')
+                if value['fingerprint'] != plan.get('locked_fingerprint',plan['fingerprint']): raise HTTPException(409, '数据已变化，请重新预览删除范围')
                 rows = db.execute("SELECT o.id,o.kind,json_extract(o.body,'$.name') AS name FROM objects o JOIN deletion_scope s ON s.id=o.id ORDER BY o.kind,o.id")
             with tempfile.NamedTemporaryFile(prefix='omp-deletion-', suffix='.json', mode='w', encoding='utf-8', delete=False) as output:
                 path = Path(output.name)
@@ -169,7 +181,17 @@ def manifest(identifier: str, current=Depends(admin)):
         raise
 
 
-@router.post('/deletion-plans/{identifier}/confirm')
+def cancel_related(db, identifier, actor, release_plans):
+    for row in db.execute('SELECT body FROM objects WHERE id IN (SELECT id FROM deletion_jobs)').fetchall():
+        job = json.loads(row['body'])
+        job.update(status='failed', lease_until=0, cancelled_by_deletion=identifier, error='hierarchy_deleted', error_detail='考试层级正在删除，原任务已取消')
+        job.pop('run_token', None); put(db, 'jobs', job, actor)
+    for item in release_plans:
+        item.update(expires_at=0, invalidated_by_deletion=identifier)
+        put(db, 'release-plans', item, actor)
+
+
+@router.post('/deletion-plans/{identifier}/confirm',status_code=202)
 def confirm(identifier: str, body: dict, current=Depends(admin)):
     if body.get('confirm') is not True: raise HTTPException(422, '请核对影响范围并确认删除')
     reason = body.get('reason', '')
@@ -178,33 +200,146 @@ def confirm(identifier: str, body: dict, current=Depends(admin)):
         db.execute('BEGIN IMMEDIATE')
         plan = require(db, identifier, 'deletion-plans')
         if plan['actor'] != current['id']: raise HTTPException(403, '请由生成预览的管理员确认删除')
-        if plan['status'] == 'completed': return public(plan)
+        if plan.get('policy') != POLICY: raise HTTPException(409,'删除策略已更新，请重新预览并核对扫描文件清理范围')
+        if plan['status'] != 'preview': return public(plan)
         if plan['expires_at'] < time.time(): raise HTTPException(409, '删除预览已过期，请重新预览')
         value, release_plans, subject = information(db, plan['target']['kind'], plan['target']['id'])
         if value['blockers']: raise HTTPException(409, value['blockers'][0]['reason'])
         if value['fingerprint'] != plan['fingerprint']: raise HTTPException(409, '扫描、评分或关联记录已变化，请重新预览删除范围')
-        deleted_at = time.time()
-        db.create_function('deletion_uuid', 0, lambda: str(uuid4()))
-        patch = "json_set(body,'$.deletion_plan_id',?,'$.deleted_at',?,'$.deletion_reason',?)"
-        parameters = (identifier, deleted_at, reason.strip())
-        db.execute('INSERT INTO audit(id,actor,action,object_id,body) SELECT deletion_uuid(),?,\'delete\',id,' + patch + ' FROM objects WHERE id IN (SELECT id FROM deletion_scope)', (current['id'], *parameters))
-        db.execute('UPDATE objects SET deleted=1,body=' + patch + ' WHERE id IN (SELECT id FROM deletion_scope)', parameters)
-        db.execute('DELETE FROM regrade_queue WHERE template_id IN (SELECT id FROM deletion_scope)')
-        db.execute('DELETE FROM review_allocations WHERE template_id IN (SELECT id FROM deletion_scope)')
-        db.execute('DELETE FROM allocation_state WHERE question_id IN (SELECT id FROM deletion_questions)')
-        for row in db.execute('SELECT body FROM objects WHERE id IN (SELECT id FROM deletion_jobs)').fetchall():
-            job = json.loads(row['body'])
-            job.update(status='failed', lease_until=0, cancelled_by_deletion=identifier, error='hierarchy_deleted', error_detail='考试层级已删除或变更，请在有效考试中重新提交任务')
-            job.pop('run_token', None); put(db, 'jobs', job, current['id'])
-        for item in release_plans:
-            item.update(expires_at=0, invalidated_by_deletion=identifier)
-            put(db, 'release-plans', item, current['id'])
-        if plan['target']['kind'] == 'projects':
-            for row in db.execute("SELECT body FROM objects WHERE kind='archives' AND deleted=0 AND json_extract(body,'$.project_id')=?", (plan['project_id'],)).fetchall():
-                archive = json.loads(row['body'])
-                archive.update(project_deleted=True, project_name=plan['target']['name'])
-                put(db, 'archives', archive, current['id'])
-        if subject and subject.get('default_group_id') == plan['target']['id']:
-            subject.pop('default_group_id'); put(db, 'subjects', subject, current['id'])
-        plan.update(status='completed', completed_at=deleted_at, reason=reason.strip())
-        return public(put(db, 'deletion-plans', plan, current['id']))
+        db.execute('INSERT INTO deletion_locks VALUES(?,?,?)',(plan['project_id'],identifier,time.time()))
+        cancel_related(db,identifier,current['id'],release_plans)
+        from .jobs import create_job
+        job=create_job(db,'delete-hierarchy',{'plan_id':identifier},plan['project_id'],current['id'])
+        value,_,_=information(db,plan['target']['kind'],plan['target']['id'])
+        plan.update(status='queued',reason=reason.strip(),confirmed_at=time.time(),locked_fingerprint=value['fingerprint'],job_id=job['id'],archive_id=str(uuid4()))
+        put(db,'deletion-plans',plan,current['id'])
+    from .jobs import dispatch
+    dispatch(job['id'],background=True)
+    return public(plan)
+
+
+def validate_archive(db,plan,data):
+    """Prove the archive includes the final owned records and scoring evidence."""
+    archived={r['data']['id']:r for r in data['records']}
+    for row in db.execute('SELECT o.id,o.kind,o.body FROM objects o JOIN deletion_scope s ON s.id=o.id'):
+        item=archived.get(row['id'])
+        if not item or item['kind']!=row['kind'] or item['data']!=json.loads(row['body']):
+            raise HTTPException(409,'归档未覆盖当前业务记录：'+row['id'])
+    for name,key,sql in (
+        ('score_history','id','SELECT * FROM scores WHERE task_id IN (SELECT id FROM deletion_scope)'),
+        ('review_results',None,'SELECT * FROM review_results WHERE submission_id IN (SELECT id FROM deletion_scope)'),
+    ):
+        evidence={r[key] if key else (r['submission_id'],r['question_id']):r for r in data.get(name,[])}
+        for row in db.execute(sql):
+            record=dict(row);identifier=record[key] if key else (record['submission_id'],record['question_id'])
+            if evidence.get(identifier)!=record:raise HTTPException(409,'归档未覆盖当前评分记录')
+
+
+def unchanged(db,plan,ownership):
+    from .jobs import guard
+    guard(db,ownership)
+    value,_,subject=information(db,plan['target']['kind'],plan['target']['id'])
+    if value['fingerprint']!=plan['locked_fingerprint']:raise HTTPException(409,'删除期间业务快照已变化，请核查原任务')
+    lock=db.execute('SELECT plan_id FROM deletion_locks WHERE project_id=?',(plan['project_id'],)).fetchone()
+    if not lock or lock['plan_id']!=plan['id']:raise HTTPException(409,'删除任务锁已失效')
+    return subject
+
+
+def prepare_files(db,plan,manifest):
+    from .storage import backend,location,local_path
+    entries={e['path']:e for e in manifest}
+    files=[]
+    for row in db.execute("SELECT o.body FROM objects o JOIN deletion_scope s ON s.id=o.id WHERE o.kind='pages'"):
+        page=json.loads(row['body'])
+        for suffix in ('.image','.png'):
+            relative='pages/'+page['id']+suffix;entry=entries.get(relative);path=local_path(relative)
+            refs=[json.loads(r['body']) for r in db.execute("SELECT body FROM objects WHERE kind='storage-assets' AND deleted=0 AND json_extract(body,'$.relative')=? AND json_extract(body,'$.status')='stored'",(relative,))]
+            if entry is None:
+                if suffix=='.image' or path.exists() or refs or page.get('normalized_sha256'):raise HTTPException(409,'归档缺少扫描文件：'+relative)
+                continue
+            if any(r['backend']!=backend() or r.get('location')!=location() for r in refs):raise HTTPException(409,'远端扫描文件位置与当前配置不一致，请恢复相应存储配置后重试')
+            # Remote keys must be scoped to this exact project and scan file.
+            if any(r['key'] not in (relative,'projects/'+plan['project_id']+'/'+relative) or r.get('project_id') not in (None,plan['project_id']) for r in refs):raise HTTPException(409,'远端扫描文件归属不一致')
+            files.append((plan['id'],relative,entry['sha256'],entry['size'],json.dumps(refs,ensure_ascii=False)))
+    db.executemany('INSERT INTO deletion_files(plan_id,relative,sha256,size,remote_refs) VALUES(?,?,?,?,?)',files)
+    plan.update(files_prepared=True,file_count=len(files),remote_files=sum(bool(json.loads(f[4])) for f in files))
+    put(db,'deletion-plans',plan,plan['actor'])
+
+
+def preflight_files(files,manifest):
+    from .archive import checksum
+    from .storage import local_path,backend,location
+    entries={e['path']:e for e in manifest}
+    for item in files:
+        entry=entries.get(item['relative'])
+        if not entry or entry['sha256']!=item['sha256'] or entry['size']!=item['size']:raise HTTPException(409,'归档扫描清单校验失败')
+        path=local_path(item['relative'])
+        if path.exists() and (path.stat().st_size!=item['size'] or checksum(path)!=item['sha256']):raise HTTPException(409,'本地扫描文件与归档不一致：'+item['relative'])
+        for remote in json.loads(item['remote_refs']):
+            if remote['backend']!=backend() or remote.get('location')!=location():raise HTTPException(409,'远端存储配置已变化，请恢复原配置后重试')
+
+
+def retire(db,plan,subject):
+    identifier=plan['id'];actor=plan['actor'];reason=plan['reason']
+    deleted_at = time.time()
+    db.create_function('deletion_uuid', 0, lambda: str(uuid4()))
+    patch = "json_set(body,'$.deletion_plan_id',?,'$.deleted_at',?,'$.deletion_reason',?)"
+    parameters = (identifier, deleted_at, reason)
+    db.execute('INSERT INTO audit(id,actor,action,object_id,body) SELECT deletion_uuid(),?,\'delete\',id,' + patch + ' FROM objects WHERE id IN (SELECT id FROM deletion_scope)', (actor, *parameters))
+    db.execute('UPDATE objects SET deleted=1,body=' + patch + ' WHERE id IN (SELECT id FROM deletion_scope)', parameters)
+    db.execute('DELETE FROM regrade_queue WHERE template_id IN (SELECT id FROM deletion_scope)')
+    db.execute('DELETE FROM review_allocations WHERE template_id IN (SELECT id FROM deletion_scope)')
+    db.execute('DELETE FROM allocation_state WHERE question_id IN (SELECT id FROM deletion_questions)')
+    if plan['target']['kind'] == 'projects':
+        for row in db.execute("SELECT body FROM objects WHERE kind='archives' AND deleted=0 AND json_extract(body,'$.project_id')=?", (plan['project_id'],)).fetchall():
+            archive = json.loads(row['body'])
+            archive.update(project_deleted=True, project_name=plan['target']['name'])
+            put(db, 'archives', archive, actor)
+    if subject and subject.get('default_group_id') == plan['target']['id']:
+        subject.pop('default_group_id'); put(db, 'subjects', subject, actor)
+    db.execute('DELETE FROM deletion_locks WHERE project_id=? AND plan_id=?',(plan['project_id'],identifier))
+    plan.update(status='completed', completed_at=deleted_at,phase='已完成')
+    return public(put(db, 'deletion-plans', plan, actor))
+
+def perform(job,progress):
+    from .archive import create,verify
+    from .lifecycle import operation
+    from .storage import Storage,local_path
+    ownership=(job['id'],job['run_token']);identifier=job['payload']['plan_id']
+    with operation(identifier,ownership):
+        with connect() as db:
+            db.execute('BEGIN IMMEDIATE');plan=require(db,identifier,'deletion-plans')
+            if plan['status']=='completed':return public(plan)
+            unchanged(db,plan,ownership)
+            plan.update(status='running',phase='生成并校验归档');put(db,'deletion-plans',plan,job['actor'])
+        create(plan['project_id'],plan['actor'],progress,plan['archive_id'],ownership,preserve_status=True)
+        archive,manifest,data=verify(plan['archive_id'],progress)
+        with connect() as db:
+            db.execute('BEGIN IMMEDIATE');unchanged(db,plan,ownership);validate_archive(db,plan,data)
+            if not plan.get('files_prepared'):prepare_files(db,plan,manifest)
+            files=[dict(r) for r in db.execute('SELECT * FROM deletion_files WHERE plan_id=? ORDER BY relative',(identifier,))]
+        # Validate every file and location before the first destructive call.
+        preflight_files(files,manifest)
+        with connect() as db:
+            db.execute('BEGIN IMMEDIATE');unchanged(db,plan,ownership)
+            plan.update(phase='清理本地及远端扫描图片');put(db,'deletion-plans',plan,plan['actor'])
+        for index,item in enumerate(files):
+            if progress:progress(index,len(files),'清理本地及远端扫描图片')
+            if item['done']:continue
+            with connect() as db:
+                from .jobs import guard
+                guard(db,ownership)
+            # Repeating DELETE after a crash is safe; adapters accept missing keys.
+            for remote in json.loads(item['remote_refs']):Storage().delete(remote['key'])
+            local_path(item['relative']).unlink(missing_ok=True)
+            with connect() as db:
+                db.execute('BEGIN IMMEDIATE');guard(db,ownership)
+                for remote in json.loads(item['remote_refs']):
+                    saved=require(db,remote['id'],'storage-assets')
+                    saved.update(status='archived',archive_id=archive['id'],deletion_plan_id=identifier)
+                    put(db,'storage-assets',saved,plan['actor'])
+                db.execute('UPDATE deletion_files SET done=1 WHERE plan_id=? AND relative=?',(identifier,item['relative']))
+        if progress:progress(len(files),len(files),'移除业务记录')
+        with connect() as db:
+            db.execute('BEGIN IMMEDIATE');subject=unchanged(db,plan,ownership)
+            return retire(db,plan,subject)

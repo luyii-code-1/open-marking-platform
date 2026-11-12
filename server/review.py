@@ -16,6 +16,8 @@ router=APIRouter(prefix='/api/v1')
 
 def question_for(db,template_id,question_id):
     template=require(db,template_id,'templates')
+    from .lifecycle import writable
+    writable(db,'templates',template)
     question=next((q for q in template['questions'] if q['id']==question_id),None)
     if question is None: raise HTTPException(404,'题目不存在')
     return template,question
@@ -23,6 +25,8 @@ def question_for(db,template_id,question_id):
 
 def own_task(db,identifier,current):
     task=require(db,identifier,'tasks')
+    from .lifecycle import writable
+    writable(db,'tasks',task)
     if current['role']!='admin' and task['user_id']!=current['id']: raise HTTPException(403,'无权访问该任务')
     return task
 

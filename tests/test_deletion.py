@@ -6,15 +6,26 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
-from server import db, deletion, jobs
+from server import db, deletion, jobs, storage
 from server.identifiers import IdentifierConflict
 from server.main import app
 
 
 def post(client, path, body, headers):
     response = client.post('/api/v1/' + path, json=body, headers=headers)
+    if path.endswith('/confirm'):
+        assert response.status_code == 202, response.text
+        plan=response.json();jobs.execute(plan['job_id'])
+        response=client.get('/api/v1/deletion-plans/'+plan['id'],headers=headers)
+        assert response.json()['status']=='completed',client.get('/api/v1/jobs/'+plan['job_id'],headers=headers).text
     assert response.status_code == 200, response.text
     return response.json()
+
+
+@pytest.fixture(autouse=True)
+def durable_queue(monkeypatch):
+    monkeypatch.setenv('OMP_TASK_MODE','celery')
+    monkeypatch.setattr(jobs.run,'apply_async',lambda **kwargs:None)
 
 
 def admin_login(client):
@@ -75,7 +86,7 @@ def populated(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize('kind', ['projects', 'subjects', 'groups'])
-def test_retire_owned_records_keep_shared_files_scores_archives_and_ids(populated, kind):
+def test_archive_remove_scans_retire_owned_records_keep_shared_files_scores_and_ids(populated, kind):
     f = populated; client = f['client']; headers = f['headers']
     target = f[{'projects': 'project', 'subjects': 'subject', 'groups': 'group'}[kind]]
     with db.connect() as connection:
@@ -109,7 +120,10 @@ def test_retire_owned_records_keep_shared_files_scores_archives_and_ids(populate
         with pytest.raises(IdentifierConflict): db.put(connection, kind, {**target, 'name': '复用旧编号'})
         cancelled = db.get(connection, f['job']['id']); assert cancelled['status'] == 'failed' and cancelled['cancelled_by_deletion'] == plan['id']
         assert db.get(connection, f['release']['id'])['invalidated_by_deletion'] == plan['id']
-    for suffix in ('.image', '.png'): assert (f['tmp_path'] / 'pages' / (f['page']['id'] + suffix)).read_bytes() == f['content']
+    for suffix in ('.image', '.png'): assert not (f['tmp_path'] / 'pages' / (f['page']['id'] + suffix)).exists()
+    from server.archive import verify
+    latest,_,data=verify(completed['archive_id'])
+    assert latest['id']!=f['archive']['id'] and len(data['score_history'])==1 and len(data['review_results'])==1
     assert (f['tmp_path'] / 'assets' / (f['asset']['id'] + '.png')).read_bytes() == f['content']
     archived = client.get(f"/api/v1/archives/{f['archive']['id']}/download", headers=headers)
     assert archived.status_code == 200 and archived.content
@@ -203,3 +217,98 @@ def test_large_scope_manifest_and_delete_are_not_limited_by_sql_parameter_count(
         with db.connect() as connection:
             assert len(db.objects(connection, 'students')) == 1205
             assert not db.objects(connection, 'submissions')
+
+
+def queued_delete(f):
+    plan=post(f['client'],f"groups/{f['group']['id']}/deletion-preview",None,f['headers'])
+    response=f['client'].post(f"/api/v1/deletion-plans/{plan['id']}/confirm",json={'confirm':True,'reason':'归档后清理'},headers=f['headers'])
+    assert response.status_code==202,response.text
+    return response.json()
+
+
+def retry_delete(f,plan):
+    response=f['client'].post(f"/api/v1/jobs/{plan['job_id']}/retry",headers=f['headers'])
+    assert response.status_code==200,response.text
+    jobs.execute(plan['job_id'])
+
+
+def test_remote_partial_failure_fences_writes_preserves_sibling_and_resumes(populated,monkeypatch):
+    f=populated;deleted=[];failing=True
+    monkeypatch.setenv('OMP_STORAGE','ros')
+    with db.connect() as connection:
+        # A sibling's bytes and a shared background must survive scoped cleanup.
+        sibling_batch=db.put(connection,'scan-batches',{'group_id':f['sibling']['id'],'template_id':f['template']['id']})
+        sibling_page=db.put(connection,'pages',{'batch_id':sibling_batch['id'],'status':'received','sha256':f['digest']})
+        sibling_path=f['tmp_path']/'pages'/(sibling_page['id']+'.image');sibling_path.write_bytes(f['content'])
+        for suffix in ('.image','.png'):
+            relative='pages/'+f['page']['id']+suffix
+            db.put(connection,'storage-assets',{'relative':relative,'key':'projects/'+f['project']['id']+'/'+relative,'project_id':f['project']['id'],'backend':'ros','location':storage.location(),'status':'stored'})
+    def remote_delete(self,key):
+        if key.endswith('.png') and failing:raise OSError('remote unavailable')
+        deleted.append(key)
+    monkeypatch.setattr(storage.Storage,'delete',remote_delete)
+    plan=queued_delete(f);jobs.execute(plan['job_id'])
+    with db.connect() as connection:
+        job=db.get(connection,plan['job_id']);assert job['status']=='pending'
+        assert db.get(connection,f['group']['id']) and db.get(connection,f['task']['id'])
+        assert connection.execute('SELECT COUNT(*) FROM deletion_files WHERE plan_id=? AND done=1',(plan['id'],)).fetchone()[0]==1
+        assert connection.execute('SELECT COUNT(*) FROM deletion_locks').fetchone()[0]==1
+    assert not (f['tmp_path']/'pages'/(f['page']['id']+'.image')).exists()
+    assert (f['tmp_path']/'pages'/(f['page']['id']+'.png')).exists()
+    assert f['client'].post(f"/api/v1/tasks/{f['task']['id']}/score",json={'score':9,'idempotency_key':'during-delete'},headers=f['teacher_headers']).status_code==409
+    assert f['client'].post('/api/v1/groups',json={'subject_id':f['subject']['id'],'name':'迟到组'},headers=f['headers']).status_code==409
+    assert f['client'].post(f"/api/v1/archives/{plan['archive_id']}/restore",headers=f['headers']).status_code==409
+    assert f['client'].get(f"/api/v1/pages/{f['page']['id']}/image",headers=f['headers']).status_code==409
+    assert post(f['client'],f"projects/{f['project']['id']}/deletion-preview",None,f['headers'])['id']==plan['id']
+    # The job survives a process recovery and resumes the already confirmed plan.
+    failing=False;retry_delete(f,plan)
+    with db.connect() as connection:
+        assert db.get(connection,plan['id'])['status']=='completed'
+        assert connection.execute('SELECT COUNT(*) FROM deletion_locks').fetchone()[0]==0
+        assert db.get(connection,sibling_page['id'])
+        assert all(r['status']=='archived' for r in db.objects(connection,'storage-assets'))
+    assert len(deleted)==2 and sibling_path.read_bytes()==f['content']
+    assert (f['tmp_path']/'assets'/(f['asset']['id']+'.png')).exists()
+
+
+def test_corrupt_archive_and_remote_location_fail_before_any_file_removal(populated,monkeypatch):
+    f=populated;plan=queued_delete(f)
+    from server import archive
+    original_create=archive.create;valid=[]
+    def corrupt(*args,**kwargs):
+        result=original_create(*args,**kwargs);path=archive.package_path(result['id'])
+        valid.append(path.read_bytes());path.write_bytes(valid[0]+b'corrupt')
+        return result
+    monkeypatch.setattr(archive,'create',corrupt)
+    jobs.execute(plan['job_id'])
+    assert all((f['tmp_path']/'pages'/(f['page']['id']+s)).exists() for s in ('.image','.png'))
+    with db.connect() as connection:
+        assert db.get(connection,f['group']['id']) and not connection.execute('SELECT COUNT(*) FROM deletion_files').fetchone()[0]
+        relative='pages/'+f['page']['id']+'.image'
+        reference=db.put(connection,'storage-assets',{'relative':relative,'key':'projects/'+f['project']['id']+'/'+relative,'project_id':f['project']['id'],'backend':'ros','location':'other-location','status':'stored'})
+    archive.package_path(plan['archive_id']).write_bytes(valid[0])
+    monkeypatch.setattr(archive,'create',original_create);retry_delete(f,plan)
+    with db.connect() as connection:
+        assert db.get(connection,plan['job_id'])['status']=='failed'
+        assert db.get(connection,f['group']['id'])
+        reference['status']='archived';db.put(connection,'storage-assets',reference)
+    assert all((f['tmp_path']/'pages'/(f['page']['id']+s)).exists() for s in ('.image','.png'))
+    retry_delete(f,plan)
+    with db.connect() as connection:assert db.get(connection,plan['id'])['status']=='completed'
+
+
+def test_retirement_transaction_failure_can_resume_after_files_removed(populated,monkeypatch):
+    f=populated;plan=queued_delete(f);original=deletion.put
+    def fail(connection,kind,body,actor=None):
+        if kind=='subjects' and 'default_group_id' not in body:raise RuntimeError('interrupted retirement')
+        if kind=='deletion-plans' and body.get('status')=='completed':raise RuntimeError('interrupted retirement')
+        return original(connection,kind,body,actor)
+    monkeypatch.setattr(deletion,'put',fail);jobs.execute(plan['job_id'])
+    with db.connect() as connection:
+        assert db.get(connection,f['task']['id']) and db.get(connection,f['group']['id'])
+        assert connection.execute("SELECT COUNT(*) FROM audit WHERE action='delete'").fetchone()[0]==0
+        assert connection.execute('SELECT COUNT(*) FROM identifiers WHERE retired=1').fetchone()[0]==0
+        assert connection.execute('SELECT COUNT(*) FROM deletion_locks').fetchone()[0]==1
+    assert not (f['tmp_path']/'pages'/(f['page']['id']+'.image')).exists()
+    monkeypatch.setattr(deletion,'put',original);retry_delete(f,plan)
+    with db.connect() as connection:assert db.get(connection,plan['id'])['status']=='completed'

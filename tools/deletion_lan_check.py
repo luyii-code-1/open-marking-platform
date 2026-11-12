@@ -10,7 +10,7 @@ import httpx
 from server import paper
 
 
-def validate(api, revision):
+def validate(api, revision, inspect_files=None):
     renderer = shutil.which('pdftoppm')
     if not renderer: raise RuntimeError('需要Poppler验证实际扫描链路')
     def post(path, body=None, status=200):
@@ -61,6 +61,7 @@ def validate(api, revision):
     response = api.get(f"scan-batches/{batch['id']}/pages"); response.raise_for_status(); page = response.json()[0]
     assert page['status'] == 'recognized'
     assert page['candidate_number'] == candidate
+    if inspect_files:assert all(inspect_files(page_id).values())
     post(f"scan-batches/{batch['id']}/pair")
     response = api.get('results', params={'group_id': group_id}); response.raise_for_status()
     assert len(response.json()) == 1 and response.json()[0]['total'] == 1
@@ -75,8 +76,13 @@ def validate(api, revision):
     assert not plan['blockers'] and plan['retained_archives'] == 1
     response = api.get(f"deletion-plans/{plan['id']}/manifest"); response.raise_for_status()
     assert len(response.json()['records']) == plan['record_count'] and len(response.json()['questions']) == 1
-    result = post(f"deletion-plans/{plan['id']}/confirm", {'confirm': True, 'reason': '隔离部署验证完成'})
-    assert result['status'] == 'completed'
+    result = post(f"deletion-plans/{plan['id']}/confirm", {'confirm': True, 'reason': '隔离部署验证完成'},status=202)
+    finished=wait('jobs/'+result['job_id'],lambda row:row.get('status')=='completed')
+    result=finished['result']
+    assert result['status']=='completed' and result['file_count']==2
+    if inspect_files:assert not any(inspect_files(page_id).values())
+    response=api.get(f"archives/{result['archive_id']}/download");response.raise_for_status()
+    assert response.content
     assert api.get(f"scan-batches/{batch['id']}").status_code == 404
     response = api.get('projects'); response.raise_for_status()
     assert project['id'] not in {p['id'] for p in response.json()}
@@ -84,4 +90,4 @@ def validate(api, revision):
     assert hashlib.sha256(response.content).hexdigest() == digest
     response = api.get('archives'); response.raise_for_status()
     assert next(a for a in response.json() if a['id'] == archive['id'])['project_deleted']
-    return {'status': 'passed', 'isolated_project_id': project['id'], 'deleted_records': plan['record_count'], 'candidate_recognition': 'passed', 'final_score': 1, 'archive_preserved': True, 'existing_personnel_reused': True}
+    return {'status': 'passed', 'isolated_project_id': project['id'], 'deleted_records': plan['record_count'], 'candidate_recognition': 'passed', 'final_score': 1, 'archive_preserved': True, 'fresh_archive_id':result['archive_id'],'deleted_scan_files':result['file_count'],'physical_local_cleanup_verified':inspect_files is not None, 'existing_personnel_reused': True}

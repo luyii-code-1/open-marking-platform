@@ -125,6 +125,11 @@ class Storage:
 
 def materialize(relative):
     relative=safe_key(relative);target=local_path(relative)
+    if relative.startswith('pages/'):
+        from .lifecycle import writable
+        with connect() as db:
+            page=get(db,relative.split('/')[-1].split('.')[0],'pages')
+            if page:writable(db,'pages',page)
     if target.exists():return target
     with connect() as db:
         expected=expected_hash(db,relative)
@@ -148,6 +153,8 @@ def materialize(relative):
 
 def mirror(relative,project_id=None):
     relative=safe_key(relative)
+    from .lifecycle import project_writable
+    with connect() as db:project_writable(db,project_id)
     if backend()=='local':return
     key=f'projects/{project_id}/{relative}' if project_id else relative
     source=local_path(relative)

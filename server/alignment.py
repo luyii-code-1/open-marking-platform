@@ -66,6 +66,8 @@ def align_page(identifier:str,body:dict,current=Depends(admin)):
             db.execute('BEGIN IMMEDIATE')
             if repeated(db,body['request_id'],identifier,fingerprint):return require(db,identifier,'pages')
             page=require(db,identifier,'pages');batch=require(db,page['batch_id'],'scan-batches');group=require(db,batch['group_id'],'groups')
+            from .lifecycle import writable
+            writable(db,'pages',page)
             if group.get('frozen') or batch['status']=='paired':raise HTTPException(409,'已配对或发布的页面请使用补扫替换，发布后需先复核')
             if page['status']=='received':raise HTTPException(425,'页面正在识别，请稍后再调整')
             if path.exists():
