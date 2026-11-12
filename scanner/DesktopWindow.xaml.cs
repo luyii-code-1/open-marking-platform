@@ -9,6 +9,22 @@ namespace OMP.Scanner;
 
 public partial class DesktopWindow : Window
 {
+    private bool _pageReady;
+    private string _pendingActivation="";
+    public async void ReceiveActivation(string value)
+    {
+        if(value.Length==0){Activate();return;}
+        if(!_pageReady){_pendingActivation=value;return;}
+        try
+        {
+            var pairing=PairingActivation.Parse(value);Activate();
+            if(System.Windows.MessageBox.Show(this,"将本机连接到：\n"+pairing.Server+"\n并使用网页生成的配对请求绑定设备。","连接扫描服务器",MessageBoxButton.OKCancel,MessageBoxImage.Question)!=MessageBoxResult.OK)return;
+            var args=JsonSerializer.SerializeToElement(new{server_url=pairing.Server,pairing_code=pairing.Code});
+            var result=await _controller.Invoke("connect",args);
+            if(result is not null){var data=JsonSerializer.SerializeToElement(result);Browser.CoreWebView2.Navigate(data.GetProperty("page_url").GetString());}
+        }
+        catch(Exception error){System.Windows.MessageBox.Show(this,error.Message,"扫描客户端连接");}
+    }
     private const string LocalPage="https://omp-scanner.local/scanner.html";
     private readonly DesktopController _controller=new();
     private readonly DispatcherTimer _timer=new(){Interval=TimeSpan.FromSeconds(8)};
@@ -43,7 +59,7 @@ public partial class DesktopWindow : Window
             Browser.CoreWebView2.WebMessageReceived+=Message;
             _controller.Changed=()=>Dispatcher.BeginInvoke(()=>
             {
-                if(!_closing&&Allowed(Browser.Source?.AbsoluteUri??""))Browser.CoreWebView2.PostWebMessageAsJson("{\"event\":\"changed\",\"protocol\":\"omp-scanner-2\"}");
+                if(!_closing&&Allowed(Browser.Source?.AbsoluteUri??""))Browser.CoreWebView2.PostWebMessageAsJson("{\"event\":\"changed\",\"protocol\":\"omp-scanner-3\"}");
             });
             _timer.Tick+=async(_,_)=>await _controller.Tick();_timer.Start();
             Browser.CoreWebView2.Navigate(LocalPage);
@@ -51,12 +67,16 @@ public partial class DesktopWindow : Window
             if(_controller.Server.Length>0)
             {
                 await _controller.Tick();
-                Browser.CoreWebView2.PostWebMessageAsJson("{\"event\":\"changed\",\"protocol\":\"omp-scanner-2\"}");
+                Browser.CoreWebView2.PostWebMessageAsJson("{\"event\":\"changed\",\"protocol\":\"omp-scanner-3\"}");
                 using var timeout=new CancellationTokenSource(TimeSpan.FromSeconds(4));
                 try{using var http=new System.Net.Http.HttpClient();using var response=await http.GetAsync(_controller.PageUrl(),timeout.Token);if(response.IsSuccessStatusCode)Browser.CoreWebView2.Navigate(_controller.PageUrl());}catch(System.Net.Http.HttpRequestException){}catch(OperationCanceledException){}
             }
         }
-        catch(Exception error){LoadingText.Text=error.Message;LoadingText.Visibility=Visibility.Visible;}
+        catch(Exception error){LoadingText.Text=error.Message;LoadingText.Visibility=Visibility.Visible;return;}
+        _pageReady=true;
+        var activation=_pendingActivation.Length>0?_pendingActivation:PairingActivation.InitialUri;
+        PairingActivation.InitialUri="";_pendingActivation="";
+        if(activation.Length>0)ReceiveActivation(activation);
     }
     private async void Message(object? sender,CoreWebView2WebMessageReceivedEventArgs args)
     {
@@ -84,6 +104,11 @@ public partial class DesktopWindow : Window
                 Browser.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new{id=requestId,ok=true,result=new{}}));Browser.CoreWebView2.Navigate(LocalPage);return;
             }
             var result=await _controller.Invoke(method,body);
+            if(method=="connect"&&result is not null)
+            {
+                var connected=JsonSerializer.SerializeToElement(result);
+                if(connected.TryGetProperty("page_url",out var target)&&Allowed(target.GetString()??"")){Browser.CoreWebView2.Navigate(target.GetString());return;}
+            }
             if(!Allowed(args.Source)||Browser.Source?.GetLeftPart(UriPartial.Path)!=new Uri(args.Source).GetLeftPart(UriPartial.Path))return;
             Browser.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new{id=requestId,ok=true,result}));
             if((method is "connect" or "onlinePage")&&result is not null)

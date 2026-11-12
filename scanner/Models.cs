@@ -16,6 +16,7 @@ public sealed class BatchRow
     public int TemplateRevision { get; set; }
     public string Label { get; set; } = "";
     public string Room { get; set; } = "";
+    public string RoomTagsJson { get; set; } = "[]";
     public string Paper { get; set; } = "A4";
     public int Sides { get; set; }
     public string BackOrder { get; set; } = "same";

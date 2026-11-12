@@ -15,8 +15,20 @@ public static class Program
             try { ScannerSelfTest.Run(args).GetAwaiter().GetResult(); return 0; }
             catch (Exception error) { Console.Error.WriteLine("SELFTEST FAIL: " + error.GetType().Name + ": " + error.Message); return 1; }
         }
-        var app = new App();
-        app.InitializeComponent();
-        return app.Run();
+        try
+        {
+            var activation=args.FirstOrDefault()??"";
+            if(activation.Length>0)PairingActivation.Parse(activation);
+            using var instance=new DesktopInstance();
+            if(!instance.Primary){instance.Forward(activation).GetAwaiter().GetResult();return 0;}
+            PairingActivation.InitialUri=activation;
+            var app=new App();app.InitializeComponent();
+            instance.Activated=value=>app.Dispatcher.BeginInvoke(()=>
+            {
+                if(app.MainWindow is DesktopWindow window)window.ReceiveActivation(value);else PairingActivation.InitialUri=value;
+            });
+            _=instance.Listen();return app.Run();
+        }
+        catch(Exception error){System.Windows.MessageBox.Show(error.Message,"扫描客户端");return 1;}
     }
 }

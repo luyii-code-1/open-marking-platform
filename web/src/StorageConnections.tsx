@@ -49,7 +49,7 @@ export function StorageConnections() {
 }
 
 export function ProjectStorage({project,onSaved}:{project:Row;onSaved:()=>Promise<void>}) {
-  const connections=useResource<Row[]>('/storage-connections',[]),[selected,setSelected]=useState<string|undefined>(),[saving,setSaving]=useState(false)
+  const connections=useResource<Row[]>('/storage-connections/choices',[]),[selected,setSelected]=useState<string|undefined>(),[saving,setSaving]=useState(false)
   const {message}=App.useApp()
   useEffect(()=>setSelected(project.storage_connection_id||undefined),[project.id,project.storage_connection_id])
   async function save(){setSaving(true);try{await send(`/projects/${project.id}/storage`,{connection_id:selected||null},'PUT');announceChanges(['projects']);await onSaved();message.success('项目存储已更新')}catch(e){message.error((e as Error).message)}finally{setSaving(false)}}

@@ -1,6 +1,7 @@
+import { ScannerDesk } from './ScannerDesk'
 import { useEffect, useState } from 'react'
 import { Alert, Avatar, Button, Card, Empty, Layout, Menu, Radio, Space, Spin, Statistic, Tag, Typography } from 'antd'
-import { ApartmentOutlined, AuditOutlined, BookOutlined, FileSearchOutlined, LogoutOutlined, MenuOutlined, ReadOutlined, SettingOutlined, TeamOutlined } from '@ant-design/icons'
+import { ScanOutlined, ApartmentOutlined, AuditOutlined, BookOutlined, FileSearchOutlined, LogoutOutlined, MenuOutlined, ReadOutlined, SettingOutlined, TeamOutlined } from '@ant-design/icons'
 import { ApiError, currentToken, request, send, setToken, useResource, type User } from './api'
 import { DataManagement, Exceptions, Results, Settings } from './Management'
 import { Exams } from './Exams'
@@ -33,15 +34,15 @@ export function App() {
       }
     }finally{if(active)setChecking(false)}
   })();return()=>{active=false}}, [])
-  useEffect(()=>{if(user && !offlineAccess && location.page==='login'){const next:Portal=location.section==='admin'&&user.role==='admin'?'admin':'marking';setPortal(next);sessionStorage.setItem('omp-portal',next);navigate(next==='admin'?'#/exams':'#/marking',true)}},[user,offlineAccess,location.page,location.section])
+  useEffect(()=>{if(user && !offlineAccess && location.page==='login'){const next:Portal=location.section==='admin'&&['admin','manager'].includes(user.role)?'admin':'marking';setPortal(next);sessionStorage.setItem('omp-portal',next);navigate(next==='admin'?'#/scanner':'#/marking',true)}},[user,offlineAccess,location.page,location.section])
   if (checking) return <div className="screen-center"><Spin size="large" /></div>
-  if (!user) return <Login portal={location.page==='login' && (location.section==='admin'||location.section==='marking')?location.section:undefined} onPortal={value=>navigate(value?'#/login/'+value:'#/')} onLogin={(person,selected)=>{setPortal(selected);sessionStorage.setItem('omp-portal',selected);acceptUser(person);navigate(selected==='admin'?'#/exams':'#/marking',true)}} />
-  const admin = user.role === 'admin', management = admin && portal === 'admin'&&!offlineAccess
-  const page = offlineAccess?'marking':management || ['dashboard','marking','results','account'].includes(location.page) ? location.page : 'dashboard'
+  if (!user) return <Login portal={location.page==='login' && (location.section==='admin'||location.section==='marking')?location.section:undefined} onPortal={value=>navigate(value?'#/login/'+value:'#/')} onLogin={(person,selected)=>{setPortal(selected);sessionStorage.setItem('omp-portal',selected);acceptUser(person);navigate(selected==='admin'?'#/scanner':'#/marking',true)}} />
+  const admin = ['admin','manager'].includes(user.role), management = admin && portal === 'admin'&&!offlineAccess
+  const page = offlineAccess?'marking':location.page==='settings'&&user.role==='manager'?'scanner':management || ['dashboard','marking','results','account'].includes(location.page) ? location.page : 'dashboard'
   const items = [
     { key: 'dashboard', icon: <ApartmentOutlined />, label: '工作概览' },
     { type: 'group' as const, key: 'work', label: '考试工作', children: [
-      ...(management ? [{ key: 'exams', icon: <BookOutlined />, label: '考试项目' }] : []),
+      ...(management ? [{key:'scanner',icon:<ScanOutlined/>,label:'扫描台'},{ key: 'exams', icon: <BookOutlined />, label: '考试项目' }] : []),
       { key: 'marking', icon: <AuditOutlined />, label: '阅卷中心' },
       ...(management ? [{ key: 'exceptions', icon: <FileSearchOutlined />, label: '异常总览' }] : []),
       { key: 'results', icon: <ReadOutlined />, label: '成绩总览' },
@@ -49,7 +50,7 @@ export function App() {
     ...(management ? [{ type: 'group' as const, key: 'management', label: '基础管理', children: [
       { key: 'people', icon: <TeamOutlined />, label: '人员与班级' },
       { key: 'archives', icon: <BookOutlined />, label: '归档文件' },
-      { key: 'settings', icon: <SettingOutlined />, label: '系统设置' },
+      ...(user.role==='admin'?[{ key: 'settings', icon: <SettingOutlined />, label: '系统设置' }]:[]),
     ] }] : []),
     { key: 'account', icon: <SettingOutlined />, label: '个人账号' },
   ]
@@ -60,16 +61,17 @@ export function App() {
       <Menu theme="light" mode="inline" items={items} selectedKeys={[page]} onClick={({ key }) => setPage(key)} />
     </Layout.Sider>
     <Layout>
-      <Layout.Header className="topbar"><Space><Button type="text" aria-label="展开导航" icon={<MenuOutlined />} onClick={() => setCollapsed(!collapsed)} /><span className="breadcrumb">{management ? '管理后台' : '阅卷台'} <span>/</span> {title}</span></Space><Space><Radio.Group size="small" value={mobile} onChange={e => setMobile(e.target.value)} options={[{ label: '自适应', value: 'auto' }, { label: '电脑', value: 'desktop' }, { label: '手机', value: 'mobile' }]} /><PwaStatus/><RealtimeStatus user={user} onProfile={setUser} onExpired={endSession}/>{admin && <Button type="text" onClick={()=>{if(!confirmLeaving())return;const next:Portal=management?'marking':'admin';setPortal(next);sessionStorage.setItem('omp-portal',next);navigate(next==='admin'?'#/exams':'#/marking')}}>{management?'进入阅卷台':'进入管理后台'}</Button>}<Avatar size="small">{user.name.slice(0, 1)}</Avatar><Text>{user.name}</Text><Button type="text" icon={<LogoutOutlined />} onClick={async () => { if(!confirmLeaving())return; await settleReviewWrites();await send('/auth/logout').catch(()=>{});endSession() }}>退出</Button></Space></Layout.Header>
-      <Layout.Content className="page-content"><div className="page-heading" hidden={page === 'exams' && !!location.projectId}><div><Title level={2}>{title}</Title></div><Tag className="account-tag">{user.role === 'admin' ? '管理员' : '阅卷教师'} · {user.username}</Tag></div>
+      <Layout.Header className="topbar"><Space><Button type="text" aria-label="展开导航" icon={<MenuOutlined />} onClick={() => setCollapsed(!collapsed)} /><span className="breadcrumb">{management ? '管理后台' : '阅卷台'} <span>/</span> {title}</span></Space><Space><Radio.Group size="small" value={mobile} onChange={e => setMobile(e.target.value)} options={[{ label: '自适应', value: 'auto' }, { label: '电脑', value: 'desktop' }, { label: '手机', value: 'mobile' }]} /><PwaStatus/><RealtimeStatus user={user} onProfile={setUser} onExpired={endSession}/>{admin && <Button type="text" onClick={()=>{if(!confirmLeaving())return;const next:Portal=management?'marking':'admin';setPortal(next);sessionStorage.setItem('omp-portal',next);navigate(next==='admin'?'#/scanner':'#/marking')}}>{management?'进入阅卷台':'进入管理后台'}</Button>}<Avatar size="small">{user.name.slice(0, 1)}</Avatar><Text>{user.name}</Text><Button type="text" icon={<LogoutOutlined />} onClick={async () => { if(!confirmLeaving())return; await settleReviewWrites();await send('/auth/logout').catch(()=>{});endSession() }}>退出</Button></Space></Layout.Header>
+      <Layout.Content className="page-content"><div className="page-heading" hidden={page === 'exams' && !!location.projectId}><div><Title level={2}>{title}</Title></div><Tag className="account-tag">{user.role==='admin'?'系统管理员':user.role==='manager'?'管理教师':'阅卷教师'} · {user.username}</Tag></div>
         {page === 'dashboard' && <Dashboard onNavigate={setPage} admin={management} />}
         {page === 'exams' && <Exams location={location} navigate={navigate} />}
         {page === 'marking' && <Marking admin={management} />}
         {page === 'exceptions' && <Exceptions />}
         {page === 'results' && <Results admin={management} />}
         {page === 'archives' && <ArchiveManager/>}
-        {page === 'people' && <DataManagement />}
-        {page === 'settings' && <Settings />}
+        {page === 'people' && <DataManagement systemAdmin={user.role==='admin'}/>}
+        {page === 'settings' && user.role==='admin' && <Settings />}
+        {page === 'scanner' && management && <ScannerDesk/>}
         {page === 'account' && <Account user={user} onProfile={setUser} onLogout={endSession}/>}
       </Layout.Content>
     </Layout>

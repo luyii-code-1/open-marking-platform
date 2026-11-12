@@ -45,7 +45,8 @@ def permissions(db,people):
 
 
 def topics(person,scope,previous,kind,body):
-    if person['role']=='admin':return ADMIN_ROOTS.get(kind,{kind})
+    if person['role']=='manager' and kind in ('storage-connections','scanner-devices','score-conversions','database-backups','request-log'):return set()
+    if person['role'] in ('admin','manager'):return ADMIN_ROOTS.get(kind,{kind})
     uid=person['id'];merged={k:scope[k]|previous[k] for k in scope}
     tid=body.get('template_id') if kind!='templates' else body.get('id')
     assigned=tid in merged['templates'];own=body.get('user_id')==uid
@@ -80,7 +81,7 @@ def authenticate(token):
     digest=hashlib.sha256(token.encode()).hexdigest()
     with connect() as db:
         row=db.execute('SELECT u.id,u.name,u.role FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=? AND s.expires>?',(digest,time.time())).fetchone()
-        if not row or row['role'] not in ('admin','teacher'):return None
+        if not row or row['role'] not in ('admin','manager','teacher'):return None
         person=dict(row)
         scope=permissions(db,{person['id']})[person['id']]
         cursor=db.execute('SELECT COALESCE(MAX(rowid),0) FROM audit').fetchone()[0]

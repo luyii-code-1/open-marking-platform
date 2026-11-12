@@ -11,7 +11,7 @@ namespace OMP.Scanner;
 
 public sealed class DesktopController : IDisposable
 {
-    public const string Protocol="omp-scanner-2";
+    public const string Protocol="omp-scanner-3";
     private readonly LocalQueue _queue;
     private readonly RecognitionWorker _worker;
     private readonly bool _selfTest;
@@ -24,7 +24,7 @@ public sealed class DesktopController : IDisposable
     private CancellationTokenSource? _captureCancel;
     private Task? _capture;
     private string _server="",_project="",_message="",_captureBatchId="";
-    private bool _online,_tickRunning,_revoked,_disposed;
+    private bool _online,_tickRunning,_revoked,_disposed,_connecting;
     public Action<string>? NavigateRequested {get;set;}
     public Action? Changed {get;set;}
     public bool Capturing=>_capture is {IsCompleted:false};
@@ -80,7 +80,7 @@ public sealed class DesktopController : IDisposable
         return new{protocol=Protocol,server_url=_server,storage_path=_queue.Root,online=_online,capturing=Capturing,syncing=_tickRunning,message=_message,project_id=_project,
             projects,catalog=File.Exists(catalogPath)?Json(File.ReadAllText(catalogPath)):Json("{\"projects\":[]}"),
             package=_packages.TryGetValue(_project,out var package)?package:Json("null"),
-            batches=batches.Select(b=>new{id=b.Id,name=b.Label,subject_id=b.SubjectId,group_id=b.GroupId,room=b.Room,status=b.Status,error=b.Error,capture_mode=b.CaptureMode,back_order=b.BackOrder,paper=b.Paper,sides=b.Sides,created_at=b.CreatedAt,
+            batches=batches.Select(b=>new{id=b.Id,name=b.Label,subject_id=b.SubjectId,group_id=b.GroupId,room=b.Room,room_tags=JsonSerializer.Deserialize<JsonElement>(b.RoomTagsJson),status=b.Status,error=b.Error,capture_mode=b.CaptureMode,back_order=b.BackOrder,paper=b.Paper,sides=b.Sides,created_at=b.CreatedAt,
                 total=_queue.Pages(b.Id).Count,pending=_queue.Pages(b.Id).Count(p=>p.Status=="pending"),blocked=_queue.Pages(b.Id).Count(p=>p.Status=="blocked"),uploaded=_queue.Pages(b.Id).Count(p=>p.Status=="uploaded")}),
             page_total=pages.Count,pages=pages.Skip(offset).Take(50).Select(p=>new{id=p.CaptureId,sequence=p.Sequence,side=p.Side,status=p.Status,error=p.Error,candidate=p.RecognitionJson=="{}"?"":Text(Json(p.RecognitionJson),"candidate_number"),quality=p.QualitySummary,recognized=p.RecognitionJson!="{}",local_cut_available=File.Exists(Path.Combine(_queue.Root,"processed",p.CaptureId,"cuts.zip"))})};
     }
@@ -91,6 +91,10 @@ public sealed class DesktopController : IDisposable
         {
             case "state":return State(args);
             case "connect":
+                if(_connecting)throw new InvalidOperationException("正在连接服务器，请稍后重试。");
+                _connecting=true;
+                try
+                {
                 if(Capturing||_tickRunning)throw new InvalidOperationException("正在采集或同步，请完成后再切换连接。");
                 using(var validate=new ApiClient(Text(args,"server_url")))
                 {
@@ -99,11 +103,14 @@ public sealed class DesktopController : IDisposable
                 using(var timeout=CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token))
                 {
                     timeout.CancelAfter(TimeSpan.FromSeconds(20));
-                    if(Text(args,"username").Length>0)await _api.Login(Text(args,"username"),Text(args,"password"),timeout.Token,_queue.Batches().Where(b=>b.ServerUrl==_server&&b.Status!="paired").Select(b=>b.Id));
+                    if(Text(args,"pairing_code").Length>0)await _api.Pair(Text(args,"pairing_code"),timeout.Token);
+                    else if(Text(args,"username").Length>0)await _api.Login(Text(args,"username"),Text(args,"password"),timeout.Token,_queue.Batches().Where(b=>b.ServerUrl==_server&&b.Status!="paired").Select(b=>b.Id));
                     else await _api.ConnectDevice(timeout.Token);
                     var catalog=await _api.Get("scanner/catalog",timeout.Token);Save(Path.Combine(_queue.Root,"workspaces",Partition,"catalog.json"),catalog.GetRawText());
                 }
                 _online=true;Notify("设备已连接。选择考试项目并下载配置。");return new{page_url=PageUrl()};
+                }
+                finally{_connecting=false;}
             case "downloadProject":
                 if(!_online||_api is null)throw new InvalidOperationException("下载项目需要连接服务器。");
                 var id=Guid.Parse(Text(args,"project_id")).ToString();var data=await _api.Get($"scanner/projects/{id}/package",_lifetime.Token);
@@ -127,6 +134,10 @@ public sealed class DesktopController : IDisposable
                 var mode=sides==2?Text(args,"capture_mode","duplex"):"separate";var order=mode=="duplex"?"same":Text(args,"back_order","same");
                 if(mode is not ("duplex" or "separate")||order is not ("same" or "reverse"))throw new InvalidOperationException("扫描模式无效。");
                 var created=new BatchRow{Id=Guid.NewGuid().ToString(),ServerUrl=_server,GroupId=Text(selected,"id"),Label=Text(args,"name","扫描批次"),Room=Text(args,"room"),Paper=Text(template,"paper"),Sides=sides,CaptureMode=mode,BackOrder=order,TemplateId=Text(template,"id"),TemplateRevision=template.GetProperty("revision").GetInt32()};
+                var tagIds=args.TryGetProperty("room_tag_ids",out var requestedTags)?requestedTags.EnumerateArray().Select(t=>t.GetString()??"").ToArray():[];
+                var tags=project.TryGetProperty("room_tags",out var availableTags)?availableTags.EnumerateArray().Where(t=>tagIds.Contains(Text(t,"id"))).ToArray():[];
+                if(tagIds.Distinct().Count()!=tagIds.Length||tags.Length!=tagIds.Length)throw new InvalidOperationException("考场标签不在已下载的项目配置中，请刷新项目。");
+                created.RoomTagsJson=JsonSerializer.Serialize(tags);
                 Bind(created,_project,selected);_queue.AddBatch(created);_queue.SaveDesktopBatch(created);return new{id=created.Id};
             case "devices":
                 var driver=Enum.Parse<Driver>(Text(args,"driver","Twain"),true);_devices=await _scanner.Devices(driver);return _devices.Select((d,i)=>new{id=i.ToString(),name=d.Name});
@@ -225,7 +236,7 @@ public sealed class DesktopController : IDisposable
 
     public async Task Tick(bool manual=false)
     {
-        if(_tickRunning||_disposed||string.IsNullOrEmpty(_server))return;_tickRunning=true;
+        if(_connecting||_tickRunning||_disposed||string.IsNullOrEmpty(_server))return;_tickRunning=true;
         try
         {
             if(_api?.LoggedIn!=true||!_online)

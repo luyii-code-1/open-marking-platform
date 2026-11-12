@@ -39,7 +39,7 @@ public sealed partial class ApiClient : IDisposable
         _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
         try
         {
-            if (body.GetProperty("user").GetProperty("role").GetString() != "admin") throw new InvalidOperationException("设备注册需要管理员账号。");
+            if (body.GetProperty("user").GetProperty("role").GetString() is not ("admin" or "manager")) throw new InvalidOperationException("设备注册需要管理账号。");
             _identity?.Dispose(); _identity = new DeviceIdentity(ServerUrl, _deviceRoot, selfTest: _selfTest);
             var device = await PostCore("scanner/devices", new { label = Environment.MachineName, public_key = _identity.PublicKey, password }, cancel);
             _identity.SetDevice(device.GetProperty("id").GetString()!);
@@ -60,6 +60,14 @@ public sealed partial class ApiClient : IDisposable
         _identity?.Dispose(); _identity = new DeviceIdentity(ServerUrl, _deviceRoot, create: false, selfTest: _selfTest);
         if (string.IsNullOrWhiteSpace(_identity.DeviceId)) throw new InvalidOperationException("请先使用管理员账号登记此设备。");
         return await AuthenticateDevice(cancel);
+    }
+
+    public async Task<string> Pair(string code,CancellationToken cancel=default)
+    {
+        _identity?.Dispose();_identity=new DeviceIdentity(ServerUrl,_deviceRoot,selfTest:_selfTest);
+        var result=await PostCore("scanner/pair",new{code,public_key=_identity.PublicKey,label=Environment.MachineName},cancel);
+        _identity.SetDevice(result.GetProperty("device").GetProperty("id").GetString()!);
+        await AuthenticateDevice(cancel);return result.GetProperty("owner_name").GetString()??"";
     }
 
     private async Task<string> AuthenticateDevice(CancellationToken cancel)

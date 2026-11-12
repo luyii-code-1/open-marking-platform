@@ -15,11 +15,26 @@ internal static class DesktopSelfTest
         var python=args[8]=="-"?null:args[8];var repository=args[9];
         RecognitionWorker Worker()=>new(root,python,repository);
         string normalized;using(var address=new ApiClient(args[1]))normalized=address.ServerUrl;
+        if(args[6]=="pair-code")
+        {
+            var uri="omp-scanner://connect?server="+Uri.EscapeDataString(args[1])+"&code="+Uri.EscapeDataString(args[7]);
+            Check(PairingActivation.Parse(uri).Server==normalized,"Protocol URI parsed another server.");
+            foreach(var bad in new[]{"file:///tmp",uri+"&code=duplicate","omp-scanner://connect?server=https%3A%2F%2Fuser%3Apassword%40example.com&code=ABCDEFGHJKLM", "omp-scanner://connect?server=http%3A%2F%2Fexample.com&code=ABCDEFGHJKLM"})
+            {
+                var rejected=false;try{PairingActivation.Parse(bad);}catch(ArgumentException){rejected=true;}Check(rejected,"Invalid activation URI accepted.");
+            }
+            var channel=".SelfTest."+Guid.NewGuid().ToString("N");using var signal=new ManualResetEventSlim();
+            using(var primary=new DesktopInstance(channel))
+            {
+                Check(primary.Primary,"Self-test instance is not primary.");primary.Activated=value=>{if(value==uri)signal.Set();};var listener=primary.Listen();
+                using var secondary=new DesktopInstance(channel);Check(!secondary.Primary,"Duplicate desktop instance was allowed.");secondary.Forward(uri).GetAwaiter().GetResult();Check(signal.Wait(TimeSpan.FromSeconds(5)),"Activation did not reach primary instance.");
+            }
+        }
         try
         {
             using(var online=new DesktopController(queue,Worker(),selfTest:true))
             {
-                await online.Invoke("connect",Json(new{server_url=args[1],username=args[6],password=args[7]}));
+                await online.Invoke("connect",args[6]=="pair-code"?Json(new{server_url=args[1],pairing_code=args[7]}):Json(new{server_url=args[1],username=args[6],password=args[7]}));
                 await online.Invoke("downloadProject",Json(new{project_id=args[5]}));await online.Close();
             }
             Checkpoint("ready_for_offline");await Console.In.ReadLineAsync();
@@ -30,8 +45,10 @@ internal static class DesktopSelfTest
                 var state=Json(await offline.Invoke("state",Json(new{}))!);Check(!state.GetProperty("online").GetBoolean(),"Restart should start with cached metadata before a connection.");
                 var group=state.GetProperty("package").GetProperty("groups")[0];
                 Check(!group.GetProperty("template").GetProperty("questions")[0].TryGetProperty("answer",out _),"Device cache contains an answer key.");
-                var created=Json(await offline.Invoke("createBatch",Json(new{group_id=group.GetProperty("id").GetString(),name="离线重启验证",capture_mode="duplex"}))!);
+                var tags=state.GetProperty("package").TryGetProperty("room_tags",out var tagList)?tagList.EnumerateArray().Select(t=>t.GetProperty("id").GetString()).ToArray():[];
+                var created=Json(await offline.Invoke("createBatch",Json(new{group_id=group.GetProperty("id").GetString(),name="离线重启验证",capture_mode="duplex",room_tag_ids=tags}))!);
                 batchId=created.GetProperty("id").GetString()!;var batch=queue.Batches().Single(b=>b.Id==batchId);
+                using(var savedTags=JsonDocument.Parse(batch.RoomTagsJson))Check(savedTags.RootElement.GetArrayLength()==tags.Length,"Offline batch tags were lost.");
                 foreach(var file in new[]{args[3],args[4]})
                 {
                     using var image=System.Drawing.Image.FromFile(file);var page=queue.AddPage(batch,"auto",image);Check(page.Status=="pending",page.Error);

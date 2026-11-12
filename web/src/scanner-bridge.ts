@@ -1,4 +1,4 @@
-export const scannerProtocol = 'omp-scanner-2'
+export const scannerProtocol = 'omp-scanner-3'
 type NativeMessage = { data: any }
 type NativeView = { postMessage: (value: unknown) => void; addEventListener: (event: string, listener: (message: NativeMessage) => void) => void }
 const native = (window as unknown as { chrome?: { webview?: NativeView } }).chrome?.webview

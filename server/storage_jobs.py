@@ -61,7 +61,7 @@ def restore_job(identifier:str,current=Depends(admin)):
 def perform(job,progress):
     with connect() as db:
         person=db.execute('SELECT id,role FROM users WHERE id=?',(job['actor'],)).fetchone()
-        if not person or person['role']!='admin':raise HTTPException(403,'提交人的管理权限已失效')
+        if not person or person['role'] not in ('admin','manager'):raise HTTPException(403,'提交人的管理权限已失效')
         current=dict(person)
     body=job['payload'];identifier=job['project_id']
     if job['kind']=='archive-project':

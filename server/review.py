@@ -27,7 +27,7 @@ def own_task(db,identifier,current):
     task=require(db,identifier,'tasks')
     from .lifecycle import writable
     writable(db,'tasks',task)
-    if current['role']!='admin' and task['user_id']!=current['id']: raise HTTPException(403,'无权访问该任务')
+    if current['role'] not in ('admin','manager') and task['user_id']!=current['id']: raise HTTPException(403,'无权访问该任务')
     return task
 
 
@@ -76,7 +76,7 @@ def progress(template_id:str,question_id:str,current=Depends(user)):
     with connect() as db:
         template,question=question_for(db,template_id,question_id)
         assignments=find(db,'assignments',template_id=template_id,question_id=question_id)
-        if current['role']!='admin' and not any(current['id'] in participants(a) for a in assignments):raise HTTPException(403,'未分配此题')
+        if current['role'] not in ('admin','manager') and not any(current['id'] in participants(a) for a in assignments):raise HTTPException(403,'未分配此题')
         if assignments:
             db.execute('BEGIN IMMEDIATE')
             ensure(db,template,question,assignments[-1])
@@ -290,10 +290,13 @@ def image(identifier:str,current=Depends(user)):
 
 
 @router.get('/exceptions')
-def exceptions(group_id:str|None=None,status:str|None=None,current=Depends(admin)):
+def exceptions(group_id:str|None=None,status:str|None=None,room_tag_id:str|None=None,current=Depends(admin)):
     with connect() as db:
+        from .room_tags import exception_tags,includes
         output=[]
         for item in objects(db,'exceptions'):
+            item={**item,'room_tags':exception_tags(db,item)}
+            if not includes(item,room_tag_id):continue
             if not item.get('group_id'):
                 submission=get(db,item.get('submission_id'),'submissions')
                 batch=get(db,item.get('batch_id'),'scan-batches')
@@ -318,7 +321,7 @@ def exception_details(identifier:str,current=Depends(admin)):
         pages=[get(db,p,'pages') for p in submission['pages']] if submission else [page] if page else []
         template=get(db,(submission or {}).get('template_id') or (batch or {}).get('template_id'),'templates')
         student=(submission or {}).get('student_snapshot') or get(db,(submission or {}).get('student_id'),'students')
-        return {'exception':item,'context':{'project':(project or {}).get('name'),'subject':(subject or {}).get('name'),'group':(group or {}).get('name'),'room':(batch or {}).get('room'),'candidate_number':(submission or page or {}).get('candidate_number'),'student_name':(student or {}).get('name')},'pages':[{'id':p['id'],'side':p['side'],'sequence':p['sequence'],'status':p['status'],'image_url':f"/api/v1/pages/{p['id']}/image",'selections':{str(q['number']):p.get('selections',{}).get(q['id'],[]) for q in (template or {}).get('questions',[]) if q['type']!='subjective' and q['id'] in p.get('selections',{})}} for p in pages if p],'answer_image_url':f"/api/v1/tasks/{task['id']}/image" if task else None}
+        return {'exception':item,'context':{'project':(project or {}).get('name'),'subject':(subject or {}).get('name'),'group':(group or {}).get('name'),'room':(batch or {}).get('room'),'room_tags':(submission or batch or {}).get('room_tags',[]),'candidate_number':(submission or page or {}).get('candidate_number'),'student_name':(student or {}).get('name')},'pages':[{'id':p['id'],'side':p['side'],'sequence':p['sequence'],'status':p['status'],'image_url':f"/api/v1/pages/{p['id']}/image",'selections':{str(q['number']):p.get('selections',{}).get(q['id'],[]) for q in (template or {}).get('questions',[]) if q['type']!='subjective' and q['id'] in p.get('selections',{})}} for p in pages if p],'answer_image_url':f"/api/v1/tasks/{task['id']}/image" if task else None}
 
 
 @router.post('/exceptions/resolve')
@@ -343,8 +346,10 @@ def resolve(identifier:str,body:dict,current=Depends(admin)):
 
 
 @router.get('/results')
-def results(group_id:str,current=Depends(user)):
-    with connect() as db:return results_for(db,group_id,current)
+def results(group_id:str,room_tag_id:str|None=None,current=Depends(user)):
+    with connect() as db:
+        from .room_tags import includes
+        return [row for row in results_for(db,group_id,current) if includes(row,room_tag_id)]
 
 
 def results_for(db,group_id,current,convert_scores=True):
@@ -360,7 +365,7 @@ def results_for(db,group_id,current,convert_scores=True):
                 'class_name':student.get('class_name',label.get('class_name',cls.get('name',student['class_id']))),
                 'grade':student.get('grade',label.get('grade',cls.get('grade')))}
     allowed_classes=None
-    if current['role']!='admin':
+    if current['role'] not in ('admin','manager'):
         from .visibility import taught_classes,result_groups
         allowed_classes=taught_classes(db,current['id'])
         if group_id not in result_groups(db,current['id'],allowed_classes): raise HTTPException(403,'成绩尚未发布或不属于任教班级')
@@ -371,7 +376,7 @@ def results_for(db,group_id,current,convert_scores=True):
         template=require(db,submission['template_id'],'templates')
         scores={str(q['number']):result_for(db,submission,q) for q in template['questions']}
         ready=all(v is not None for v in scores.values())
-        output.append({**identity(student),'candidate_number':submission['candidate_number'],'scores':{k:v/100 if v is not None else None for k,v in scores.items()},'total':sum(scores.values())/100 if ready else None,'status':'absent' if submission['status']=='absent' else 'completed' if ready else 'pending'})
+        output.append({**identity(student),'candidate_number':submission['candidate_number'],'room_tags':submission.get('room_tags',[]),'scores':{k:v/100 if v is not None else None for k,v in scores.items()},'total':sum(scores.values())/100 if ready else None,'status':'absent' if submission['status']=='absent' else 'completed' if ready else 'pending'})
     if roster:
         seen={r['student_id'] for r in output}
         template=require(db,group['template_id'],'templates')

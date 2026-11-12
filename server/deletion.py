@@ -15,6 +15,7 @@ from .dependencies import admin, require
 router = APIRouter(prefix='/api/v1')
 Hierarchy = Literal['projects', 'subjects', 'groups']
 LABELS = {
+    'room-tags': '考场标签',
     'projects': '考试项目', 'subjects': '科目', 'groups': '题卡组', 'templates': '题卡',
     'scan-batches': '扫描批次', 'pages': '扫描页面', 'rosters': '应考名单',
     'submissions': '答卷', 'assignments': '教师分配', 'tasks': '阅卷任务',
@@ -24,6 +25,7 @@ LABELS = {
 # Follow ownership only. Shared students, accounts, assets, libraries and archives
 # must not be pulled into the hierarchy just because a record references them.
 CHILDREN = (
+    ('room-tags', ('project_id',)),
     ('subjects', ('project_id',)), ('groups', ('subject_id',)),
     ('templates', ('group_id',)), ('scan-batches', ('group_id',)), ('rosters', ('group_id',)),
     ('pages', ('batch_id',)), ('submissions', ('group_id',)),

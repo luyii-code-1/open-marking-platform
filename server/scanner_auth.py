@@ -9,7 +9,7 @@ from cryptography.hazmat.primitives import serialization,hashes
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.exceptions import InvalidSignature,UnsupportedAlgorithm
 from .db import connect,find,get,objects,put
-from .dependencies import admin,user,require,password_hash
+from .dependencies import admin,system_admin,user,require,password_hash
 
 router=APIRouter(prefix='/api/v1/scanner')
 
@@ -25,7 +25,7 @@ def decode(value,limit=500):
 def active(db,identifier):
     device=require(db,identifier,'scanner-devices')
     owner=db.execute('SELECT role FROM users WHERE id=?',(device['owner_id'],)).fetchone()
-    if device.get('revoked') or not owner or owner['role']!='admin':raise HTTPException(403,'扫描设备授权已停用，请联系管理员')
+    if device.get('revoked') or not owner or owner['role'] not in ('admin','manager'):raise HTTPException(403,'扫描设备授权已停用，请联系管理员')
     return device
 
 
@@ -33,7 +33,7 @@ def public(device):return {k:v for k,v in device.items() if k!='public_key'}
 
 
 @router.get('/devices')
-def devices(current=Depends(admin)):
+def devices(current=Depends(system_admin)):
     with connect() as db:return [public(d) for d in objects(db,'scanner-devices')]
 
 
@@ -57,7 +57,7 @@ def enroll(body:dict,current=Depends(admin)):
 
 
 @router.post('/devices/{identifier}/status')
-def set_status(identifier:str,body:dict,current=Depends(admin)):
+def set_status(identifier:str,body:dict,current=Depends(system_admin)):
     if type(body.get('enabled')) is not bool or not str(body.get('reason','')).strip():raise HTTPException(422,'请明确启用状态并填写原因')
     with connect() as db:
         db.execute('BEGIN IMMEDIATE');device=require(db,identifier,'scanner-devices')
@@ -72,7 +72,7 @@ def set_status(identifier:str,body:dict,current=Depends(admin)):
 
 
 @router.post('/devices/{identifier}/adopt-batches')
-def adopt(identifier:str,body:dict,current=Depends(admin)):
+def adopt(identifier:str,body:dict,current=Depends(system_admin)):
     ids=body.get('batch_ids',[])
     if not isinstance(ids,list) or len(ids)>1000 or any(not isinstance(i,str) for i in ids):raise HTTPException(422,'批次列表无效')
     with connect() as db:
