@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Alert, App as AntApp, Avatar, Button, Card, Divider, Empty, Form, Input, Layout, Menu, Radio, Space, Spin, Statistic, Tag, Typography } from 'antd'
-import { ApartmentOutlined, AuditOutlined, BookOutlined, FileSearchOutlined, LogoutOutlined, MenuOutlined, ReadOutlined, ScanOutlined, SettingOutlined, TeamOutlined } from '@ant-design/icons'
+import { Alert, Avatar, Button, Card, Empty, Layout, Menu, Radio, Space, Spin, Statistic, Tag, Typography } from 'antd'
+import { ApartmentOutlined, AuditOutlined, BookOutlined, FileSearchOutlined, LogoutOutlined, MenuOutlined, ReadOutlined, SettingOutlined, TeamOutlined } from '@ant-design/icons'
 import { request, send, setToken, useResource, type User } from './api'
 import { DataManagement, Exceptions, Results, Settings } from './Management'
 import { Exams } from './Exams'
@@ -9,27 +9,28 @@ import { Marking } from './Marking'
 import { Account } from './Account'
 import { PwaStatus } from './PwaStatus'
 import { RealtimeStatus } from './RealtimeStatus'
-import { loginPasskey } from './passkeys'
+import { Login, type Portal } from './Login'
 
 const { Text, Title } = Typography
 export function App() {
-  const [user, setUser] = useState<User | null>(null), [checking, setChecking] = useState(true), [mobile, setMobile] = useState<'auto' | 'desktop' | 'mobile'>('auto'), [collapsed, setCollapsed] = useState(false)
+  const [user, setUser] = useState<User | null>(null), [checking, setChecking] = useState(true), [mobile, setMobile] = useState<'auto' | 'desktop' | 'mobile'>('auto'), [collapsed, setCollapsed] = useState(false), [portal,setPortal] = useState<Portal>(()=>sessionStorage.getItem('omp-portal')==='marking'?'marking':'admin')
   const { location, navigate } = useNavigation()
   const setPage = (page: string) => navigate('#/' + page)
   useEffect(() => { request<User>('/auth/me').then(setUser).catch(() => setToken('')).finally(() => setChecking(false)) }, [])
+  useEffect(()=>{if(user && location.page==='login'){const next:Portal=location.section==='admin'&&user.role==='admin'?'admin':'marking';setPortal(next);sessionStorage.setItem('omp-portal',next);navigate(next==='admin'?'#/exams':'#/marking',true)}},[user,location.page,location.section])
   if (checking) return <div className="screen-center"><Spin size="large" /></div>
-  if (!user) return <Login onLogin={setUser} />
-  const admin = user.role === 'admin'
-  const page = admin || ['dashboard','marking','results','account'].includes(location.page) ? location.page : 'dashboard'
+  if (!user) return <Login portal={location.page==='login' && (location.section==='admin'||location.section==='marking')?location.section:undefined} onPortal={value=>navigate(value?'#/login/'+value:'#/')} onLogin={(person,selected)=>{setPortal(selected);sessionStorage.setItem('omp-portal',selected);setUser(person);navigate(selected==='admin'?'#/exams':'#/marking',true)}} />
+  const admin = user.role === 'admin', management = admin && portal === 'admin'
+  const page = management || ['dashboard','marking','results','account'].includes(location.page) ? location.page : 'dashboard'
   const items = [
     { key: 'dashboard', icon: <ApartmentOutlined />, label: '工作概览' },
     { type: 'group' as const, key: 'work', label: '考试工作', children: [
-      ...(admin ? [{ key: 'exams', icon: <BookOutlined />, label: '考试项目' }] : []),
+      ...(management ? [{ key: 'exams', icon: <BookOutlined />, label: '考试项目' }] : []),
       { key: 'marking', icon: <AuditOutlined />, label: '阅卷中心' },
-      ...(admin ? [{ key: 'exceptions', icon: <FileSearchOutlined />, label: '异常总览' }] : []),
+      ...(management ? [{ key: 'exceptions', icon: <FileSearchOutlined />, label: '异常总览' }] : []),
       { key: 'results', icon: <ReadOutlined />, label: '成绩总览' },
     ] },
-    ...(admin ? [{ type: 'group' as const, key: 'management', label: '基础管理', children: [
+    ...(management ? [{ type: 'group' as const, key: 'management', label: '基础管理', children: [
       { key: 'people', icon: <TeamOutlined />, label: '人员与班级' },
       { key: 'settings', icon: <SettingOutlined />, label: '系统设置' },
     ] }] : []),
@@ -42,27 +43,19 @@ export function App() {
       <Menu theme="light" mode="inline" items={items} selectedKeys={[page]} onClick={({ key }) => setPage(key)} />
     </Layout.Sider>
     <Layout>
-      <Layout.Header className="topbar"><Space><Button type="text" aria-label="展开导航" icon={<MenuOutlined />} onClick={() => setCollapsed(!collapsed)} /><span className="breadcrumb">工作空间 <span>/</span> {title}</span></Space><Space><Radio.Group size="small" value={mobile} onChange={e => setMobile(e.target.value)} options={[{ label: '自适应', value: 'auto' }, { label: '电脑', value: 'desktop' }, { label: '手机', value: 'mobile' }]} /><PwaStatus/><RealtimeStatus user={user} onProfile={setUser} onExpired={()=>{setToken('');setUser(null)}}/><Avatar size="small">{user.name.slice(0, 1)}</Avatar><Text>{user.name}</Text><Button type="text" icon={<LogoutOutlined />} onClick={async () => { if(!confirmLeaving())return; await send('/auth/logout').catch(()=>{}); setToken(''); setUser(null) }}>退出</Button></Space></Layout.Header>
+      <Layout.Header className="topbar"><Space><Button type="text" aria-label="展开导航" icon={<MenuOutlined />} onClick={() => setCollapsed(!collapsed)} /><span className="breadcrumb">{management ? '管理后台' : '阅卷台'} <span>/</span> {title}</span></Space><Space><Radio.Group size="small" value={mobile} onChange={e => setMobile(e.target.value)} options={[{ label: '自适应', value: 'auto' }, { label: '电脑', value: 'desktop' }, { label: '手机', value: 'mobile' }]} /><PwaStatus/><RealtimeStatus user={user} onProfile={setUser} onExpired={()=>{setToken('');setUser(null)}}/>{admin && <Button type="text" onClick={()=>{if(!confirmLeaving())return;const next:Portal=management?'marking':'admin';setPortal(next);sessionStorage.setItem('omp-portal',next);navigate(next==='admin'?'#/exams':'#/marking')}}>{management?'进入阅卷台':'进入管理后台'}</Button>}<Avatar size="small">{user.name.slice(0, 1)}</Avatar><Text>{user.name}</Text><Button type="text" icon={<LogoutOutlined />} onClick={async () => { if(!confirmLeaving())return; await send('/auth/logout').catch(()=>{}); setToken(''); setUser(null) }}>退出</Button></Space></Layout.Header>
       <Layout.Content className="page-content"><div className="page-heading" hidden={page === 'exams' && !!location.projectId}><div><Title level={2}>{title}</Title></div><Tag className="account-tag">{user.role === 'admin' ? '管理员' : '阅卷教师'} · {user.username}</Tag></div>
-        {page === 'dashboard' && <Dashboard onNavigate={setPage} admin={admin} />}
+        {page === 'dashboard' && <Dashboard onNavigate={setPage} admin={management} />}
         {page === 'exams' && <Exams location={location} navigate={navigate} />}
-        {page === 'marking' && <Marking admin={admin} />}
+        {page === 'marking' && <Marking admin={management} />}
         {page === 'exceptions' && <Exceptions />}
-        {page === 'results' && <Results admin={admin} />}
+        {page === 'results' && <Results admin={management} />}
         {page === 'people' && <DataManagement />}
         {page === 'settings' && <Settings />}
         {page === 'account' && <Account user={user} onProfile={setUser} onLogout={()=>{setToken('');setUser(null)}}/>}
       </Layout.Content>
     </Layout>
   </Layout>
-}
-function Login({ onLogin }: { onLogin: (user: User) => void }) {
-  const [mode,setMode]=useState<'password'|'recovery'|'passkey'>('password'); const [bootstrap, setBootstrap] = useState(false), [loading, setLoading] = useState(false), [error, setError] = useState('')
-  async function submit(values: Record<string, string>) {
-    setLoading(true); setError('')
-    try { if (bootstrap) await send('/auth/bootstrap', values); const result = !bootstrap&&mode==='passkey'?await loginPasskey(values.username):!bootstrap&&mode==='recovery'?await send<{token:string;user:User}>('/auth/recovery-login',{username:values.username,code:values.password}):await send<{ token: string; user: User }>('/auth/login', { username: values.username, password: values.password }); setToken(result.token); onLogin(result.user) } catch (e) { setError((e as Error).message) } finally { setLoading(false) }
-  }
-  return <div className="login-screen"><Card className="login-card"><PwaStatus/><Title level={3}>{bootstrap ? '创建管理员' : '登录'}</Title>{bootstrap && <Text type="secondary">仅首次部署可创建管理员。</Text>}<Divider />{error && <Alert type="error" showIcon message={error} style={{ marginBottom: 20 }} />}<Form layout="vertical" onFinish={submit} requiredMark={false}>{!bootstrap&&<Form.Item label="登录方式"><Radio.Group value={mode} onChange={e=>setMode(e.target.value)} options={[{label:"密码",value:"password"},{label:"恢复码",value:"recovery"},{label:"通行密钥",value:"passkey"}]}/></Form.Item>}<Form.Item name="username" label="账号" rules={[{ required: true, message: '请输入账号' }]}><Input size="large" autoComplete="username" /></Form.Item>{bootstrap && <Form.Item name="name" label="姓名" rules={[{ required: true, message: '请输入姓名' }]}><Input size="large" /></Form.Item>}<Form.Item name="password" hidden={!bootstrap&&mode==='passkey'} label={!bootstrap&&mode==='recovery'?'恢复码':'密码'} rules={[{ required: bootstrap||mode!=='passkey', message: '请输入密码或恢复码' }, ...(bootstrap ? [{ min: 10, message: '至少 10 个字符' }] : [])]}><Input.Password size="large" autoComplete={bootstrap ? 'new-password' : 'current-password'} /></Form.Item><Button block size="large" type="primary" htmlType="submit" loading={loading}>{bootstrap ? '创建并登录' : '登录'}</Button></Form><Button block type="link" onClick={() => { setBootstrap(!bootstrap); setError('') }}>{bootstrap ? '返回登录' : '首次部署 · 创建管理员'}</Button></Card></div>
 }
 function Dashboard({ onNavigate, admin }: { onNavigate: (value: string) => void; admin: boolean }) {
   const resource = useResource<Record<string, number>>('/dashboard', {})

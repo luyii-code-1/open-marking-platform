@@ -78,7 +78,7 @@ def test_restore_released_scans_grades_and_audit_with_runtime_reset(tmp_path,mon
     with TestClient(app) as client:
         assert client.get('/api/v1/auth/me',headers=headers).status_code==401
         assert client.get(ticket).status_code==403
-        assert client.post('/api/v1/auth/recovery-login',json={'username':'admin','code':codes[0]}).status_code==401
+        assert client.post('/api/v1/auth/recovery-reset',json={'username':'admin','code':codes[0],'new_password':'reset-must-not-succeed'}).status_code==401
         assert client.post('/api/v1/scanner/challenge',json={'device_id':device['id']}).status_code==403
         token=client.post('/api/v1/auth/login',json=account).json()['token'];fresh={'Authorization':'Bearer '+token}
         rows=client.get('/api/v1/results',params={'group_id':group['id']},headers=fresh).json()

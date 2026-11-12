@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import xml.etree.ElementTree as ET
 import cv2
 import httpx
 from server import paper
@@ -16,7 +17,8 @@ from server import paper
 
 def run(scanner_dll=None):
     repo=Path(__file__).resolve().parents[1]
-    dll=Path(scanner_dll).resolve() if scanner_dll else repo/'scanner/bin/Debug/net8.0-windows/OMP.Scanner.dll'
+    framework=ET.parse(repo/'scanner/OMP.Scanner.csproj').findtext('.//TargetFramework')
+    dll=Path(scanner_dll).resolve() if scanner_dll else repo/f'scanner/bin/Debug/{framework}/OMP.Scanner.dll'
     if not dll.exists():raise RuntimeError('请先构建扫描客户端')
     renderer=shutil.which('pdftoppm')
     if not renderer:raise RuntimeError('需要pdftoppm生成扫描样本')

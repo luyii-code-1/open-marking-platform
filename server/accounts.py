@@ -62,8 +62,10 @@ def recovery_codes(body:dict,current=Depends(user)):
     return {'codes':codes}
 
 
-@router.post('/auth/recovery-login')
-def recovery_login(body:dict,request:Request=None):
+@router.post('/auth/recovery-reset')
+def recovery_reset(body:dict,request:Request=None):
+    new=body.get('new_password','')
+    if not isinstance(new,str) or not 10<=len(new)<=200:raise HTTPException(422,'新密码需10至200字符')
     code=body.get('code','')
     if not isinstance(code,str) or len(code)>100:raise HTTPException(401,'账号或恢复码错误')
     digest=hashlib.sha256(code.encode()).hexdigest()
@@ -73,5 +75,8 @@ def recovery_login(body:dict,request:Request=None):
         match=next((r for r in find(db,'recovery-code',user_id=row['id']) if not r['used'] and hmac.compare_digest(r['digest'],digest)),None) if row else None
         if not match:raise HTTPException(401,'账号或恢复码错误')
         match['used']=True;put(db,'recovery-code',match,row['id'])
+        db.execute('UPDATE users SET password=? WHERE id=?',(password_hash(new),row['id']))
+        db.execute('DELETE FROM sessions WHERE user_id=?',(row['id'],))
+        put(db,'account-events',{'user_id':row['id'],'action':'password_reset','method':'recovery_code'},row['id'])
         if request is not None:request.state.actor=row['id']
-        return session(db,dict(row),'recovery_code')
+        return {'status':'reset'}

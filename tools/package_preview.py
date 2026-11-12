@@ -70,14 +70,18 @@ def main() -> None:
     output.mkdir(parents=True, exist_ok=False)
     framework = ET.parse(ROOT / 'scanner/OMP.Scanner.csproj').findtext('.//TargetFramework')
     metadata = {'channel': 'development-preview', 'created_at': now.isoformat(),
+                'license': 'GPL-3.0-only',
+                'source_commit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(),
+                'source_modified': bool(subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT, text=True).strip()),
                 'scanner_framework': framework, 'scanner_runtime': 'win-x64',
                 'scanner_self_contained': False,
-                'pending': ['Exact GPL license selection', 'Supported .NET release target',
-                            'User UI acceptance', 'Real Hi-5100S scanner acceptance',
+                'pending': ['User UI acceptance', 'Real Hi-5100S scanner acceptance',
                             'Production deployment acceptance']}
     # Publish into a disposable directory; existing queues and registered keys are untouched.
     run(['npm', 'ci'], ROOT / 'web')
     run(['npm', 'run', 'build'], ROOT / 'web')
+    run(['npm', 'run', 'test:navigation'], ROOT / 'web')
+    run(['npm', 'run', 'test:objective'], ROOT / 'web')
     run(['npm', 'run', 'test:pwa'], ROOT / 'web')
     results = [pack(output / 'OpenMarkingPlatform-source-preview.zip',
                     ((path, path.relative_to(ROOT).as_posix()) for path in source_files()), metadata)]
@@ -89,6 +93,8 @@ def main() -> None:
             raise RuntimeError('Scanner publish did not produce OMP.Scanner.exe')
         shutil.copyfile(ROOT / 'docs/扫描端.md', staging / '扫描端说明.md')
         shutil.copyfile(ROOT / 'docs/安装与交付.md', staging / '安装与交付.md')
+        shutil.copyfile(ROOT / 'LICENSE', staging / 'LICENSE')
+        if (ROOT / 'NOTICE.md').exists(): shutil.copyfile(ROOT / 'NOTICE.md', staging / 'NOTICE.md')
         results.append(pack(output / 'OpenMarkingPlatform-scanner-win-x64-preview.zip',
                             ((path, path.relative_to(staging).as_posix())
                              for path in sorted(staging.rglob('*')) if path.is_file()), metadata))

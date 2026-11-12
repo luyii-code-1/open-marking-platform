@@ -20,8 +20,8 @@ def config():
     return rp,[origin.strip() for origin in os.getenv('OMP_WEBAUTHN_ORIGINS',default).split(',') if origin.strip()]
 
 
-def challenge(db,person,kind,options):
-    item=put(db,'auth-challenge',{'user_id':person['id'],'ceremony':kind,'challenge':bytes_to_base64url(options.challenge),'expires':time.time()+300,'used':False})
+def challenge(db,person,kind,options,portal=None):
+    item=put(db,'auth-challenge',{'user_id':person['id'],'ceremony':kind,'challenge':bytes_to_base64url(options.challenge),'expires':time.time()+300,'used':False,'portal':portal})
     return {'challenge_id':item['id'],'options':json.loads(options_to_json(options))}
 
 
@@ -67,11 +67,14 @@ def login_options(body:dict):
     rp,_=config()
     with connect() as db:
         person=db.execute('SELECT id,username,name,role FROM users WHERE username=?',(str(body.get('username','')),)).fetchone()
+        portal=body.get('portal')
+        if portal not in (None,'admin','marking'):raise HTTPException(422,'登录入口无效')
+        if person and portal=='admin' and person['role']!='admin':raise HTTPException(403,'此账号没有管理后台权限，请使用阅卷台入口')
         available=find(db,'passkey',user_id=person['id']) if person else []
         available=[p for p in available if not p.get('revoked')]
         if not available:raise HTTPException(401,'该账号没有可用通行密钥')
         options=generate_authentication_options(rp_id=rp,allow_credentials=[PublicKeyCredentialDescriptor(id=base64url_to_bytes(p['credential_id'])) for p in available],user_verification=UserVerificationRequirement.REQUIRED)
-        return challenge(db,dict(person),'login',options)
+        return challenge(db,dict(person),'login',options,portal)
 
 
 @router.post('/login/verify')
@@ -86,6 +89,7 @@ def login_verify(body:dict,request:Request=None):
         credential['sign_count']=verified.new_sign_count;put(db,'passkey',credential,item['user_id'])
         item['used']=True;put(db,'auth-challenge',item,item['user_id'])
         person=db.execute('SELECT id,username,name,role FROM users WHERE id=?',(item['user_id'],)).fetchone()
+        if item.get('portal')=='admin' and person['role']!='admin':raise HTTPException(403,'此账号没有管理后台权限，请使用阅卷台入口')
         if request is not None:request.state.actor=person['id']
         return session(db,dict(person),'passkey')
 

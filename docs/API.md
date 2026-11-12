@@ -2,7 +2,7 @@
 
 Base `/api/v1`. JSON requests. Lists return arrays. IDs are UUID strings. Errors use `{detail: string}`. Authentication uses `Authorization: Bearer <token>`.
 
-- `POST /auth/login` `{username,password}` => `{token,user:{id,username,name,role}}`.
+- `POST /auth/login` `{username,password,portal?}` => `{token,user:{id,username,name,role}}`.
 - `POST /auth/bootstrap` `{username,password,name}` creates the first admin only.
 - `GET /auth/me` returns current user.
 - `GET /dashboard` => `{projects,groups,students,pending_tasks,exceptions}` counts.
@@ -129,7 +129,7 @@ Frontend must show server validation and loading states. Scanner freezes batch o
 - 新领取评阅任务含 `answer_slice_id`，其图像接口使用该任务绑定的版本，保留补扫前历史图像。早期未绑定的任务仍走原有兼容读取路径，需要迁移后才能获得相同历史版本保证。
 - 项目归档的 `data.json` 含相应 `identifiers` 注册记录、单题切片历史与所引用的历史资产。
 
-账号初始化、创建、密码/恢复码/Passkey登录及退出写入 `account-events`，已有资料、密码和权限更改继续留痕；账号事件与其审计记录不写入密码或访问令牌。
+账号初始化、创建、密码/Passkey登录、恢复码重置密码及退出写入 `account-events`，已有资料、密码和权限更改继续留痕；账号事件与其审计记录不写入密码或访问令牌。
 
 ## 制卡、Default与题卡库
 
@@ -186,3 +186,9 @@ Frontend must show server validation and loading states. Scanner freezes batch o
 分组统计的 `classes`、学生明细以及考试跨科汇总与CSV使用同一快照。缺少答卷的应考学生使用应考名单中的班级快照。教师查看权限继续由其当前任教班级决定，保存历史班名不延续已撤销的教师权限。
 
 较早答卷若未保存班名或年级，优先使用同一学生且班级编号相同的应考快照；两种快照均缺少字段时只能回退当前班级信息，无法据此恢复真实历史名称。此兼容回退不改写原始答卷记录。
+
+## 登录入口与忘记密码
+
+`portal`可选`admin`或`marking`。管理后台仅管理员可登录，阅卷台允许教师和管理员；未传portal的现有设备/API登录保持原权限。Passkey的`/auth/passkeys/login/options`也接受portal并随挑战保存，完成验证时再次检查管理权限。
+
+`POST /auth/recovery-reset`接收`{username,code,new_password}`：验证一次性恢复码、设置10至200字符的新密码并撤销旧会话，操作在同一事务完成；返回`{status:"reset"}`，不签发登录令牌。无效恢复码不消耗有效码，重放返回401。恢复码不再作为独立登录方式。

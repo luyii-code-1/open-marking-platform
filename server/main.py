@@ -68,6 +68,7 @@ from .dependencies import password_hash,user,admin,scan_user,scan_admin,require,
 class Login(BaseModel):
     username: str = Field(min_length=1,max_length=100)
     password: str = Field(min_length=1,max_length=200)
+    portal: str | None = None
 
 
 class Account(Login):
@@ -97,6 +98,8 @@ def login(body: Login,request:Request=None):
         stored=row['password'] if row else password_hash('invalid-password')
         if not hmac.compare_digest(stored,password_hash(body.password,stored.split(':')[0])) or row is None:
             raise HTTPException(401,'账号或密码错误')
+        if body.portal not in (None,'admin','marking'):raise HTTPException(422,'登录入口无效')
+        if body.portal=='admin' and row['role']!='admin':raise HTTPException(403,'此账号没有管理后台权限，请使用阅卷台入口')
         token=secrets.token_urlsafe(40)
         db.execute('INSERT INTO sessions VALUES(?,?,?)',(hashlib.sha256(token.encode()).hexdigest(),row['id'],time.time()+43200))
         put(db,'account-events',{'user_id':row['id'],'action':'login','method':'password'},row['id'])

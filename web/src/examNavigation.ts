@@ -7,7 +7,7 @@ export const groupSections = [
 export type GroupSection = typeof groupSections[number][0]
 export type ExamLocation = { projectId?: string; subjectId?: string; groupId?: string; section?: string }
 export type Location = ExamLocation & { page: string }
-const pages = new Set(['dashboard', 'exams', 'marking', 'exceptions', 'results', 'people', 'settings', 'account'])
+const pages = new Set(['dashboard', 'exams', 'marking', 'exceptions', 'results', 'people', 'settings', 'account', 'login'])
 
 export function examPath(location: ExamLocation = {}) {
   const { projectId, subjectId, groupId, section } = location
@@ -25,6 +25,7 @@ export function readLocation(hash: string): Location {
     const parts = hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent)
     const page = parts[0] || 'dashboard'
     if (!pages.has(page)) return { page: 'dashboard' }
+    if (page === 'login') return { page, section: ['admin', 'marking'].includes(parts[1]) ? parts[1] : undefined }
     if (page !== 'exams') return { page }
     if (!parts[1]) return { page }
     const location: Location = { page, projectId: parts[1] }

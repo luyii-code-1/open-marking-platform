@@ -11,9 +11,9 @@ export async function registerPasskey(password:string,name:string){
   if(!credential)throw new Error('未创建通行密钥')
   return send('/auth/passkeys/register/verify',{challenge_id:request.challenge_id,credential:serialize(credential),name})
 }
-export async function loginPasskey(username:string){
+export async function loginPasskey(username:string,portal?:'admin'|'marking'){
   if(!window.PublicKeyCredential||!isSecureContext)throw new Error('通行密钥需要HTTPS或localhost及兼容浏览器')
-  const request=await send('/auth/passkeys/login/options',{username}),options=request.options
+  const request=await send('/auth/passkeys/login/options',{username,portal}),options=request.options
   const publicKey={...options,challenge:decode(options.challenge),allowCredentials:options.allowCredentials?.map((c:any)=>({...c,id:decode(c.id)}))} as PublicKeyCredentialRequestOptions
   const credential=await navigator.credentials.get({publicKey}) as PublicKeyCredential|null
   if(!credential)throw new Error('未选择通行密钥')

@@ -4,4 +4,4 @@ import { ConfigProvider, App as AntApp } from 'antd'
 import zhCN from 'antd/locale/zh_CN'
 import { App } from './App'
 import './styles.css'
-createRoot(document.getElementById('root')!).render(<React.StrictMode><ConfigProvider locale={zhCN} theme={{ token: { colorPrimary: '#17655b', colorInfo: '#17655b', colorSuccess: '#268b65', colorBgLayout: '#f3f5f4', borderRadius: 9, fontFamily: 'Inter, "Segoe UI", "Microsoft YaHei", sans-serif' } }}><AntApp><App /></AntApp></ConfigProvider></React.StrictMode>)
+createRoot(document.getElementById('root')!).render(<React.StrictMode><ConfigProvider locale={zhCN} theme={{ token: { colorPrimary: '#17655b', colorInfo: '#17655b', colorSuccess: '#268b65', colorBgLayout: '#f3f5f4', borderRadius: 9, fontFamily: '"Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif', fontSize: 14, fontSizeHeading3: 22, fontSizeHeading4: 18, controlHeight: 36 } }}><AntApp><App /></AntApp></ConfigProvider></React.StrictMode>)

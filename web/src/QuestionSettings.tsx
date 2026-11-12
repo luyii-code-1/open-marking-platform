@@ -1,0 +1,38 @@
+import { useState } from 'react'
+import { App, Button, Collapse, Drawer, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Typography, Upload } from 'antd'
+import { DeleteOutlined } from '@ant-design/icons'
+import { request, type Question, type Row } from './api'
+import { RichEditor } from './RichEditor'
+import { answerLetters, parseAnswer } from './objectiveLayout'
+
+export function QuestionSettings({ question: q, open, readOnly, onClose, onChange, onDelete, onDraw }: { question?: Question; open: boolean; readOnly: boolean; onClose: () => void; onChange: (patch: Partial<Question>) => void; onDelete: () => void; onDraw: () => void }) {
+  const [ruleOpen, setRuleOpen] = useState(false), [ruleText, setRuleText] = useState(''), { message } = App.useApp()
+  if (!q) return null
+  const rule = q.rule || { mode: 'exact' }, mode = String(rule.mode || 'exact')
+  const patchRule = (patch: Record<string, unknown>) => onChange({ rule: { ...rule, ...patch } })
+  const field = (key: string, fallback = 0) => typeof rule[key] === 'number' ? rule[key] as number : fallback
+  return <Drawer title={`第 ${q.number} 题设置`} width={420} open={open} onClose={onClose} extra={<Button onClick={onClose}>完成</Button>}>
+    <Form layout="vertical" disabled={readOnly}>
+      <div className="editor-form-grid"><Form.Item label="题号"><InputNumber min={1} value={q.number} onChange={number => number && onChange({ number })} /></Form.Item><Form.Item label="分值"><InputNumber min={0.01} precision={2} value={q.points} onChange={points => points !== null && onChange({ points })} /></Form.Item></div>
+      <Form.Item label="题型"><Select value={q.type} options={[{ label: '单选题', value: 'single' }, { label: '多选题', value: 'multiple' }, { label: '主观题', value: 'subjective' }]} onChange={type => onChange({ type, answer: [], ...(type === 'subjective' ? { style: q.style || 'line' } : {}) })} /></Form.Item>
+      {q.type !== 'subjective' ? <>
+        <Form.Item label="选项数"><Select value={q.options} options={[3, 4, 5].map(n => ({ label: `${n} 项`, value: n }))} onChange={options => onChange({ options, answer: q.answer.filter(a => answerLetters.indexOf(a) < options) })} /></Form.Item>
+        <Form.Item label="标准答案"><Input value={q.answer.join('')} onFocus={event => event.target.select()} onChange={event => { try { onChange({ answer: parseAnswer(q, event.target.value) }) } catch (e) { message.warning((e as Error).message) } }} /></Form.Item>
+        <Form.Item label="给分方式"><Select value={mode} options={[{ label: '全部正确得满分', value: 'exact' }, { label: '漏选部分给分，错选不得分', value: 'partial' }, { label: '按正确与错误选项计分', value: 'per_option' }]} onChange={value => patchRule({ mode: value })} /></Form.Item>
+        {mode === 'partial' && <Form.Item label="漏选所得分"><InputNumber min={0} max={q.points} precision={2} value={field('partial_points')} onChange={value => patchRule({ partial_points: value ?? 0 })} /></Form.Item>}
+        {mode === 'per_option' && <div className="editor-form-grid"><Form.Item label="每个正确选项得分"><InputNumber min={0.01} precision={2} value={field('correct_points', 1)} onChange={value => patchRule({ correct_points: value ?? 1 })} /></Form.Item><Form.Item label="每个错误选项扣分"><InputNumber min={0} precision={2} value={field('wrong_penalty', 1)} onChange={value => patchRule({ wrong_penalty: value ?? 0 })} /></Form.Item></div>}
+        <Button type="link" className="table-name-link" onClick={() => { setRuleText(JSON.stringify(rule, null, 2)); setRuleOpen(true) }}>高级给分规则</Button>
+      </> : <>
+        <Form.Item label="评阅方式"><Select value={q.review_mode} options={[{ label: '单评', value: 'single' }, { label: '双评盲评', value: 'double' }]} onChange={review_mode => onChange({ review_mode })} /></Form.Item>
+        {q.review_mode === 'double' && <Form.Item label="允许差值（≤ 此值取平均）"><InputNumber min={0} max={q.points} precision={2} value={q.threshold} onChange={threshold => onChange({ threshold: threshold ?? 0 })} /></Form.Item>}
+        <Form.Item label="答题区样式"><Select value={q.style || 'line'} options={[{ label: '横线', value: 'line' }, { label: '作文格', value: 'grid' }, { label: '富文本', value: 'rich' }, { label: '底图或空白', value: 'none' }]} onChange={style => onChange({ style })} /></Form.Item>
+        {q.style === 'grid' ? <Form.Item label="格子大小（毫米）"><InputNumber min={4} max={20} value={q.cell_size || 8} onChange={cell_size => onChange({ cell_size: cell_size || 8 })} /></Form.Item> : (!q.style || q.style === 'line') && <Form.Item label="横线行数"><InputNumber min={1} max={100} value={q.lines || 5} onChange={lines => onChange({ lines: lines || 5 })} /></Form.Item>}
+        <Collapse items={[{ key: 'content', label: '题目文字与图片', children: <Space direction="vertical" size={16} style={{ width: '100%' }}><RichEditor readOnly={readOnly} value={q.content_html || ''} onChange={content_html => onChange({ content_html })} /><Upload disabled={readOnly} accept="image/*" showUploadList={false} beforeUpload={async file => { const data = new FormData(); data.append('file', file); try { const asset = await request<Row>('/assets', { method: 'POST', body: data }); onChange({ image_asset_id: asset.id }) } catch (e) { message.error((e as Error).message) } return false }}><Button>插入作答区图片</Button></Upload></Space> }]} />
+      </>}
+    </Form>
+    <div className="question-region-section"><Typography.Title level={5}>答题区域</Typography.Title><Typography.Paragraph type="secondary">可在打印预览中框选、移动；同题多个区域按顺序拼接。</Typography.Paragraph><Button disabled={readOnly} onClick={onDraw}>{q.regions.length ? '继续框选区域' : '在预览中框选'}</Button></div>
+    {!!q.regions.length && <Collapse items={[{ key: 'regions', label: `坐标与顺序 · ${q.regions.length} 个区域`, children: q.regions.map((region, index) => <div className="region-editor" key={index}><Space><Typography.Text>{region.page === 1 ? '正面' : '背面'} · 区域 {index + 1}</Typography.Text><Button disabled={readOnly} type="text" danger icon={<DeleteOutlined />} aria-label={`删除区域${index + 1}`} onClick={() => onChange({ regions: q.regions.filter((_, i) => i !== index) })} /></Space><div className="region-grid">{(['x', 'y', 'width', 'height'] as const).map(key => <label key={key}>{({ x: 'X', y: 'Y', width: '宽', height: '高' })[key]}<InputNumber disabled={readOnly} min={0} step={0.5} value={region[key]} onChange={value => onChange({ regions: q.regions.map((r, i) => i === index ? { ...r, [key]: value ?? 0 } : r) })} /></label>)}</div></div>) }]} />}
+    <Popconfirm title={`删除第 ${q.number} 题及其答题区域？`} onConfirm={onDelete}><Button className="question-delete" disabled={readOnly} danger icon={<DeleteOutlined />}>删除本题</Button></Popconfirm>
+    <Modal title="高级给分规则" open={ruleOpen} onCancel={() => setRuleOpen(false)} onOk={() => { try { const rule = JSON.parse(ruleText); if (!rule || typeof rule !== 'object' || Array.isArray(rule)) throw new Error('规则须为JSON对象'); onChange({ rule }); setRuleOpen(false) } catch (e) { message.error((e as Error).message) } }}><Input.TextArea rows={12} value={ruleText} onChange={event => setRuleText(event.target.value)} className="code-input" /></Modal>
+  </Drawer>
+}
