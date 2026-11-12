@@ -10,7 +10,7 @@ import httpx
 from server import paper
 
 
-def validate(api, revision, inspect_files=None, local_recognition=False):
+def validate(api, revision, inspect_files=None, local_recognition=False, storage_connection_id=None, remote_check=None, forward_check=None):
     renderer = shutil.which('pdftoppm')
     if not renderer: raise RuntimeError('需要Poppler验证实际扫描链路')
     def post(path, body=None, status=200):
@@ -36,10 +36,14 @@ def validate(api, revision, inspect_files=None, local_recognition=False):
     student = next(s for s in response.json() if str(s['candidate_number']).isdigit() and 1 <= len(str(s['candidate_number'])) <= 20)
     candidate = str(student['candidate_number'])
     project = post('projects', {'name': '删除验证-' + revision[:10]})
+    if storage_connection_id:
+        response=api.put(f"projects/{project['id']}/storage",json={'connection_id':storage_connection_id});response.raise_for_status()
     print('隔离验证考试：' + project['id'], flush=True)
     subject = post('subjects', {'project_id': project['id'], 'name': '验证科目', 'group_mode': 'default'})
     group_id = subject['default_group_id']
-    template = post('templates', {'name': '隔离验证卷', 'group_id': group_id, 'paper': 'A4', 'sides': 1, 'candidate_length': len(candidate), 'questions': [{'number': 1, 'type': 'single', 'options': 4, 'points': 1, 'answer': ['B'], 'regions': [{'page': 1, 'x': 15, 'y': 110, 'width': 90, 'height': 20}]}]})
+    questions=[{'number': 1, 'type': 'single', 'options': 4, 'points': 1, 'answer': ['B'], 'regions': [{'page': 1, 'x': 15, 'y': 110, 'width': 90, 'height': 20}]}]
+    if forward_check:questions.append({'number':2,'type':'subjective','points':1,'review_mode':'single','regions':[{'page':1,'x':15,'y':150,'width':80,'height':20}]})
+    template = post('templates', {'name': '隔离验证卷', 'group_id': group_id, 'paper': 'A4', 'sides': 1, 'candidate_length': len(candidate), 'questions': questions})
     template = post(f"templates/{template['id']}/publish")
     if local_recognition:
         from uuid import uuid4
@@ -75,8 +79,19 @@ def validate(api, revision, inspect_files=None, local_recognition=False):
     response = api.get(f"scan-batches/{batch['id']}/pages"); response.raise_for_status(); page = response.json()[0]
     assert page['status'] == 'recognized'
     assert page['candidate_number'] == candidate
+    if storage_connection_id:
+        response=api.get('jobs');response.raise_for_status()
+        for job in response.json():
+            if job['kind']=='mirror' and job.get('project_id')==project['id']:wait('jobs/'+job['id'],lambda j:j['status']=='completed')
+    if remote_check:remote_check(project['id'],page_id,True,local_recognition)
     if inspect_files:assert all(inspect_files(page_id).values())
     post(f"scan-batches/{batch['id']}/pair")
+    if forward_check:
+        response=api.get('auth/me');response.raise_for_status();person=response.json()
+        post('assignments',{'template_id':template['id'],'question_id':template['questions'][1]['id'],'user_ids':[person['id']]})
+        task=post('tasks/claim',{'template_id':template['id'],'question_id':template['questions'][1]['id']})
+        forward_check(project,page_id,task,storage_connection_id)
+        post('tasks/'+task['id']+'/score',{'score':0,'idempotency_key':str(uuid4())})
     response = api.get('results', params={'group_id': group_id}); response.raise_for_status()
     assert len(response.json()) == 1 and response.json()[0]['total'] == 1
     post('results/publish', {'group_id': group_id})
@@ -89,12 +104,13 @@ def validate(api, revision, inspect_files=None, local_recognition=False):
     plan = post(f"projects/{project['id']}/deletion-preview")
     assert not plan['blockers'] and plan['retained_archives'] == 1
     response = api.get(f"deletion-plans/{plan['id']}/manifest"); response.raise_for_status()
-    assert len(response.json()['records']) == plan['record_count'] and len(response.json()['questions']) == 1
+    assert len(response.json()['records']) == plan['record_count'] and len(response.json()['questions']) == len(questions)
     result = post(f"deletion-plans/{plan['id']}/confirm", {'confirm': True, 'reason': '隔离部署验证完成'},status=202)
     finished=wait('jobs/'+result['job_id'],lambda row:row.get('status')=='completed')
     result=finished['result']
     assert result['status']=='completed' and result['file_count']==(3 if local_recognition else 2)
     if inspect_files:assert not any(inspect_files(page_id).values())
+    if remote_check:remote_check(project['id'],page_id,False,local_recognition)
     response=api.get(f"archives/{result['archive_id']}/download");response.raise_for_status()
     assert response.content
     assert api.get(f"scan-batches/{batch['id']}").status_code == 404
@@ -104,4 +120,4 @@ def validate(api, revision, inspect_files=None, local_recognition=False):
     assert hashlib.sha256(response.content).hexdigest() == digest
     response = api.get('archives'); response.raise_for_status()
     assert next(a for a in response.json() if a['id'] == archive['id'])['project_deleted']
-    return {'status': 'passed', 'isolated_project_id': project['id'], 'deleted_records': plan['record_count'], 'candidate_recognition': 'passed','local_recognition':local_recognition, 'final_score': 1, 'archive_preserved': True, 'fresh_archive_id':result['archive_id'],'deleted_scan_files':result['file_count'],'physical_local_cleanup_verified':inspect_files is not None, 'existing_personnel_reused': True}
+    return {'status': 'passed', 'isolated_project_id': project['id'], 'deleted_records': plan['record_count'], 'candidate_recognition': 'passed','local_recognition':local_recognition, 'final_score': 1, 'archive_preserved': True, 'fresh_archive_id':result['archive_id'],'deleted_scan_files':result['file_count'],'physical_local_cleanup_verified':inspect_files is not None, 'physical_remote_cleanup_verified':remote_check is not None,'authenticated_forward_verified':forward_check is not None, 'existing_personnel_reused': True}

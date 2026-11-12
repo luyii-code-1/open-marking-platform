@@ -11,6 +11,7 @@ import { Scans } from './Management'
 import { Marking } from './Marking'
 import { Exceptions } from './Exceptions'
 import { Results } from './Results'
+import { ProjectStorage } from './StorageConnections'
 import { defaultGroup, examPath, groupSections, resolveExam, type ExamLocation } from './examNavigation'
 
 const { Title, Text } = Typography
@@ -63,6 +64,7 @@ export function Exams({ location, navigate }: { location: ExamLocation; navigate
       ]} /> },
       { key: 'summary', label: '跨科成绩', children: <Results admin projectId={project.id} projectOnly /> },
       { key: 'archives', label: '归档与释放', children: <ArchiveManager projectId={project.id} /> },
+      { key: 'storage', label: '存储设置', children: <ProjectStorage project={project} onSaved={refresh} /> },
     ]} />}
   </div>
 }

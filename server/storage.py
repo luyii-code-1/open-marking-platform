@@ -4,7 +4,7 @@ import json
 from uuid import uuid4
 import posixpath
 from pathlib import PurePosixPath
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 import httpx
 from . import db as database
 from .db import connect,objects,put,find,get
@@ -40,15 +40,26 @@ def location():
 
 
 class Storage:
-    def __init__(self):
-        self.kind=backend()
-        self.prefix=os.getenv('OMP_STORAGE_PREFIX','omp').strip('/')
+    def __init__(self,project_id=None,connection_id=None,settings=None):
+        if project_id and not connection_id:
+            with connect() as db:connection_id=(get(db,project_id,'projects') or {}).get('storage_connection_id')
+        if connection_id and settings is None:
+            from .storage_connections import config
+            settings=config(connection_id)
+        self.settings=settings or {}
+        self.connection_id=connection_id or self.settings.get('id')
+        self.kind=self.settings.get('kind',backend())
+        self.prefix=self.settings.get('prefix',os.getenv('OMP_STORAGE_PREFIX','omp')).strip('/')
+        self.bucket=self.settings.get('bucket',os.getenv('OMP_S3_BUCKET'))
         if self.kind not in ('local','s3','ros','webdav','sftp'):raise ValueError('储存后端无效')
+    def location(self):
+        if not self.connection_id:return location()
+        return hashlib.sha256(json.dumps({k:self.settings.get(k) for k in ('kind','endpoint','bucket','prefix')},sort_keys=True).encode()).hexdigest()
     def key(self,key):return '/'.join(filter(None,[self.prefix,safe_key(key)]))
     def s3(self):
         import boto3
         from botocore.config import Config
-        return boto3.client('s3',endpoint_url=os.getenv('OMP_S3_ENDPOINT') or None,region_name=os.getenv('OMP_S3_REGION','us-east-1'),aws_access_key_id=os.environ['OMP_S3_ACCESS_KEY'],aws_secret_access_key=os.environ['OMP_S3_SECRET_KEY'],config=Config(signature_version='s3v4',s3={'addressing_style':os.getenv('OMP_S3_ADDRESSING','path')},connect_timeout=10,read_timeout=60,retries={'max_attempts':3}))
+        return boto3.client('s3',endpoint_url=self.settings.get('endpoint',os.getenv('OMP_S3_ENDPOINT')) or None,region_name=self.settings.get('region',os.getenv('OMP_S3_REGION','us-east-1')),aws_access_key_id=self.settings.get('access_key') or os.environ['OMP_S3_ACCESS_KEY'],aws_secret_access_key=self.settings.get('secret_key') or os.environ['OMP_S3_SECRET_KEY'],config=Config(signature_version='s3v4',s3={'addressing_style':self.settings.get('addressing',os.getenv('OMP_S3_ADDRESSING','path'))},connect_timeout=10,read_timeout=30,retries={'max_attempts':2}))
     def dav(self):
         return httpx.Client(auth=(os.environ['OMP_WEBDAV_USER'],os.environ['OMP_WEBDAV_PASSWORD']),timeout=60,follow_redirects=False)
     def dav_url(self,key):return os.environ['OMP_WEBDAV_URL'].rstrip('/')+'/'+quote(self.key(key),safe='/')
@@ -62,7 +73,7 @@ class Storage:
         key=safe_key(key)
         if self.kind=='local':return
         if self.kind in ('s3','ros'):
-            self.s3().upload_file(str(source),os.environ['OMP_S3_BUCKET'],self.key(key));return
+            self.s3().upload_file(str(source),self.bucket,self.key(key));return
         if self.kind=='webdav':
             with self.dav() as client:
                 url=os.environ['OMP_WEBDAV_URL'].rstrip('/')
@@ -86,7 +97,7 @@ class Storage:
         key=safe_key(key);target.parent.mkdir(parents=True,exist_ok=True)
         temporary=target.with_name(target.name+'.'+str(uuid4())+'.download')
         try:
-            if self.kind in ('s3','ros'):self.s3().download_file(os.environ['OMP_S3_BUCKET'],self.key(key),str(temporary))
+            if self.kind in ('s3','ros'):self.s3().download_file(self.bucket,self.key(key),str(temporary))
             elif self.kind=='webdav':
                 with self.dav() as client,client.stream('GET',self.dav_url(key)) as response:
                     response.raise_for_status()
@@ -105,12 +116,35 @@ class Storage:
         finally:temporary.unlink(missing_ok=True)
     def signed_url(self,key,expires=120):
         if self.kind not in ('s3','ros'):return None
-        return self.s3().generate_presigned_url('get_object',Params={'Bucket':os.environ['OMP_S3_BUCKET'],'Key':self.key(key)},ExpiresIn=expires)
+        return self.s3().generate_presigned_url('get_object',Params={'Bucket':self.bucket,'Key':self.key(key)},ExpiresIn=expires)
+    def fetch_crop(self,key,rect,force=False):
+        if not (force or self.settings.get('media_enabled')) or not self.settings.get('media_url'):raise ValueError('媒体处理未启用')
+        from botocore.awsrequest import AWSRequest
+        from botocore.auth import S3SigV4QueryAuth
+        from PIL import Image
+        import io
+        x,y,w,h=rect
+        if any(not isinstance(v,int) for v in rect) or min(x,y)<0 or min(w,h)<=0:raise ValueError('裁切坐标无效')
+        request=AWSRequest(method='GET',url=self.settings['media_url'].rstrip('/')+'/'+quote(self.key(key),safe='/')+'?'+urlencode({'rect':','.join(map(str,rect)),'fmt':'png'}))
+        client=self.s3()
+        S3SigV4QueryAuth(client._request_signer._credentials,'s3',self.settings.get('region','us-east-1'),expires=60).add_auth(request)
+        with httpx.Client(timeout=8,follow_redirects=False) as http:
+            with http.stream('GET',request.url) as response:
+                response.raise_for_status();chunks=[];length=0
+                for chunk in response.iter_bytes():
+                    length+=len(chunk)
+                    if length>30*1024*1024:raise ValueError('媒体图片过大')
+                    chunks.append(chunk)
+        data=b''.join(chunks)
+        with Image.open(io.BytesIO(data)) as image:
+            if image.size!=(w,h):raise ValueError('媒体裁切未生效')
+            image.load()
+        return data
     def delete(self,key):
         key=safe_key(key)
         if self.kind=='local':return
         if self.kind in ('s3','ros'):
-            self.s3().delete_object(Bucket=os.environ['OMP_S3_BUCKET'],Key=self.key(key));return
+            self.s3().delete_object(Bucket=self.bucket,Key=self.key(key));return
         if self.kind=='webdav':
             with self.dav() as client:
                 response=client.delete(self.dav_url(key))
@@ -124,6 +158,26 @@ class Storage:
         finally:ssh.close()
 
 
+def for_reference(reference):
+    provider=Storage(connection_id=reference.get('connection_id'))
+    if provider.kind!=reference.get('backend') or provider.location()!=reference.get('location'):raise ValueError('远端位置与文件目录不一致')
+    return provider
+
+
+def remote_piece(relative,region):
+    with connect() as db:
+        expected=expected_hash(db,relative)
+        references=[r for r in find(db,'storage-assets',relative=relative) if r['status']=='stored' and r.get('sha256')==expected and expected]
+    for reference in references:
+        try:
+            provider=for_reference(reference)
+            if not provider.settings.get('media_enabled'):continue
+            x,y,w,h=(region[k]*4 for k in ('x','y','width','height'))
+            return provider.fetch_crop(reference['key'],(int(x),int(y),int(x+w)-int(x),int(y+h)-int(y)))
+        except Exception:continue
+    return None
+
+
 def materialize(relative):
     relative=safe_key(relative);target=local_path(relative)
     if relative.startswith('pages/'):
@@ -135,20 +189,22 @@ def materialize(relative):
     with connect() as db:
         expected=expected_hash(db,relative)
         references=[r for r in find(db,'storage-assets',relative=relative) if r['status']=='stored']
-        reference=next((r for r in references if r.get('backend')==backend() and r.get('location')==location()),None)
         archived=sorted(find(db,'archive-files',relative=relative),key=lambda r:r['created_at'],reverse=True)
-    if reference:
+    available=False;last_error=None
+    for reference in references:
+        try:provider=for_reference(reference);available=True
+        except Exception:continue
         try:
-            Storage().download(reference['key'],target,expected)
+            provider.download(reference['key'],target,expected)
             return target
-        except Exception:
-            if not archived:raise
+        except Exception as error:last_error=error
     from .archive import extract_file
     for record in archived:
         if expected and record['sha256']!=expected:continue
         try:return extract_file(record['archive_id'],relative,target,{'path':relative,'size':record['size'],'sha256':record['sha256']})
         except FileNotFoundError:continue
-    if references and not reference:raise FileNotFoundError('文件登记的远端位置与当前存储配置不一致，请恢复原配置或从有效归档恢复')
+    if last_error:raise last_error
+    if references and not available:raise FileNotFoundError('文件登记的远端位置与当前存储配置不一致，请恢复原配置或从有效归档恢复')
     raise FileNotFoundError(relative)
 
 
@@ -156,10 +212,12 @@ def mirror(relative,project_id=None):
     relative=safe_key(relative)
     from .lifecycle import project_writable
     with connect() as db:project_writable(db,project_id)
-    if backend()=='local':return
+    provider=Storage(project_id=project_id)
+    if provider.kind=='local':return
     key=f'projects/{project_id}/{relative}' if project_id else relative
     source=local_path(relative)
-    Storage().upload(source,key)
+    with source.open('rb') as stream:digest=hashlib.file_digest(stream,'sha256').hexdigest()
+    provider.upload(source,key)
     with connect() as db:
-        old=next(iter(find(db,'storage-assets',relative=relative)),{})
-        put(db,'storage-assets',{**old,'relative':relative,'key':key,'project_id':project_id,'backend':backend(),'location':location(),'status':'stored'})
+        old=next((r for r in find(db,'storage-assets',relative=relative) if r.get('connection_id')==provider.connection_id and r.get('location')==provider.location()),{})
+        put(db,'storage-assets',{**old,'relative':relative,'key':key,'project_id':project_id,'connection_id':provider.connection_id,'backend':provider.kind,'location':provider.location(),'sha256':digest,'status':'stored'})

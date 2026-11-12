@@ -431,6 +431,8 @@ from .release import router as release_router
 app.include_router(release_router)
 from .storage_jobs import router as storage_jobs_router
 app.include_router(storage_jobs_router)
+from .storage_connections import router as storage_connections_router
+app.include_router(storage_connections_router)
 from .alignment import router as alignment_router
 app.include_router(alignment_router)
 from .scanner_auth import router as scanner_auth_router

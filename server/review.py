@@ -259,6 +259,11 @@ def image(identifier:str,current=Depends(user)):
         if prepared is not None:
             with Image.open(io.BytesIO(prepared)) as cut:pieces.append(cut.convert('RGB'))
             continue
+        from .storage import remote_piece
+        prepared=remote_piece('pages/'+source.get('page_id',submission['pages'][page])+'.png',region)
+        if prepared is not None:
+            with Image.open(io.BytesIO(prepared)) as cut:pieces.append(cut.convert('RGB'))
+            continue
         from .storage import materialize
         try:path=materialize('pages/'+source.get('page_id',submission['pages'][page])+'.png')
         except FileNotFoundError:raise HTTPException(409,'校正图尚未就绪')

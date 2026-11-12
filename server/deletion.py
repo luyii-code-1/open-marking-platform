@@ -246,7 +246,7 @@ def unchanged(db,plan,ownership):
 
 
 def prepare_files(db,plan,manifest):
-    from .storage import backend,location,local_path
+    from .storage import for_reference,local_path
     entries={e['path']:e for e in manifest}
     files=[]
     for row in db.execute("SELECT o.body FROM objects o JOIN deletion_scope s ON s.id=o.id WHERE o.kind='pages'"):
@@ -258,7 +258,9 @@ def prepare_files(db,plan,manifest):
             if entry is None:
                 if suffix=='.image' or path.exists() or refs or page.get('normalized_sha256'):raise HTTPException(409,'归档缺少扫描文件：'+relative)
                 continue
-            if any(r['backend']!=backend() or r.get('location')!=location() for r in refs):raise HTTPException(409,'远端扫描文件位置与当前配置不一致，请恢复相应存储配置后重试')
+            try:
+                for r in refs:for_reference(r)
+            except Exception:raise HTTPException(409,'远端扫描文件位置与登记不一致，请检查原连接后重试')
             # Remote keys must be scoped to this exact project and scan file.
             if any(r['key'] not in (relative,'projects/'+plan['project_id']+'/'+relative) or r.get('project_id') not in (None,plan['project_id']) for r in refs):raise HTTPException(409,'远端扫描文件归属不一致')
             files.append((plan['id'],relative,entry['sha256'],entry['size'],json.dumps(refs,ensure_ascii=False)))
@@ -269,7 +271,7 @@ def prepare_files(db,plan,manifest):
 
 def preflight_files(files,manifest):
     from .archive import checksum
-    from .storage import local_path,backend,location
+    from .storage import local_path,for_reference
     entries={e['path']:e for e in manifest}
     for item in files:
         entry=entries.get(item['relative'])
@@ -277,7 +279,8 @@ def preflight_files(files,manifest):
         path=local_path(item['relative'])
         if path.exists() and (path.stat().st_size!=item['size'] or checksum(path)!=item['sha256']):raise HTTPException(409,'本地扫描文件与归档不一致：'+item['relative'])
         for remote in json.loads(item['remote_refs']):
-            if remote['backend']!=backend() or remote.get('location')!=location():raise HTTPException(409,'远端存储配置已变化，请恢复原配置后重试')
+            try:for_reference(remote)
+            except Exception:raise HTTPException(409,'远端存储配置已变化，请恢复原连接后重试')
 
 
 def retire(db,plan,subject):
@@ -305,7 +308,7 @@ def retire(db,plan,subject):
 def perform(job,progress):
     from .archive import create,verify
     from .lifecycle import operation
-    from .storage import Storage,local_path
+    from .storage import for_reference,local_path
     ownership=(job['id'],job['run_token']);identifier=job['payload']['plan_id']
     with operation(identifier,ownership):
         with connect() as db:
@@ -331,7 +334,7 @@ def perform(job,progress):
                 from .jobs import guard
                 guard(db,ownership)
             # Repeating DELETE after a crash is safe; adapters accept missing keys.
-            for remote in json.loads(item['remote_refs']):Storage().delete(remote['key'])
+            for remote in json.loads(item['remote_refs']):for_reference(remote).delete(remote['key'])
             local_path(item['relative']).unlink(missing_ok=True)
             with connect() as db:
                 db.execute('BEGIN IMMEDIATE');guard(db,ownership)

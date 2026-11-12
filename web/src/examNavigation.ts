@@ -29,7 +29,7 @@ export function readLocation(hash: string): Location {
     if (page !== 'exams') return { page }
     if (!parts[1]) return { page }
     const location: Location = { page, projectId: parts[1] }
-    if (parts[2] !== 'subjects') return { ...location, section: ['archives', 'summary'].includes(parts[2]) ? parts[2] : undefined }
+    if (parts[2] !== 'subjects') return { ...location, section: ['archives', 'summary', 'storage'].includes(parts[2]) ? parts[2] : undefined }
     if (!parts[3]) return location
     location.subjectId = parts[3]
     if (parts[4] === 'groups' && parts[5]) {

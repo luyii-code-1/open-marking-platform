@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from .db import connect, find, get, objects, put
 from .dependencies import admin,require
 from .archive import checksum,verify
-from .storage import backend,local_path,location,Storage
+from .storage import local_path,for_reference
 
 router=APIRouter(prefix='/api/v1')
 
@@ -57,20 +57,25 @@ def prepare(identifier,body,current,progress=None,plan_id=None,ownership=None):
     if archive['project_id']!=identifier:raise HTTPException(422,'归档不属于该考试')
     with connect() as db:
         pages=scope(db,identifier)
-        references={r['relative']:r for r in objects(db,'storage-assets') if r['status']=='stored'}
+        references={}
+        for r in objects(db,'storage-assets'):
+            if r['status']=='stored':references.setdefault(r['relative'],[]).append(r)
     entries={e['path']:e for e in manifest};files=[]
     for index,page in enumerate(pages):
         if progress:progress(index,len(pages),'核对扫描文件')
         from .scan_files import page_suffixes
         for suffix in page_suffixes(page):
-            relative='pages/'+page['id']+suffix;path=local_path(relative);reference=references.get(relative)
+            relative='pages/'+page['id']+suffix;path=local_path(relative);refs=references.get(relative,[]);reference=refs[0] if refs else None
             if not path.exists() and not reference and not (page.get('status')=='recognized' or suffix=='.image'):continue
             entry=entries.get(relative)
             if not entry:raise HTTPException(409,'有扫描文件未被该归档覆盖，请重新归档：'+relative)
             if path.exists() and checksum(path)!=entry['sha256']:raise HTTPException(409,'扫描文件已变化，请重新归档：'+relative)
             remote=mode=='all' and reference is not None
-            if remote and (reference.get('backend')!=backend() or reference.get('location')!=location()):raise HTTPException(409,'远端位置与文件目录不一致，不能删除；请核对存储配置并重新同步')
-            if path.exists() or remote:files.append({**entry,'relative':relative,'local':path.exists(),'remote_id':reference['id'] if remote else None,'candidate_number':page.get('candidate_number'),'side':page.get('side'),'sequence':page.get('sequence')})
+            if remote:
+                try:
+                    for r in refs:for_reference(r)
+                except Exception:raise HTTPException(409,'远端位置与文件目录不一致，不能删除；请核对原连接')
+            if path.exists() or remote:files.append({**entry,'relative':relative,'local':path.exists(),'remote_id':reference['id'] if remote else None,'remote_ids':[r['id'] for r in refs] if remote else [],'candidate_number':page.get('candidate_number'),'side':page.get('side'),'sequence':page.get('sequence')})
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
         from .jobs import guard
@@ -119,11 +124,10 @@ def execute_release(identifier,body,current,progress=None):
             if progress:progress(index,len(plan['files']),'释放扫描文件')
             try:
                 path=local_path(entry['relative'])
-                if entry['remote_id']:
-                    with connect() as db:reference=require(db,entry['remote_id'],'storage-assets')
+                for remote_id in entry.get('remote_ids',[entry['remote_id']] if entry['remote_id'] else []):
+                    with connect() as db:reference=require(db,remote_id,'storage-assets')
                     if reference['status']=='stored':
-                        if reference.get('backend')!=backend() or reference.get('location')!=location():raise ValueError('远端位置变化')
-                        Storage().delete(reference['key'])
+                        for_reference(reference).delete(reference['key'])
                         with connect() as db:
                             reference.update(status='archived',archive_id=plan['archive_id']);put(db,'storage-assets',reference,current['id'])
                 path.unlink(missing_ok=True);released+=1
