@@ -69,3 +69,15 @@ def test_objective_rule_trial_uses_formal_grading_and_bounds(tmp_path,monkeypatc
         assert trial([])['score']==0
         question['rule']['script']='anything';trial(['A'],422)
         question['rule']={'mode':'partial','partial_points':1};assert trial(['A'])['score']==1 and trial(['B'])['score']==0
+
+
+def test_forbidden_placeholders_preserve_header_subjective_and_footer():
+    region={'page':1,'x':15,'y':115,'width':100,'height':70}
+    template={'name':'测试卷','paper':'A3','sheet_columns':3,'sides':2,'layout_version':3,'candidate_length':8,'questions':[{'number':1,'type':'subjective','regions':[region]}]}
+    areas=paper.forbidden_regions(template,1)
+    assert areas and len(paper.forbidden_regions(template,2))==3
+    for area in areas:
+        assert area['y']>=35 and area['y']+area['height']<=255
+        assert not (area['x']<region['x']+region['width'] and region['x']<area['x']+area['width'] and area['y']<region['y']+region['height'] and region['y']<area['y']+area['height'])
+        if area['x']<130:assert area['y']>=100
+    assert paper.forbidden_regions({**template,'layout_version':2},1)==[]

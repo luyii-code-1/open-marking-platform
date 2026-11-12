@@ -61,6 +61,33 @@ def validate(template):
 
 
 
+def forbidden_regions(template,page):
+    if not manual_binding(template):return []
+    width,_=dimensions(template);count=panels(template);pw=(width-24-(count-1)*8)/count
+    occupied=[r for q in template.get('questions',[]) for r in q.get('regions',[]) if r['page']==page]
+    result=[]
+    for panel in range(count):
+        left=12+panel*(pw+8);right=left+pw;top=100 if page==1 and panel==0 else 35;bottom=255
+        obstacles=[(max(left,r['x']-2),max(top,r['y']-5),min(right,r['x']+r['width']+2),min(bottom,r['y']+r['height']+2)) for r in occupied if r['x']<right and r['x']+r['width']>left]
+        edges=sorted({top,bottom}|{v for x,y,ex,ey in obstacles for v in (y,ey) if top<=v<=bottom})
+        active={}
+        for y,ey in zip(edges,edges[1:]):
+            spans=[(left,right)]
+            for x,oy,ex,oey in obstacles:
+                if oy>=ey or oey<=y:continue
+                spans=[part for a,b in spans for part in ((a,min(b,x)),(max(a,ex),b)) if part[1]>part[0]]
+            current={}
+            for a,b in spans:
+                key=(round(a,3),round(b,3))
+                if key in active:
+                    rect=active.pop(key);rect['height']=ey-rect['y']
+                else:rect={'page':page,'x':a,'y':y,'width':b-a,'height':ey-y}
+                current[key]=rect
+            result.extend(active.values());active=current
+        result.extend(active.values())
+    return [r for r in result if r['width']>=30 and r['height']>=12]
+
+
 def pdf(template):
     validate(template)
     output=io.BytesIO()
@@ -78,10 +105,11 @@ def pdf(template):
             c.setFillColorRGB(1,1,1);c.rect(0,(h-100)*mm,w*mm,100*mm,fill=1,stroke=0);c.setFillColorRGB(0,0,0)
         title_width=(w-24-(panels(template)-1)*8)/panels(template) if manual_binding(template) else w-65
         title_size=min(16,16*(title_width-6)/max(1,pdfmetrics.stringWidth(template['name'],FONT,16)/mm))
-        c.setFont(FONT,title_size)
-        c.drawString(15*mm,(h-20)*mm,template['name'])
-        if template.get('subtitle'):
-            c.setFont(FONT,10);c.drawString(15*mm,(h-25)*mm,template['subtitle'])
+        if page==1 or not manual_binding(template):
+            c.setFont(FONT,title_size)
+            c.drawString(15*mm,(h-20)*mm,template['name'])
+            if template.get('subtitle'):
+                c.setFont(FONT,10);c.drawString(15*mm,(h-25)*mm,template['subtitle'])
         c.setFont(FONT,9)
         c.drawString(15*mm,(h-29)*mm,f"第{page}面 · 按实际大小打印，保留定位标记")
         if not manual_binding(template):
@@ -93,7 +121,6 @@ def pdf(template):
             for panel in range(count):
                 left=12+panel*(pw+8)
                 if panel:
-                    c.setFont(FONT,min(title_size,11));c.drawString((left+2)*mm,(h-20)*mm,template['name'])
                     c.setDash(1,3);c.setStrokeGray(.65);c.line((left-4)*mm,15*mm,(left-4)*mm,(h-15)*mm);c.setDash();c.setStrokeGray(0)
                 c.setFont(FONT,8);c.drawRightString((left+pw-2)*mm,16*mm,f'第{(page-1)*count+panel+1}栏 / 共{count*template["sides"]}栏')
         for x,y in ((7,7),(w-7,7),(7,h-7),(w-7,h-7)):
@@ -165,6 +192,15 @@ def pdf(template):
                         try:asset=materialize('assets/'+question['image_asset_id']+'.png')
                         except FileNotFoundError:raise ValueError('题卡插图不存在')
                         c.drawImage(str(asset),(x+3)*mm,(h-y-rh+3)*mm,width=(rw-6)*mm,height=min(rh-12,question.get('image_height',25))*mm,preserveAspectRatio=True,anchor='c',mask='auto')
+        for area in forbidden_regions(template,page):
+            x,y,rw,rh=(area[k] for k in ('x','y','width','height'))
+            c.saveState();c.setStrokeGray(.7);c.setLineWidth(.15*mm);c.setDash(2,2)
+            c.rect(x*mm,(h-y-rh)*mm,rw*mm,rh*mm)
+            c.setDash();c.setStrokeGray(.88)
+            c.line(x*mm,(h-y)*mm,(x+rw)*mm,(h-y-rh)*mm);c.line(x*mm,(h-y-rh)*mm,(x+rw)*mm,(h-y)*mm)
+            label='该区域禁止答题';font_size=min(11,(rw-4)*mm/8);label_width=pdfmetrics.stringWidth(label,FONT,font_size)
+            c.setFillGray(1);c.rect((x+rw/2)*mm-label_width/2-3,(h-y-rh/2)*mm-4,label_width+6,font_size+4,fill=1,stroke=0)
+            c.setFillGray(.35);c.setFont(FONT,font_size);c.drawCentredString((x+rw/2)*mm,(h-y-rh/2)*mm,label);c.restoreState()
         if any(q.get('choice_style') in ('bracket','compact') for q in template.get('questions',[])):
             c.setFillGray(1);c.rect(12*mm,26*mm,98*mm,12*mm,fill=1,stroke=0);c.setFillGray(0)
             c.setFont(FONT,8);c.drawString(12*mm,30*mm,'灰度校准 · 请勿填涂')
