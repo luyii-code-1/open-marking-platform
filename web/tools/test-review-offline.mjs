@@ -68,22 +68,41 @@ let reloaded=0,dirty=false
 workerEvents.controller={postMessage(value){replies.push(value)}}
 Object.defineProperty(globalThis,'navigator',{configurable:true,value:{serviceWorker:workerEvents}})
 globalThis.window=windowEvents
-globalThis.document={querySelector(){return {getAttribute(){return 'test-build'}}}}
+globalThis.document={activeElement:null,querySelector(){return {getAttribute(){return 'test-build'}}}}
 globalThis.location={reload(){reloaded++}}
 const navigationUrl='data:text/javascript,export const hasUnsavedChanges=()=>globalThis.testDirty()'
 globalThis.testDirty=()=>dirty
-await import(await sourceUrl('pwaCoordinator.ts',{"'./reviewStore'":JSON.stringify(storeUrl),"'./useNavigation'":JSON.stringify(navigationUrl)}))
+const policyUrl=await sourceUrl('updatePolicy.ts'),policy=await import(policyUrl)
+let clock=Date.now();const realNow=Date.now;Date.now=()=>clock
+await import(await sourceUrl('pwaCoordinator.ts',{"'./reviewStore'":JSON.stringify(storeUrl),"'./useNavigation'":JSON.stringify(navigationUrl),"'./updatePolicy'":JSON.stringify(policyUrl)}))
+clock+=16000
 const source={postMessage(value){replies.push(value)}}
 function message(data){const event=new Event('message');event.data=data;event.source=source;workerEvents.dispatchEvent(event)}
 dirty=true;message({type:'CHECK_UPDATE',requestId:'dirty'})
 await new Promise(resolve=>setTimeout(resolve,10))
-assert.equal(store.isReviewUpdateLocked(),true);assert.ok(replies.some(r=>r.requestId==='dirty'&&!r.ready))
+assert.equal(store.isReviewUpdateLocked(),false);assert.ok(replies.some(r=>r.requestId==='dirty'&&!r.ready))
 message({type:'UPDATE_ABORTED'});assert.equal(store.isReviewUpdateLocked(),false)
 dirty=false
+document.activeElement={matches(){return true}}
+message({type:'CHECK_UPDATE',requestId:'input'});assert.ok(replies.some(r=>r.requestId==='input'&&!r.ready))
+document.activeElement=null
+const finish=policy.beginMutation('POST')
+message({type:'CHECK_UPDATE',requestId:'posting'});assert.ok(replies.some(r=>r.requestId==='posting'&&!r.ready));finish()
+message({type:'CHECK_UPDATE',requestId:'resumed'})
+await new Promise(resolve=>setTimeout(resolve,10))
+windowEvents.dispatchEvent(new Event('pointerdown'))
+assert.ok(replies.some(r=>r.type==='UPDATE_CANCEL'&&r.requestId==='resumed'));assert.equal(store.isReviewUpdateLocked(),false)
+clock+=16000
+const form={isConnected:true},inputEvent=new Event('input')
+Object.defineProperty(inputEvent,'target',{value:{closest(){return form}}})
+windowEvents.dispatchEvent(inputEvent);clock+=16000
+message({type:'CHECK_UPDATE',requestId:'form'});assert.ok(replies.some(r=>r.requestId==='form'&&!r.ready),'Blurred form changes must still defer updates')
+form.isConnected=false
 const write=store.saveReviewDraft(owner,'three',3.5)
 message({type:'CHECK_UPDATE',requestId:'safe'})
 await write;await new Promise(resolve=>setTimeout(resolve,10))
 assert.ok(replies.some(r=>r.requestId==='safe'&&r.ready));assert.equal((await store.getReview(owner,'three')).draft,3.5)
 message({type:'UPDATE_COMMIT'});workerEvents.dispatchEvent(new Event('controllerchange'));assert.equal(reloaded,1)
 store.lockReviewUpdate(false)
+Date.now=realNow
 console.log('Offline grading passed: IndexedDB refresh, images/drafts, account isolation, two-tab idempotency, response loss, auth pause, protocol gating, conflict retention and page update handshake')

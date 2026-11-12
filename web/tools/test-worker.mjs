@@ -34,7 +34,7 @@ async function event(name,value={}) {
   return response
 }
 await event('install')
-assert.equal(skipped,0,'Installing an update must not activate it before confirmation')
+assert.equal(skipped,0,'Installing an update must not activate it before readiness')
 const current=(await caches.keys()).find(name=>stores.get(name)?.has('/index.html')&&name.startsWith('omp-shell-'))
 assert.ok(current)
 await event('activate')
@@ -58,6 +58,14 @@ function client(id){return {id,url:origin+'/',postMessage(data){messages.push({i
 clients=[client('one'),client('two')];replies.set('one',true);replies.set('two',false)
 await event('message',{source:client('one'),data:{type:'PREPARE_UPDATE'}})
 assert.equal(skipped,0);assert.ok(messages.some(m=>m.type==='UPDATE_ABORTED'))
+messages=[];replies.delete('two')
+const preparing=event('message',{source:client('one'),data:{type:'PREPARE_UPDATE'}})
+await new Promise(resolve=>setTimeout(resolve,0))
+const requestId=messages.find(m=>m.type==='CHECK_UPDATE').requestId
+await event('message',{source:{id:'one'},data:{type:'UPDATE_CANCEL',requestId}})
+await preparing
+assert.equal(skipped,0,'A ready window resuming work must cancel the pending update')
+assert.ok(messages.some(m=>m.type==='UPDATE_ABORTED'))
 messages=[];replies.set('two',true)
 await event('message',{source:client('one'),data:{type:'PREPARE_UPDATE'}})
 assert.equal(skipped,1);assert.equal(messages.filter(m=>m.type==='UPDATE_COMMIT').length,2)
@@ -75,4 +83,4 @@ assert.equal([...stores.keys()].filter(k=>k.startsWith('omp-shell-')).length,2)
 assert.ok(stores.has('unrelated')&&stores.has('omp-review-private'),'Only shell caches may be pruned')
 clients=[client('one')]
 await event('message',{source:client('one'),data:{type:'SKIP_WAITING'}});assert.equal(skipped,2)
-console.log('PWA worker passed: pinned offline shell, API bypass, two-window readiness/refusal/timeout, legacy gating, old assets and isolated cache pruning')
+console.log('PWA worker passed: pinned offline shell, API bypass, two-window readiness/refusal/cancellation/timeout, legacy gating, old assets and isolated cache pruning')

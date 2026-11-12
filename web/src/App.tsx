@@ -2,7 +2,7 @@ import { Button } from './Button'
 import { Brand } from './Brand'
 import { ScannerDesk } from './ScannerDesk'
 import { useEffect, useState } from 'react'
-import { Alert, Avatar, Card, Empty, Layout, Menu, Select, Space, Spin, Statistic, Tag, Typography } from 'antd'
+import { Alert, Avatar, Card, Empty, Layout, Menu, Space, Spin, Statistic, Tag, Typography } from 'antd'
 import { ScanOutlined, ApartmentOutlined, AuditOutlined, BookOutlined, FileSearchOutlined, LogoutOutlined, MenuOutlined, ReadOutlined, SettingOutlined, TeamOutlined } from '@ant-design/icons'
 import { ApiError, currentToken, request, send, setToken, useResource, type User } from './api'
 import { DataManagement, Exceptions, Results, Settings } from './Management'
@@ -10,7 +10,6 @@ import { Exams } from './Exams'
 import { useNavigation, confirmLeaving } from './useNavigation'
 import { Marking } from './Marking'
 import { Account } from './Account'
-import { PwaStatus } from './PwaStatus'
 import { RealtimeStatus } from './RealtimeStatus'
 import { Login, type Portal } from './Login'
 import { ArchiveManager } from './ArchiveManager'
@@ -19,7 +18,7 @@ import { cachedReviewUser, rememberReviewUser, settleReviewWrites } from './revi
 
 const { Text, Title } = Typography
 export function App() {
-  const [user, setUser] = useState<User | null>(null), [checking, setChecking] = useState(true), [mobile, setMobile] = useState<'auto' | 'desktop' | 'mobile'>('auto'), [collapsed, setCollapsed] = useState(false), [portal,setPortal] = useState<Portal>(()=>sessionStorage.getItem('omp-portal')==='marking'?'marking':'admin')
+  const [user, setUser] = useState<User | null>(null), [checking, setChecking] = useState(true), [collapsed, setCollapsed] = useState(false), [portal,setPortal] = useState<Portal>(()=>sessionStorage.getItem('omp-portal')==='marking'?'marking':'admin')
   const [offlineAccess,setOfflineAccess]=useState(false)
   const { location, navigate } = useNavigation()
   function endSession(){setToken('');sessionStorage.removeItem('omp-review-user');setUser(null);setOfflineAccess(false)}
@@ -57,13 +56,13 @@ export function App() {
     { key: 'account', icon: <SettingOutlined />, label: '个人账号' },
   ]
   const title = items.flatMap(i => 'children' in i ? i.children || [] : [i]).find(i => i.key === page)?.label || '工作概览'
-  return <ReviewWorkspace key={user.id} user={user} offline={offlineAccess} onVerified={acceptUser} onLoginRequired={endSession}><Layout className={`app-shell mode-${mobile}`}>
+  return <ReviewWorkspace key={user.id} user={user} offline={offlineAccess} onVerified={acceptUser} onLoginRequired={endSession}><Layout className="app-shell">
     <Layout.Sider width={200} collapsedWidth={64} collapsed={collapsed} className="sidebar" breakpoint="lg" onBreakpoint={broken => setCollapsed(broken)}>
       <Brand compact={collapsed} />
       <Menu theme="light" mode="inline" items={items} selectedKeys={[page]} onClick={({ key }) => setPage(key)} />
     </Layout.Sider>
     <Layout>
-      <Layout.Header className="topbar"><Space className="topbar-left"><Button type="text" aria-label={collapsed?'展开导航':'收起导航'} icon={<MenuOutlined />} onClick={() => setCollapsed(!collapsed)} /><span className="breadcrumb">{management ? '管理后台' : '阅卷台'} <span>/</span> {title}</span></Space><Space size={8} className="topbar-actions"><Select aria-label="显示模式" style={{width:88}} size="small" value={mobile} onChange={value => setMobile(value)} options={[{ label: '自适应', value: 'auto' }, { label: '电脑', value: 'desktop' }, { label: '手机', value: 'mobile' }]} /><PwaStatus/><RealtimeStatus user={user} onProfile={setUser} onExpired={endSession}/>{admin && <Button type="text" onClick={()=>{if(!confirmLeaving())return;const next:Portal=management?'marking':'admin';setPortal(next);sessionStorage.setItem('omp-portal',next);navigate(next==='admin'?'#/scanner':'#/marking')}}>{management?'进入阅卷台':'进入管理后台'}</Button>}<Avatar size="small">{user.name.slice(0, 1)}</Avatar><Text className="account-name" ellipsis>{user.name}</Text><Button type="text" icon={<LogoutOutlined />} onClick={async () => { if(!confirmLeaving())return; await settleReviewWrites();await send('/auth/logout').catch(()=>{});endSession() }}>退出</Button></Space></Layout.Header>
+      <Layout.Header className="topbar"><Space className="topbar-left"><Button type="text" aria-label={collapsed?'展开导航':'收起导航'} icon={<MenuOutlined />} onClick={() => setCollapsed(!collapsed)} /><span className="breadcrumb">{management ? '管理后台' : '阅卷台'} <span>/</span> {title}</span></Space><Space size={8} className="topbar-actions"><RealtimeStatus user={user} onProfile={setUser} onExpired={endSession}/>{admin && <Button type="text" onClick={()=>{if(!confirmLeaving())return;const next:Portal=management?'marking':'admin';setPortal(next);sessionStorage.setItem('omp-portal',next);navigate(next==='admin'?'#/scanner':'#/marking')}}>{management?'进入阅卷台':'进入管理后台'}</Button>}<Avatar size="small">{user.name.slice(0, 1)}</Avatar><Text className="account-name" ellipsis>{user.name}</Text><Button type="text" icon={<LogoutOutlined />} onClick={async () => { if(!confirmLeaving())return; await settleReviewWrites();await send('/auth/logout').catch(()=>{});endSession() }}>退出</Button></Space></Layout.Header>
       <Layout.Content className="page-content"><div className="page-heading" hidden={page === 'exams' && !!location.projectId}><div><Title level={2}>{title}</Title></div><Tag className="account-tag">{user.role==='admin'?'系统管理员':user.role==='manager'?'管理教师':'阅卷教师'} · {user.username}</Tag></div>
         {page === 'dashboard' && <Dashboard onNavigate={setPage} admin={management} />}
         {page === 'exams' && <Exams location={location} navigate={navigate} />}

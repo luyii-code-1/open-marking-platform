@@ -41,13 +41,14 @@ async function prepare(event,legacy){
   const requestId=String(Date.now())+'-'+Math.random();
   let finish;
   const outcome=new Promise(resolve=>{finish=resolve});
-  pending={requestId,remaining:new Set(clients.map(c=>c.id)),finish};
+  pending={requestId,clients:new Set(clients.map(c=>c.id)),remaining:new Set(clients.map(c=>c.id)),finish,cancelled:false};
   const timer=setTimeout(()=>finish(false),8000);
   for(const client of clients)client.postMessage({type:'CHECK_UPDATE',requestId});
   if(!clients.length)finish(false);
   let accepted=await outcome;
   clearTimeout(timer);
   const latest=await windows();
+  if(pending.cancelled)accepted=false;
   if(latest.some(c=>!clients.some(original=>original.id===c.id)))accepted=false;
   for(const client of latest)client.postMessage({type:accepted?'UPDATE_COMMIT':'UPDATE_ABORTED'});
   pending=null;
@@ -57,6 +58,7 @@ self.addEventListener('message',event=>{
   const value=event.data;
   if(value?.type==='PREPARE_UPDATE')event.waitUntil(prepare(event,false));
   else if(value?.type==='SKIP_WAITING')event.waitUntil(prepare(event,true));
+  else if(value?.type==='UPDATE_CANCEL'&&pending&&pending.requestId===value.requestId&&pending.clients.has(event.source?.id)){pending.cancelled=true;pending.finish(false);}
   else if(value?.type==='UPDATE_READY'&&pending&&pending.requestId===value.requestId&&pending.remaining.has(event.source?.id)){
     if(value.ready!==true)pending.finish(false);
     else {pending.remaining.delete(event.source.id);if(!pending.remaining.size)pending.finish(true);}
