@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { Alert, Button, Space, Typography } from 'antd'
+import { Alert, Space, Typography } from 'antd'
+import { Button } from './Button'
 import { requestBlob, type Region, type Template } from './api'
 import { choiceCenters, compactChoice } from './objectiveLayout'
 
@@ -45,10 +46,10 @@ export function Paper({value,page,selected,draw,answerMode=false,readOnly=false,
       <rect width={width} height={height} fill="white"/>
       {visible&&<image href={visible.url} x={0} y={0} width={width} height={height} preserveAspectRatio="none" pointerEvents="none"/>}
       {value.questions.flatMap(q=>q.regions.map((r,index)=>r.page!==page?null:<g key={`${q.id}-${index}`}>
-        <rect data-question-id={q.id} x={r.x} y={r.y} width={r.width} height={r.height} fill={selected===q.id?'#17655b12':'transparent'} stroke={selected===q.id?'#17655b':'transparent'} strokeWidth={.4} onPointerDown={e=>{e.stopPropagation();onSelect(q.id);svg.current?.focus();if(!readOnly&&!draw&&!answerMode){start.current={...point(e),qid:q.id,index,region:r};svg.current!.setPointerCapture(e.pointerId)}}}><title>第{q.number}题 · 区域{index+1}</title></rect>
-        {answerMode&&q.type!=='subjective'&&choiceCenters(q,r).map(({letter,x,y})=><rect key={letter} role="button" aria-label={`第${q.number}题选项${letter}`} aria-pressed={q.answer.includes(letter)} x={x-(q.choice_style==='bracket'?4:2)} y={y-1.5} width={q.choice_style==='bracket'?compactChoice.width:4} height={3} rx={.4} fill={q.answer.includes(letter)?'#17655b35':'transparent'} stroke={q.answer.includes(letter)?'#17655b':'transparent'} strokeWidth={.3} style={{cursor:readOnly?'default':'pointer'}} onPointerDown={e=>{e.stopPropagation();svg.current?.focus()}} onClick={()=>{if(!readOnly)onAnswer?.(q.id,letter)}}><title>第{q.number}题 · {letter}</title></rect>)}
+        <rect data-question-id={q.id} x={r.x} y={r.y} width={r.width} height={r.height} fill={selected===q.id?'#0866ff12':'transparent'} stroke={selected===q.id?'#0866ff':'transparent'} strokeWidth={.4} onPointerDown={e=>{e.stopPropagation();onSelect(q.id);svg.current?.focus();if(!readOnly&&!draw&&!answerMode){start.current={...point(e),qid:q.id,index,region:r};svg.current!.setPointerCapture(e.pointerId)}}}><title>第{q.number}题 · 区域{index+1}</title></rect>
+        {answerMode&&q.type!=='subjective'&&choiceCenters(q,r).map(({letter,x,y})=><rect key={letter} role="button" aria-label={`第${q.number}题选项${letter}`} aria-pressed={q.answer.includes(letter)} x={x-(q.choice_style==='bracket'?4:2)} y={y-1.5} width={q.choice_style==='bracket'?compactChoice.width:4} height={3} rx={.4} fill={q.answer.includes(letter)?'#0866ff35':'transparent'} stroke={q.answer.includes(letter)?'#0866ff':'transparent'} strokeWidth={.3} style={{cursor:readOnly?'default':'pointer'}} onPointerDown={e=>{e.stopPropagation();svg.current?.focus()}} onClick={()=>{if(!readOnly)onAnswer?.(q.id,letter)}}><title>第{q.number}题 · {letter}</title></rect>)}
       </g>))}
-      {draft&&<rect x={draft.x} y={draft.y} width={draft.width} height={draft.height} stroke="#17655b" fill="#17655b20" strokeDasharray="2 1" strokeWidth={.6} pointerEvents="none"/>}
+      {draft&&<rect x={draft.x} y={draft.y} width={draft.width} height={draft.height} stroke="#0866ff" fill="#0866ff20" strokeDasharray="2 1" strokeWidth={.6} pointerEvents="none"/>}
     </svg></div>
   </Space>
 }

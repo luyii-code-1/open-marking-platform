@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { App, Button, Collapse, Drawer, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Typography, Upload } from 'antd'
+import { App, Collapse, Drawer, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Typography, Upload } from 'antd'
+import { Button } from './Button'
 import { DeleteOutlined } from '@ant-design/icons'
 import { request, type Question, type Row } from './api'
 import { RichEditor } from './RichEditor'

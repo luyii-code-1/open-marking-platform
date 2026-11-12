@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
-import { Alert, App, Button, Card, Form, Input, Radio, Space, Typography } from 'antd'
+import { Alert, App, Card, Form, Input, Radio, Space, Typography } from 'antd'
+import { Button } from './Button'
 import { ArrowLeftOutlined, AuditOutlined, SettingOutlined } from '@ant-design/icons'
 import { send, setToken, type User } from './api'
 import { loginPasskey } from './passkeys'
 import { PwaStatus } from './PwaStatus'
+import { Brand } from './Brand'
 
 export type Portal = 'marking' | 'admin'
 const { Title, Text, Paragraph } = Typography
@@ -30,11 +32,11 @@ export function Login({ portal, onPortal, onLogin }: { portal?: Portal; onPortal
     } catch (e) { setError((e as Error).message) }
     finally { setLoading(false) }
   }
-  if (!portal) return <div className="login-screen"><div className="portal-picker"><Title level={2}>登录</Title><div className="portal-grid">
+  if (!portal) return <div className="login-screen"><div className="portal-picker"><Brand login /><Title level={2}>登录</Title><div className="portal-grid">
     <Card><AuditOutlined className="portal-icon" /><Title level={3}>阅卷台</Title><Button type="primary" size="large" block onClick={() => onPortal('marking')}>登录阅卷台</Button></Card>
     <Card><SettingOutlined className="portal-icon" /><Title level={3}>管理后台</Title><Button size="large" block onClick={() => onPortal('admin')}>登录管理后台</Button></Card>
   </div><PwaStatus /></div></div>
-  return <div className="login-screen"><Card className="login-card">
+  return <div className="login-screen"><Card className="login-card"><Brand login />
     <Button type="text" className="login-back" icon={<ArrowLeftOutlined />} disabled={loading} onClick={() => { if (mode === 'forgot' || mode === 'bootstrap') { setMode('password'); setError('') } else onPortal() }}>{mode === 'forgot' || mode === 'bootstrap' ? '返回登录' : '选择登录入口'}</Button>
     <Title level={3}>{mode === 'forgot' ? '重置密码' : mode === 'bootstrap' ? '创建管理员' : portal === 'admin' ? '登录管理后台' : '登录阅卷台'}</Title>
     {error && <Alert type="error" showIcon message={error} className="login-error" />}

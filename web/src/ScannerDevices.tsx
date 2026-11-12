@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { Alert,App,Button,Card,Input,Modal,Select,Space,Table,Tag,Typography } from 'antd'
+import { Alert, App, Card, Input, Modal, Select, Space, Table, Tag, Typography } from 'antd'
+import { Button } from './Button'
 import { send,useResource,type Row } from './api'
 
 export function ScannerDevices() {

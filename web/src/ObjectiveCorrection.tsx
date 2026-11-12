@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Alert, App, Button, Collapse, Select, Table } from 'antd'
+import { Alert, App, Collapse, Select, Table } from 'antd'
+import { Button } from './Button'
 import { send, useResource, type Row } from './api'
 
 export function ObjectiveCorrection({submissionId,reason,onSaved}:{submissionId:string;reason:string;onSaved:()=>Promise<void>}) {

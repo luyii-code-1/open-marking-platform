@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="750" height="240" viewBox="130 335 750 240" role="img" aria-labelledby="title desc">
+<title id="title">OMP — Open Marking Platform</title>
+<desc id="desc">Geometric OMP wordmark, electric-blue diagonal accent, and Open Marking Platform subtitle.</desc>
+
+<g id="omp-mark" fill="#232323">
+<path id="letter-o" d="M 263 350
+H 347
+C 390 350 417 379 410 422
+L 403 455
+Q 400 467 386 476
+H 344
+L 353 456
+C 370 414 357 395 324 395
+H 260
+C 224 395 205 420 197 466
+C 189 498 206 515 238 515
+H 272
+L 234 563
+H 219
+C 158 563 137 527 147 478
+C 158 399 198 350 263 350
+Z"/>
+<path id="letter-m" d="M 440 350
+H 467
+Q 479 350 485 363
+L 537 455
+L 620 361
+Q 629 350 639 350
+H 667
+Q 674 350 672 360
+L 643 554
+Q 641 563 632 563
+H 610
+Q 601 563 603 553
+L 620 440
+L 558 520
+Q 553 527 545 527
+H 529
+Q 521 527 517 520
+L 472 440
+L 453 555
+Q 452 563 444 563
+H 412
+Q 404 563 406 553
+L 429 360
+Q 430 350 440 350
+Z"/>
+<path id="letter-p" fill-rule="evenodd" d="M 703 350
+H 794
+C 845 350 869 376 866 417
+C 862 465 827 498 770 498
+H 737
+L 729 553
+Q 728 563 720 563
+H 686
+Q 678 563 680 553
+L 694 360
+Q 695 350 703 350
+Z
+M 743 395
+L 739 452
+H 774
+C 800 452 815 439 817 420
+C 818 405 807 395 785 395
+Z"/>
+</g>
+<path id="blue-slash" d="M 307 498
+Q 313 492 320 492
+H 388
+Q 397 492 392 500
+L 346 556
+Q 340 563 332 563
+H 260
+Q 252 563 258 555
+Z" fill="#0866FF"/>
+
+</svg>

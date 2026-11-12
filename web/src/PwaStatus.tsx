@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { App, Button, Modal, Space, Tag } from 'antd'
+import { App, Modal, Space, Tag } from 'antd'
+import { Button } from './Button'
 
 interface InstallPrompt extends Event {
   prompt():Promise<void>

@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
-import { Alert, App, Button, Collapse, Empty, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd'
+import { Alert, App, Collapse, Empty, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd'
+import { Button } from './Button'
 import { PlusOutlined } from '@ant-design/icons'
 import type { Question, Template } from './api'
 import { addObjective, applyAnswers, arrangeObjective, answerLetters, parseAnswer } from './objectiveLayout'
