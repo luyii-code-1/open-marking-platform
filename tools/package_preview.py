@@ -31,7 +31,7 @@ def source_files():
     for name in ['LICENSE', 'LICENSE.md', 'NOTICE', 'NOTICE.md']:
         if (ROOT / name).is_file():
             yield ROOT / name
-    for folder in ['server', 'web', 'scanner', 'scanner_engine', 'deploy', 'docs', 'tools', 'tests']:
+    for folder in ['server', 'web', 'scanner', 'scanner_engine', 'deploy', 'tools', 'tests']:
         for path in sorted((ROOT / folder).rglob('*')):
             relative = path.relative_to(ROOT)
             if any(part in EXCLUDED for part in relative.parts):
@@ -98,8 +98,6 @@ def main() -> None:
             raise RuntimeError('Scanner publish did not produce OMP.Scanner.exe')
         from tools.build_recognition import build as build_recognition
         build_recognition(staging / 'recognition')
-        shutil.copyfile(ROOT / 'docs/扫描端.md', staging / '扫描端说明.md')
-        shutil.copyfile(ROOT / 'docs/安装与交付.md', staging / '安装与交付.md')
         shutil.copyfile(ROOT / 'LICENSE', staging / 'LICENSE')
         if (ROOT / 'NOTICE.md').exists(): shutil.copyfile(ROOT / 'NOTICE.md', staging / 'NOTICE.md')
         results.append(pack(output / 'OpenMarkingPlatform-scanner-win-x64-preview.zip',
