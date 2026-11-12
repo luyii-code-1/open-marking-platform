@@ -9,6 +9,7 @@ import { DataManagement, Exceptions, Results, Settings } from './Management'
 import { Exams } from './Exams'
 import { useNavigation, confirmLeaving } from './useNavigation'
 import { Marking } from './Marking'
+import { ReviewTasks } from './ReviewTasks'
 import { Account } from './Account'
 import { RealtimeStatus } from './RealtimeStatus'
 import { Login, type Portal } from './Login'
@@ -56,7 +57,7 @@ export function App() {
     { key: 'account', icon: <SettingOutlined />, label: '个人账号' },
   ]
   const title = items.flatMap(i => 'children' in i ? i.children || [] : [i]).find(i => i.key === page)?.label || '工作概览'
-  return <ReviewWorkspace key={user.id} user={user} offline={offlineAccess} onVerified={acceptUser} onLoginRequired={endSession}><Layout className="app-shell">
+  return <ReviewWorkspace key={user.id} user={user} offline={offlineAccess} onVerified={acceptUser} onLoginRequired={endSession}>{page === 'marking' && location.templateId && location.questionId ? <main className="review-fullscreen"><Marking key={`${location.templateId}:${location.questionId}`} admin={false} initialTemplateId={location.templateId} initialQuestionId={location.questionId} onExit={() => navigate('#/marking')} /></main> : <Layout className="app-shell">
     <Layout.Sider width={200} collapsedWidth={64} collapsed={collapsed} className="sidebar" breakpoint="lg" onBreakpoint={broken => setCollapsed(broken)}>
       <Brand compact={collapsed} />
       <Menu theme="light" mode="inline" items={items} selectedKeys={[page]} onClick={({ key }) => setPage(key)} />
@@ -66,7 +67,7 @@ export function App() {
       <Layout.Content className="page-content"><div className="page-heading" hidden={page === 'exams' && !!location.projectId}><div><Title level={2}>{title}</Title></div><Tag className="account-tag">{user.role==='admin'?'系统管理员':user.role==='manager'?'管理教师':'阅卷教师'} · {user.username}</Tag></div>
         {page === 'dashboard' && <Dashboard onNavigate={setPage} admin={management} />}
         {page === 'exams' && <Exams location={location} navigate={navigate} />}
-        {page === 'marking' && <Marking admin={management} />}
+        {page === 'marking' && <ReviewTasks onOpen={(templateId, questionId) => navigate(`#/marking/review/${encodeURIComponent(templateId)}/${encodeURIComponent(questionId)}`)} />}
         {page === 'exceptions' && <Exceptions />}
         {page === 'results' && <Results admin={management} />}
         {page === 'archives' && <ArchiveManager/>}
@@ -76,7 +77,7 @@ export function App() {
         {page === 'account' && <Account user={user} onProfile={setUser} onLogout={endSession}/>}
       </Layout.Content>
     </Layout>
-  </Layout></ReviewWorkspace>
+  </Layout>}</ReviewWorkspace>
 }
 function Dashboard({ onNavigate, admin }: { onNavigate: (value: string) => void; admin: boolean }) {
   const resource = useResource<Record<string, number>>('/dashboard', {})

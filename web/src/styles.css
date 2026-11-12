@@ -35,3 +35,9 @@
 
 .review-queue-status { position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:1000;max-width:calc(100vw - 32px);padding:12px 20px;border:1px solid #dce3ec;border-radius:12px;background:#fff;box-shadow:0 4px 20px #17243b16; }
 .review-save-status { min-height:24px;margin-bottom:16px; }
+
+.review-task-progress{max-width:170px;font-size:12px}.review-task-progress .ant-progress{margin:4px 0 0}
+.review-fullscreen{min-height:100dvh;padding:16px 20px;background:#f5f7fa}
+.review-session-header{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:0 0 4px}.review-session-header h4{margin:0 0 4px!important}
+.review-fullscreen .marking-layout{grid-template-columns:minmax(0,1fr) 300px;gap:16px}.review-fullscreen .answer-viewport{height:calc(100dvh - 176px);min-height:340px}.review-fullscreen .marking-layout>.ant-card{min-width:0}.review-session-empty{min-height:calc(100dvh - 130px);display:grid;place-items:center}
+@media(max-width:850px){.review-fullscreen{padding:12px}.review-fullscreen .marking-layout{grid-template-columns:1fr}.review-fullscreen .answer-viewport{height:55dvh;min-height:260px}.review-session-header{align-items:flex-start;flex-wrap:wrap}}
