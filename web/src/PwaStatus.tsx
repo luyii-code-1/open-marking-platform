@@ -1,5 +1,6 @@
+import { Button } from './Button'
 import { useEffect, useRef, useState } from 'react'
-import { App, Button, Modal, Space, Tag } from 'antd'
+import { App, Modal, Space, Tag } from 'antd'
 import { settleReviewWrites } from './reviewStore'
 import { hasUnsavedChanges } from './useNavigation'
 import { reportPwaReady } from './pwaCoordinator'

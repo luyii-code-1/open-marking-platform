@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react'
-import { Alert, Spin } from 'antd'
+import { Alert, Card, Spin, type CardProps } from 'antd'
+export function ContentCard({ loading, children, ...props }: CardProps) {
+  return <Card {...props}><Spin spinning={!!loading}>{children}</Spin></Card>
+}
 export function AssetImage({ src, className, style }: { src: string; className?: string; style?: React.CSSProperties }) {
   const [url, setUrl] = useState(''), [error, setError] = useState('')
   useEffect(() => {

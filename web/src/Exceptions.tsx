@@ -1,6 +1,7 @@
+import { Button } from './Button'
 import { RoomTagBadges, RoomTagPicker } from './RoomTags'
 import { useEffect, useState } from 'react'
-import { Alert, App, Button, Card, Descriptions, Form, Input, InputNumber, Modal, Select, Space, Switch, Table, Tabs, Tag, Typography } from 'antd'
+import { Alert, App, Card, Descriptions, Form, Input, InputNumber, Modal, Select, Space, Switch, Table, Tabs, Tag, Typography } from 'antd'
 import { download, send, useResource, type Row } from './api'
 import { AssetImage } from './components'
 import { HierarchyPicker } from './HierarchyPicker'
@@ -9,7 +10,7 @@ const kinds:Record<string,string>={automatic:'自动检查',recognition:'定位�
 const rules:Record<string,string>={blank_answers:'客观题留空数量',same_answer_run:'连续相同选项',invalid_single:'单选题多选'}
 
 export function Exceptions({groupId}:{groupId?:string}) {
-  const [selectedGroup,setGroup]=useState(groupId || ''),group=groupId || selectedGroup,[status,setStatus]=useState<string|undefined>('open'),[selected,setSelected]=useState<string[]>([]),[detailId,setDetailId]=useState(''),[resolution,setResolution]=useState(''),[bulk,setBulk]=useState(false),[busy,setBusy]=useState(false),[form]=Form.useForm()
+  const [selectedGroup,setGroup]=useState(groupId || ''),group=groupId || selectedGroup,[status,setStatus]=useState<string|undefined>('open'),[selected,setSelected]=useState<string[]>([]),[detailId,setDetailId]=useState(''),[resolution,setResolution]=useState(''),[bulk,setBulk]=useState(false),[busy,setBusy]=useState(false),[savingRules,setSavingRules]=useState(false),[form]=Form.useForm()
   const [roomTag,setRoomTag]=useState<string|undefined>()
   const groups=useResource<Row[]>('/groups',[])
   const list=useResource<Row[]>(`/exceptions?${new URLSearchParams({...group?{group_id:group}:{},...status?{status}:{},...roomTag?{room_tag_id:roomTag}:{}})}`,[])
@@ -23,7 +24,7 @@ export function Exceptions({groupId}:{groupId?:string}) {
     try{await send('/exceptions/resolve',{ids,resolution});setDetailId('');setBulk(false);setSelected([]);await list.reload();message.success('核查结论已保存')}catch(e){message.error((e as Error).message)}finally{setBusy(false)}
   }
   const item=details.data?.exception
-  return <Space direction="vertical" size="large" style={{width:'100%'}}>
+  return <Space direction="vertical" size={16} style={{width:'100%'}}>
     <Card title="异常与优秀卷" extra={<Button onClick={list.reload}>刷新</Button>}>
       <Space wrap style={{marginBottom:16}}>{!groupId && <HierarchyPicker allowClear placeholder="全部题卡组" value={group} onChange={value=>{setGroup(value);setSelected([])}}/>}<Select allowClear placeholder="全部状态" value={status} style={{width:150}} options={[{label:'待核查',value:'open'},{label:'已处理',value:'resolved'}]} onChange={value=>{setStatus(value);setSelected([])}}/><RoomTagPicker groupId={group} value={roomTag} onChange={value=>{setRoomTag(value);setSelected([])}}/><Button onClick={()=>download(`/exports/exceptions?${new URLSearchParams({...group?{group_id:group}:{},...status?{status}:{},...roomTag?{room_tag_id:roomTag}:{}})}`,'异常核查.csv').catch(e=>message.error(e.message))}>导出</Button><Button disabled={!selected.length} onClick={()=>{setBulk(true);setResolution('')}}>批量处理（{selected.length}）</Button></Space>
       {list.error&&<Alert type="error" message={list.error}/>}
@@ -32,9 +33,9 @@ export function Exceptions({groupId}:{groupId?:string}) {
     {group&&<Card title="自动检查规则">
       <Typography.Paragraph type="secondary">规则用于提示人工核查，不修改识读结果或分数。保存后重新检查本题卡组已有答卷；关闭规则会结束该规则仍待核查的事项。</Typography.Paragraph>
       {configuration.error&&<Alert type="error" message={configuration.error}/>}
-      <Form form={form} layout="vertical" onFinish={async value=>{setBusy(true);try{const result=await send<{checked_submissions:number}>(`/groups/${group}/anomaly-rules`,value,'PUT');await configuration.reload();await list.reload();message.success(`已检查 ${result.checked_submissions} 份答卷`)}catch(e){message.error((e as Error).message)}finally{setBusy(false)}}}>
+      <Form form={form} layout="vertical" onFinish={async value=>{setSavingRules(true);try{const result=await send<{checked_submissions:number}>(`/groups/${group}/anomaly-rules`,value,'PUT');await configuration.reload();await list.reload();message.success(`已检查 ${result.checked_submissions} 份答卷`)}catch(e){message.error((e as Error).message)}finally{setSavingRules(false)}}}>
         {Object.entries(rules).map(([key,label])=><Space key={key} align="start" wrap><Form.Item name={[key,'enabled']} label={label} valuePropName="checked"><Switch/></Form.Item>{key!=='invalid_single'&&<Form.Item name={[key,key==='blank_answers'?'min_count':'min_run']} label="达到此数量时提示" rules={[{required:true}]}><InputNumber min={key==='blank_answers'?1:2} max={10000}/></Form.Item>}</Space>)}
-        <Button type="primary" htmlType="submit" loading={busy||configuration.loading}>保存并重新检查</Button>
+        <Button type="primary" htmlType="submit" loading={savingRules} disabled={configuration.loading || savingRules}>保存并重新检查</Button>
       </Form>
     </Card>}
     <Modal width={1000} title="查看与核查" open={!!detailId} onCancel={()=>setDetailId('')} confirmLoading={busy} onOk={()=>resolve([detailId])} okText="记录核查结论">

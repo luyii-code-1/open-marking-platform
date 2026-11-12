@@ -1,5 +1,6 @@
 import { useEffect,useRef } from 'react'
-import { Button,Space } from 'antd'
+import { Space } from 'antd'
+import { Button } from './Button'
 
 export function cleanHtml(value:string){
   const doc=new DOMParser().parseFromString(value,'text/html')

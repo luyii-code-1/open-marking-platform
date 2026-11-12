@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { App, Button, Card, Progress, Space, Table, Tag, Typography } from 'antd'
+import { App, Card, Progress, Space, Table, Tag, Typography } from 'antd'
+import { Button } from './Button'
 import { downloadArchive,send,useResource,type Row } from './api'
 
 const labels:Record<string,string>={'archive-project':'生成归档','preview-release':'核对释放清单','release-project':'释放扫描文件','restore-archive':'恢复扫描文件','delete-hierarchy':'归档并删除考试记录'}

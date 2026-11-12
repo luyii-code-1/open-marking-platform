@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { Alert, Button, Card, Input, InputNumber, Modal, Radio, Space, Table, Tag, Typography } from 'antd'
+import { Alert, Card, Input, InputNumber, Modal, Radio, Space, Table, Tag, Typography } from 'antd'
+import { Button } from './Button'
 import { useResource,type Row } from './api'
 
 type Filters={actor:string;object_id:string;kind:string;status:number|null}

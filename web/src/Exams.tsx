@@ -1,6 +1,7 @@
 import { RoomTagManager } from './RoomTags'
 import { useEffect } from 'react'
-import { App, Breadcrumb, Button, Card, Empty, Space, Spin, Tabs, Tag, Typography } from 'antd'
+import { App, Breadcrumb, Card, Empty, Space, Spin, Tabs, Tag, Typography } from 'antd'
+import { Button } from './Button'
 import { ArrowLeftOutlined, RightOutlined } from '@ant-design/icons'
 import { send, useResource, type Row, type Template } from './api'
 import { HierarchyDelete } from './HierarchyDelete'

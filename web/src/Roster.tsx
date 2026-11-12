@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Alert, App, Button, Card, Form, Select, Space, Table, Tag, Typography } from 'antd'
+import { Alert, App, Card, Form, Select, Space, Table, Tag, Typography } from 'antd'
+import { Button } from './Button'
 import { send, useResource, type Row } from './api'
 import { HierarchyPicker } from './HierarchyPicker'
 

@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { App,Button,Card,Form,Input,Modal,Select,Space,Table,Tabs } from 'antd'
+import { App, Card, Form, Input, Modal, Select, Space, Table, Tabs } from 'antd'
+import { Button } from './Button'
 import { send,useResource,type Row } from './api'
 import { EntityTable, ErrorNotice } from './EntityTable'
 

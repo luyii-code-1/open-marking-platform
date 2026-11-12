@@ -10,7 +10,8 @@
     "test:pwa": "node tools/test-worker.mjs",
     "test:navigation": "node tools/test-exam-navigation.mjs",
     "test:objective": "node tools/test-objective-layout.mjs",
-    "test:review-offline": "node tools/test-review-offline.mjs"
+    "test:review-offline": "node tools/test-review-offline.mjs",
+    "test:actions": "node tools/test-actions.mjs"
   },
   "dependencies": {
     "@ant-design/icons": "^6.0.0",
@@ -19,6 +20,7 @@
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
+    "@types/node": "^22.20.5",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.5.0",

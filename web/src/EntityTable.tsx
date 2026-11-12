@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { ReactNode } from 'react'
-import { Alert, App, Button, Card, Dropdown, Form, Input, InputNumber, Modal, Progress, Select, Space, Table, Tag, Typography, Upload } from 'antd'
+import { Alert, App, Card, Dropdown, Form, Input, InputNumber, Modal, Progress, Select, Space, Table, Tag, Typography, Upload } from 'antd'
+import { Button } from './Button'
 import { MoreOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons'
 import type { TableColumnsType } from 'antd'
 import { send, useResource, type Row } from './api'
@@ -40,9 +41,12 @@ export function EntityTable({ path, title, fields, columns, extra, onCreated, sc
     } catch (e) { message.error((e as Error).message) }
     finally { setSaving(false); await resource.reload(); await onCreated?.() }
   }
-  return <Card title={title} extra={<Space wrap>{extra}<Dropdown menu={{ items: [{ key: 'refresh', label: '刷新列表', onClick: resource.reload }, { key: 'import', label: '批量导入', onClick: () => setImporting(true) }] }}><Button icon={<MoreOutlined />} aria-label={`${title}更多操作`} /></Dropdown><Button type="primary" icon={<PlusOutlined />} onClick={() => setOpen(true)}>新建{title}</Button></Space>}>
+  return <Card title={title}>
     <ErrorNotice error={resource.error} retry={resource.reload} />
-    <Input.Search className="entity-search" placeholder={`搜索${title}`} allowClear value={search} onChange={e => setSearch(e.target.value)} />
+    <div className="entity-toolbar">
+      <Input.Search className="entity-search" placeholder={`搜索${title}`} allowClear value={search} onChange={e => setSearch(e.target.value)} />
+      <Space wrap>{extra}<Dropdown menu={{ items: [{ key: 'refresh', label: '刷新列表', onClick: resource.reload }, { key: 'import', label: '批量导入', onClick: () => setImporting(true) }] }}><Button icon={<MoreOutlined />} aria-label={`${title}更多操作`} /></Dropdown><Button type="primary" icon={<PlusOutlined />} onClick={() => setOpen(true)}>新建{title}</Button></Space>
+    </div>
     <Table rowKey="id" dataSource={rows} loading={resource.loading} columns={columns || fields.filter(f => f.type !== 'password').map(f => ({ title: f.label, dataIndex: f.name, render: (value: unknown) => f.options?.find(o => o.value === value)?.label || String(value ?? '—') }))} pagination={{ defaultPageSize: 10, showSizeChanger: true }} scroll={{ x: 'max-content' }} locale={{ emptyText: search ? '没有匹配的记录' : `尚未创建${title}` }} />
     <Modal title={`新建${title}`} open={open} onCancel={() => !saving && setOpen(false)} onOk={() => form.submit()} confirmLoading={saving}>
       <Form form={form} layout="vertical" onFinish={create}>{fields.map(f => <Form.Item key={f.name} name={f.name} label={f.label} initialValue={f.initial} rules={[{ required: f.required !== false, whitespace: f.type === undefined, message: `请填写${f.label}` }]}>{f.type === 'select' ? <Select showSearch optionFilterProp="label" options={f.options} /> : f.type === 'number' ? <InputNumber style={{ width: '100%' }} /> : f.type === 'password' ? <Input.Password autoComplete="new-password" /> : <Input />}</Form.Item>)}</Form>

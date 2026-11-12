@@ -1,5 +1,6 @@
 import { useEffect,useRef,useState } from 'react'
-import { Alert,App,Button,Checkbox,Input,Select,Space,Tag,Typography } from 'antd'
+import { Alert, App, Checkbox, Input, Select, Space, Tag, Typography } from 'antd'
+import { Button } from './Button'
 import { send,useResource,type Row } from './api'
 
 type Point={x:number;y:number}
