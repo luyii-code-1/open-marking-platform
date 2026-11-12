@@ -1,0 +1,42 @@
+{
+  "url": "https://192.168.1.2:18443",
+  "image_tag": "omp-integration:20261112-ui4",
+  "code_commit": "ef5c27e1337f7950ef9207c98e7b8d2fe70fca17",
+  "verified_static_files": 7,
+  "preserved_result_count": 100,
+  "backup_id": "9b6c2b55-44c4-4c33-b9d8-d0fcd88b171a",
+  "backup_sha256": "734a11e5a3dad212dc28cd9d915841b7a6c17e8af56b682fa6ae0cd6ea7b23ad",
+  "admin_portals": "passed",
+  "recovery_reset_invalid_code": "rejected",
+  "deletion_flow": {
+    "status": "passed",
+    "isolated_project_id": "d73aa53e-f1e8-4f70-8610-da6773bd1af2",
+    "deleted_records": 9,
+    "candidate_recognition": "passed",
+    "final_score": 1,
+    "archive_preserved": true,
+    "existing_personnel_reused": true
+  },
+  "ui_acceptance": "pending user review",
+  "services": [
+    {
+      "Service": "api",
+      "Image": "omp-integration:20261112-ui4",
+      "State": "running",
+      "Health": "healthy"
+    },
+    {
+      "Service": "scheduler",
+      "Image": "omp-integration:20261112-ui4",
+      "State": "running",
+      "Health": ""
+    },
+    {
+      "Service": "worker",
+      "Image": "omp-integration:20261112-ui4",
+      "State": "running",
+      "Health": ""
+    }
+  ],
+  "worker_scheduler_healthcheck": "not configured; real queue and archive tasks passed"
+}
