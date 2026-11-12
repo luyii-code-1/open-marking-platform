@@ -87,6 +87,7 @@ def main() -> None:
     run(['npm', 'run', 'test:navigation'], ROOT / 'web')
     run(['npm', 'run', 'test:objective'], ROOT / 'web')
     run(['npm', 'run', 'test:pwa'], ROOT / 'web')
+    run(['npm', 'run', 'test:review-offline'], ROOT / 'web')
     results = [pack(output / 'OpenMarkingPlatform-source-preview.zip',
                     ((path, path.relative_to(ROOT).as_posix()) for path in source_files()), metadata)]
     with tempfile.TemporaryDirectory(prefix='omp-scanner-publish-') as temporary:

@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 export type Row = Record<string, any> & { id: string }
 export type User = { id: string; username: string; name: string; role: string }
 export type Region = { page: number; x: number; y: number; width: number; height: number }
-export type Question = { id: string; number: number; type: 'single' | 'multiple' | 'subjective'; options: number; answer: string[]; points: number; regions: Region[]; rule: Record<string, unknown>; review_mode: 'single' | 'double'; threshold: number; choice_style?: 'bracket'; style?:string; lines?:number; cell_size?:number; content_html?:string; image_asset_id?:string; image_height?:number }
+export type Question = { id: string; number: number; type: 'single' | 'multiple' | 'subjective'; options: number; answer: string[]; points: number; step?:number; regions: Region[]; rule: Record<string, unknown>; review_mode: 'single' | 'double'; threshold: number; choice_style?: 'bracket'; style?:string; lines?:number; cell_size?:number; content_html?:string; image_asset_id?:string; image_height?:number }
 export type Template = { id: string; group_id: string; name: string; subtitle?:string; background_assets?:Record<string,string>; paper: 'A3' | 'A4'; sides: number; candidate_length: number; revision: number; status?: string; questions: Question[] }
 let token = sessionStorage.getItem('omp-token') ?? ''
 export function setToken(value: string) { token = value; value ? sessionStorage.setItem('omp-token', value) : sessionStorage.removeItem('omp-token') }
@@ -14,7 +14,7 @@ export function watchChanges(callback:(roots?:string[])=>void){const handler=(ev
 export class ApiError extends Error { constructor(message: string, public status: number) { super(message) } }
 export async function request<T = any>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers)
-  if (token) headers.set('Authorization', `Bearer ${token}`)
+  if (token&&!headers.has('Authorization')) headers.set('Authorization', `Bearer ${token}`)
   if (init.body && !(init.body instanceof FormData)) headers.set('Content-Type', 'application/json')
   const response = await fetch(`/api/v1${path}`, { ...init, headers })
   if (!response.ok) {

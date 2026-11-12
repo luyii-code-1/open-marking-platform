@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { readLocation } from './examNavigation'
 
 const unsaved = new Set<symbol>()
-export const confirmLeaving = () => !unsaved.size || window.confirm('题卡有未保存修改，确认离开当前页面？')
+export const hasUnsavedChanges=()=>unsaved.size>0
+export const confirmLeaving = () => !unsaved.size || window.confirm('当前页面有未保存修改，确认离开？')
 
 export function useUnsavedChanges(dirty: boolean) {
   useEffect(() => {

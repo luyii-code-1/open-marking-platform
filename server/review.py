@@ -175,15 +175,20 @@ def score(identifier:str,body:dict,current=Depends(user)):
         prior=db.execute('SELECT * FROM scores WHERE user_id=? AND idempotency_key=?',(current['id'],key)).fetchone()
         if prior:
             if prior['task_id']!=identifier or prior['score']!=amount: raise HTTPException(409,'提交编号已用于其他评分')
-            return public_task(task)
+            return {**public_task(task),'accepted_operation':{'id':key,'score':amount/100}}
         template,question=question_for(db,task['template_id'],task['question_id'])
         group=require(db,template['group_id'],'groups')
         if group.get('frozen'): raise HTTPException(409,'成绩已冻结，请联系管理员复核')
         if task['status'] not in ('claimed','completed') or (task['status']=='claimed' and task['expires_at']<time.time()): raise HTTPException(409,'任务已失效，请重新领取')
+        if 'offline_protocol' in body:
+            if type(body['offline_protocol']) is not int or body['offline_protocol']!=1:raise HTTPException(422,'离线评分协议不受支持')
+            revision=body.get('base_score_revision')
+            if type(revision) is not int or revision<0:raise HTTPException(422,'缺少有效的评分版本')
+            if revision!=task.get('score_revision',0):raise HTTPException(409,'评分已在其他窗口更新，本地记录已保留，请核对后再评阅')
         if not 0<=amount<=cents(question['points']): raise HTTPException(422,'分值超出范围')
         step=cents(question.get('step',.5))
         if step<=0 or amount%step: raise HTTPException(422,'分值不符合评分步长')
-        task.update(status='completed',score_cents=amount,score=amount/100)
+        task.update(status='completed',score_cents=amount,score=amount/100,score_revision=task.get('score_revision',0)+1)
         put(db,'tasks',task,current['id'])
         submission=require(db,task['submission_id'],'submissions')
         final=result_for(db,submission,question)
@@ -192,7 +197,12 @@ def score(identifier:str,body:dict,current=Depends(user)):
         put(db,'tasks',task,current['id'])
         db.execute('INSERT INTO scores VALUES(?,?,?,?,?)',(str(uuid4()),identifier,current['id'],amount,key))
         db.execute('DELETE FROM regrade_queue WHERE task_id=?',(identifier,))
-        return public_task(task)
+        return {**public_task(task),'accepted_operation':{'id':key,'score':amount/100}}
+
+
+@router.get('/review/offline-capabilities')
+def offline_capabilities(current=Depends(user)):
+    return {'protocols':[1],'score_revision':True}
 
 
 @router.post('/tasks/{identifier}/regrade-from')

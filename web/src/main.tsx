@@ -1,3 +1,4 @@
+import './pwaCoordinator'
 import React from 'react'
 import { createRoot } from 'react-dom/client'
 import { ConfigProvider, App as AntApp } from 'antd'
