@@ -88,7 +88,10 @@ def correct_page(identifier:str,body:dict,current=Depends(admin)):
             if not isinstance(candidate,str) or not candidate.isdigit(): raise HTTPException(422,'考号需为数字字符串')
             known={s['candidate_number'] for s in objects(db,'students')}
             group=require(db,batch['group_id'],'groups')
-            if group.get('roster_id'):known.update(s['candidate_number'] for s in require(db,group['roster_id'],'rosters')['students'])
+            if group.get('grade_id') or group.get('roster_mode')=='selected':
+                from .school import group_students
+                known={s['candidate_number'] for s in group_students(db,group)}
+            elif group.get('roster_id'):known.update(s['candidate_number'] for s in require(db,group['roster_id'],'rosters')['students'])
             if candidate not in known: raise HTTPException(422,'考号不在学生名单中')
             page['candidate_number']=candidate
         if 'selections' in body:
@@ -169,7 +172,7 @@ def mark_absent(identifier:str,body:dict,current=Depends(admin)):
         student=require(db,body.get('student_id'),'students')
         from .school import group_students
         members=group_students(db,group)
-        if group.get('grade_id') and not any(s['id']==student['id'] for s in members):raise HTTPException(422,'学生不属于本组年级')
+        if (group.get('grade_id') or group.get('roster_mode')=='selected') and not any(s['id']==student['id'] for s in members):raise HTTPException(422,'学生不在本题卡应考名单中')
         if not group.get('grade_id') and members is not None:student=next((s for s in members if s['id']==student['id']),student)
         from .student_history import snapshot
         student=snapshot(db,student)

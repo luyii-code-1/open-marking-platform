@@ -97,7 +97,7 @@ function Dashboard({ onNavigate, admin }: { onNavigate: (value: string) => void;
     : [['marking', '阅卷中心'], ['results', '成绩与分析']]
   return <Space direction="vertical" size={16} style={{ width: '100%' }}>
     {resource.error && <Alert type="error" showIcon message={resource.error} action={<Button onClick={resource.reload}>重试</Button>} />}
-    <div className="stat-grid">{[['projects', '考试项目'], ['groups', '题卡组'], ['students', '学生'], ['pending_tasks', '待评作答'], ['exceptions', '待处理异常']].map(([key, label]) => <Card key={key}><Statistic loading={resource.loading} title={label} value={resource.data[key] ?? '—'} /></Card>)}</div>
+    <div className="stat-grid">{[['projects', '考试项目'], ['groups', '题卡'], ['students', '学生'], ['pending_tasks', '待评作答'], ['exceptions', '待处理异常']].map(([key, label]) => <Card key={key}><Statistic loading={resource.loading} title={label} value={resource.data[key] ?? '—'} /></Card>)}</div>
     <Card title="快捷操作"><div className="workflow-grid">{shortcuts.map(([key, label]) => <button className="workflow-item" key={key} onClick={() => onNavigate(key)}><strong>{label}</strong></button>)}</div></Card>
     {!resource.loading && !Object.keys(resource.data).length && !resource.error && <Empty description="尚无工作数据" />}
   </Space>

@@ -6,13 +6,14 @@ import { MoreOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons'
 import type { TableColumnsType } from 'antd'
 import { send, useResource, type Row } from './api'
 import { scopedRecord } from './examNavigation'
+import { rowNavigation } from './rowNavigation'
 
 type Field = { name: string; label: string; type?: 'number' | 'password' | 'select'; options?: { label: string; value: string | number }[]; required?: boolean; initial?: string | number }
 type ListResource = { data: Row[]; loading: boolean; error: string; reload: () => Promise<void> }
 export function ErrorNotice({ error, retry }: { error: string; retry?: () => void }) {
   return error ? <Alert type="error" showIcon message={error} action={retry && <Button onClick={retry}>重试</Button>} /> : null
 }
-export function EntityTable({ path, title, fields, columns, extra, onCreated, scope = {}, resource: external }: { path: string; title: string; fields: Field[]; columns?: TableColumnsType<Row>; extra?: ReactNode; onCreated?: (row?: Row) => void | Promise<unknown>; scope?: Record<string, string>; resource?: ListResource }) {
+export function EntityTable({ path, title, fields, columns, extra, onCreated, scope = {}, resource: external,onEnter,allowImport=true }: { path: string; title: string; fields: Field[]; columns?: TableColumnsType<Row>; extra?: ReactNode; onCreated?: (row?: Row) => void | Promise<unknown>; scope?: Record<string, string>; resource?: ListResource; onEnter?:(row:Row)=>void; allowImport?:boolean }) {
   const internal = useResource<Row[]>(external ? null : path, []), resource = external || internal, [open, setOpen] = useState(false), [saving, setSaving] = useState(false), [importing, setImporting] = useState(false), [csv, setCsv] = useState(''), [search, setSearch] = useState(''), [progress, setProgress] = useState(0), [form] = Form.useForm()
   const { message } = App.useApp()
   const rows = resource.data.filter(row => Object.entries(scope).every(([key, value]) => row[key] === value) && (!search || `${row.name || ''} ${row.username || ''} ${row.candidate_number || ''}`.toLowerCase().includes(search.toLowerCase())))
@@ -45,9 +46,9 @@ export function EntityTable({ path, title, fields, columns, extra, onCreated, sc
     <ErrorNotice error={resource.error} retry={resource.reload} />
     <div className="entity-toolbar">
       <Input.Search className="entity-search" placeholder={`搜索${title}`} allowClear value={search} onChange={e => setSearch(e.target.value)} />
-      <Space wrap>{extra}<Dropdown menu={{ items: [{ key: 'refresh', label: '刷新列表', onClick: resource.reload }, { key: 'import', label: '批量导入', onClick: () => setImporting(true) }] }}><Button icon={<MoreOutlined />} aria-label={`${title}更多操作`} /></Dropdown><Button type="primary" icon={<PlusOutlined />} onClick={() => setOpen(true)}>新建{title}</Button></Space>
+      <Space wrap>{extra}<Dropdown menu={{ items: [{ key: 'refresh', label: '刷新列表', onClick: resource.reload }, ...allowImport?[{ key: 'import', label: '批量导入', onClick: () => setImporting(true) }]:[]] }}><Button icon={<MoreOutlined />} aria-label={`${title}更多操作`} /></Dropdown><Button type="primary" icon={<PlusOutlined />} onClick={() => setOpen(true)}>新建{title}</Button></Space>
     </div>
-    <Table rowKey="id" dataSource={rows} loading={resource.loading} columns={columns || fields.filter(f => f.type !== 'password').map(f => ({ title: f.label, dataIndex: f.name, render: (value: unknown) => f.options?.find(o => o.value === value)?.label || String(value ?? '—') }))} pagination={{ defaultPageSize: 10, showSizeChanger: true }} scroll={{ x: 'max-content' }} locale={{ emptyText: search ? '没有匹配的记录' : `尚未创建${title}` }} />
+    <Table rowKey="id" onRow={onEnter?row=>rowNavigation(()=>onEnter(row),row.name):undefined} dataSource={rows} loading={resource.loading} columns={columns || fields.filter(f => f.type !== 'password').map(f => ({ title: f.label, dataIndex: f.name, render: (value: unknown) => f.options?.find(o => o.value === value)?.label || String(value ?? '—') }))} pagination={{ defaultPageSize: 10, showSizeChanger: true }} scroll={{ x: 'max-content' }} locale={{ emptyText: search ? '没有匹配的记录' : `尚未创建${title}` }} />
     <Modal title={`新建${title}`} open={open} onCancel={() => !saving && setOpen(false)} onOk={() => form.submit()} confirmLoading={saving}>
       <Form form={form} layout="vertical" onFinish={create}>{fields.map(f => <Form.Item key={f.name} name={f.name} label={f.label} initialValue={f.initial} rules={[{ required: f.required !== false, whitespace: f.type === undefined, message: `请填写${f.label}` }]}>{f.type === 'select' ? <Select showSearch optionFilterProp="label" options={f.options} /> : f.type === 'number' ? <InputNumber style={{ width: '100%' }} /> : f.type === 'password' ? <Input.Password autoComplete="new-password" /> : <Input />}</Form.Item>)}</Form>
     </Modal>

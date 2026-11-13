@@ -38,8 +38,34 @@ assert.deepEqual(readLocation('#/login/unknown'), {page:'login',section:undefine
 assert.deepEqual(readLocation('#/marking/review/template-a/question-b'), {page:'marking',templateId:'template-a',questionId:'question-b'})
 assert.deepEqual(readLocation('#/marking'), {page:'marking'})
 assert.deepEqual(readLocation('#/marking/review/template-a'), {page:'marking'})
-assert.equal(options[0].children[0].children[0].value, 'g1')
-assert.equal(options[1].children[0].children[0].value, 'g2')
-assert.equal(options[1].children[0].children[0].label, '默认组')
+assert.equal(options[0].children[0].children[0].value, 'unassigned')
+assert.equal(options[0].children[0].children[0].children[0].value, 'g1')
+assert.equal(options[1].children[0].children[0].children[0].value, 'g2')
+assert.equal(options[1].children[0].children[0].children[0].label, '数学题卡')
 assert.deepEqual(groupOptions(projects, subjects, []), [])
-console.log('Exam navigation passed: deep links, parent ownership, default group, scoped creation/import, same-name hierarchy choices')
+const graded=[{id:'card-a',name:'物理卷',subject_id:'s1',grade_id:'year-a',grade_name:'高一'},{id:'card-b',name:'物理卷',subject_id:'s1',grade_id:'year-b',grade_name:'高二'}]
+for(const section of ['overview','template','roster','scans','marking','exceptions','results']){
+  const value={projectId:'p1',subjectId:'s1',gradeId:'year-a',groupId:'card-a',section}
+  assert.deepEqual(readLocation(examPath(value)),{page:'exams',...value})
+  assert.equal(resolveExam(value,projects,subjects,graded).invalid,false)
+}
+assert.equal(resolveExam({projectId:'p1',subjectId:'s1',gradeId:'year-a',groupId:'card-b'},projects,subjects,graded).invalid,true)
+assert.equal(resolveExam({projectId:'p1',subjectId:'s1',gradeId:'missing'},projects,subjects,graded).invalid,true)
+const emptyGradeSubjects=[{...subjects[0],grade_ids:['new-year']}]
+assert.equal(resolveExam({projectId:'p1',subjectId:'s1',gradeId:'new-year'},projects,emptyGradeSubjects,[]).invalid,false)
+const fourLevels=groupOptions(projects,subjects,graded)
+assert.equal(fourLevels[0].children[0].children[0].label,'高一')
+assert.equal(fourLevels[0].children[0].children[1].children[0].value,'card-b')
+const rowSource=ts.transpileModule(await readFile(new URL('../src/rowNavigation.ts',import.meta.url),'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ES2022}}).outputText
+const {rowNavigation}=await import(`data:text/javascript;base64,${Buffer.from(rowSource).toString('base64')}`)
+globalThis.window={getSelection:()=>({toString:()=>''})}
+let entered=0;const row=rowNavigation(()=>entered++,'高一物理题卡')
+row.onClick({target:{closest:()=>null}});assert.equal(entered,1)
+row.onClick({target:{closest:()=>({tagName:'BUTTON'})}});assert.equal(entered,1,'Row actions must not trigger navigation')
+let prevented=false;const element={}
+row.onKeyDown({target:element,currentTarget:element,key:'Enter',preventDefault:()=>prevented=true})
+assert.equal(entered,2);assert.equal(prevented,true)
+row.onKeyDown({target:{},currentTarget:element,key:'Enter',preventDefault(){}});assert.equal(entered,2,'Nested controls retain their own keyboard behavior')
+window.getSelection=()=>({toString:()=> 'copied text'})
+row.onClick({target:{closest:()=>null}});assert.equal(entered,2,'Copying a field must not open the row')
+console.log('Exam navigation passed: four-level paths and choices, grade ownership, legacy links, empty grades and scoped creation')

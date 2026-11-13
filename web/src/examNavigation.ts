@@ -5,17 +5,25 @@ export const groupSections = [
   ['scans', '扫描与补扫'], ['marking', '阅卷'], ['exceptions', '异常核查'], ['results', '成绩'],
 ] as const
 export type GroupSection = typeof groupSections[number][0]
-export type ExamLocation = { projectId?: string; subjectId?: string; groupId?: string; section?: string }
+export type ExamLocation = { projectId?: string; subjectId?: string; gradeId?:string; groupId?: string; section?: string }
+export const unassignedGrade='unassigned'
+export const cardName=(group:Row,subject?:Row)=>group.is_default||group.name==='Default'?`${subject?.name||''}题卡`:group.name
+export function subjectGrades(subject:Row,groups:Row[],grades:Row[]=[]):Row[]{
+  const children=groups.filter(g=>g.subject_id===subject.id)
+  const ids=[...new Set([...(subject.grade_ids||[]),...children.map(g=>g.grade_id||unassignedGrade)])] as string[]
+  return ids.map(id=>({id,name:id===unassignedGrade?'待设置年级':grades.find(g=>g.id===id)?.name||children.find(g=>g.grade_id===id)?.grade_name||'年级',count:children.filter(g=>(g.grade_id||unassignedGrade)===id).length}))
+}
 export type Location = ExamLocation & { page: string; templateId?: string; questionId?: string }
 const pages = new Set(['dashboard', 'scanner', 'exams', 'marking', 'exceptions', 'results', 'people', 'settings', 'account', 'login', 'archives'])
 
 export function examPath(location: ExamLocation = {}) {
-  const { projectId, subjectId, groupId, section } = location
+  const { projectId, subjectId, gradeId,groupId, section } = location
   let path = '#/exams'
   if (!projectId) return path
   path += '/' + encodeURIComponent(projectId)
   if (subjectId) path += '/subjects/' + encodeURIComponent(subjectId)
-  if (subjectId && groupId) path += '/groups/' + encodeURIComponent(groupId)
+  if (subjectId && gradeId) path += '/grades/' + encodeURIComponent(gradeId)
+  if (subjectId && groupId) path += (gradeId?'/cards/':'/groups/') + encodeURIComponent(groupId)
   if (section && section !== 'overview') path += '/' + encodeURIComponent(section)
   return path
 }
@@ -33,7 +41,12 @@ export function readLocation(hash: string): Location {
     if (parts[2] !== 'subjects') return { ...location, section: ['archives', 'summary', 'storage', 'rooms'].includes(parts[2]) ? parts[2] : undefined }
     if (!parts[3]) return location
     location.subjectId = parts[3]
-    if (parts[4] === 'groups' && parts[5]) {
+    if(parts[4]==='grades'&&parts[5]){
+      location.gradeId=parts[5]
+      if(parts[6]==='cards'&&parts[7]){
+        location.groupId=parts[7];location.section=groupSections.some(([key])=>key===parts[8])?parts[8]:'overview'
+      }
+    }else if (parts[4] === 'groups' && parts[5]) {
       location.groupId = parts[5]
       location.section = groupSections.some(([key]) => key === parts[6]) ? parts[6] : 'overview'
     }
@@ -45,7 +58,8 @@ export function resolveExam(location: ExamLocation, projects: Row[], subjects: R
   const project = projects.find(p => p.id === location.projectId)
   const subject = subjects.find(s => s.id === location.subjectId && s.project_id === project?.id)
   const group = groups.find(g => g.id === location.groupId && g.subject_id === subject?.id)
-  return { project, subject, group, invalid: !!((location.projectId && !project) || (location.subjectId && !subject) || (location.groupId && !group)) }
+  const validGrade=!location.gradeId||!!subject&&subjectGrades(subject,groups).some(g=>g.id===location.gradeId)
+  return { project, subject, group, invalid: !!((location.projectId && !project) || (location.subjectId && !subject) || (location.groupId && !group) || !validGrade || (group&&location.gradeId&&(group.grade_id||unassignedGrade)!==location.gradeId)) }
 }
 
 export function defaultGroup(subject: Row, groups: Row[]) {
@@ -58,5 +72,5 @@ export function scopedRecord(value: Record<string, unknown>, scope: Record<strin
 }
 
 export function groupOptions(projects: Row[], subjects: Row[], groups: Row[]) {
-  return projects.map(p => ({ value: p.id, label: p.name, children: subjects.filter(s => s.project_id === p.id).map(s => ({ value: s.id, label: s.name, children: groups.filter(g => g.subject_id === s.id).map(g => ({ value: g.id, label: g.is_default || g.name === 'Default' ? '默认组' : g.name })) })).filter(s => s.children.length) })).filter(p => p.children.length)
+  return projects.map(p=>({value:p.id,label:p.name,children:subjects.filter(s=>s.project_id===p.id).map(s=>({value:s.id,label:s.name,children:subjectGrades(s,groups).map(grade=>({value:grade.id,label:grade.name,children:groups.filter(g=>g.subject_id===s.id&&(g.grade_id||unassignedGrade)===grade.id).map(g=>({value:g.id,label:cardName(g,s)}))})).filter(g=>g.children.length)})).filter(s=>s.children.length)})).filter(p=>p.children.length)
 }

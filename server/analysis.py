@@ -6,7 +6,7 @@ from statistics import median, pstdev
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
-from .db import connect, find, objects
+from .db import connect, find, get, objects
 from .dependencies import user, require
 from .review import results_for
 
@@ -96,7 +96,8 @@ def project_rows(db,identifier,current):
         if current['role'] not in ('admin','manager') and not group.get('frozen'):continue
         rows=results_for(db,group['id'],current)
         if not rows and current['role'] not in ('admin','manager'):continue
-        columns.append({'id':group['id'],'subject_id':group['subject_id'],'subject':subjects[group['subject_id']]['name'],'group':group['name'],'published':bool(group.get('frozen'))})
+        grade=(get(db,group.get('grade_id'),'grades') or {}).get('name','')
+        columns.append({'id':group['id'],'subject_id':group['subject_id'],'subject':subjects[group['subject_id']]['name'],'grade':grade,'group':group['name'],'published':bool(group.get('frozen'))})
         for row in rows:
             student=students.setdefault(row['student_id'],{k:row[k] for k in ('student_id','candidate_number','name','class_id','class_name','grade')})
             student.setdefault('scores',{})[group['id']]={'raw':row['total'],'converted':row.get('converted_score'),'status':row['status'],'room_tags':row.get('room_tags',[]),'grade_id':row.get('group_grade_id')}
@@ -138,7 +139,7 @@ def export_project(project_id:str,current=Depends(user)):
     data=project_analysis(project_id,current)
     columns=data['columns']
     headers=['考号','姓名','班级','已完成记录','缺考记录','待结分记录','未扫描记录','已记录原始分合计','已记录采用分合计']
-    for col in columns:headers.extend(f"{col['subject']}/{col['group']} {name}" for name in ('原始分','赋分','状态','考场'))
+    for col in columns:headers.extend('/'.join(v for v in (col['subject'],col['grade'],col['group']) if v)+f' {name}' for name in ('原始分','赋分','状态','考场'))
     rows=[]
     for student in data['students']:
         row=[student[k] for k in ('candidate_number','name','class_name','completed_records','absent_records','pending_records','unscanned_records','recorded_raw_sum','recorded_effective_sum')]

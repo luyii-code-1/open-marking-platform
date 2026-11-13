@@ -141,6 +141,9 @@ def list_route(kind):
     def endpoint(current=Depends(scan_user if kind in ('projects','subjects','groups','templates','scan-batches') else user)):
         with connect() as db:
             values=objects(db,kind)
+            if kind=='groups':
+                grades={g['id']:g['name'] for g in objects(db,'grades')}
+                values=[{**v,'grade_name':grades.get(v.get('grade_id'),'')} for v in values]
             if kind=='scan-batches':
                 from .room_tags import view as room_view
                 values=[{**v,'room_tags':room_view(db,v.get('room_tags',[]))} for v in values]
@@ -149,7 +152,7 @@ def list_route(kind):
             if current['role']=='scanner':
                 if kind=='scan-batches':return [v for v in values if v.get('scanner_device_id')==current['id']]
                 if kind=='templates':return [{k:v[k] for k in ('id','name','group_id','paper','sides','status','revision','layout_version') if k in v} for v in values]
-                fields={'projects':('id','name','status'),'subjects':('id','name','project_id'),'groups':('id','name','subject_id','template_id','frozen','grade_id')}
+                fields={'projects':('id','name','status'),'subjects':('id','name','project_id'),'groups':('id','name','subject_id','template_id','frozen','grade_id','grade_name')}
                 return [{k:v[k] for k in fields[kind] if k in v} for v in values]
             assigned=[a for a in objects(db,'assignments') if current['id'] in (a.get('user_ids',[])+a.get('arbitrator_ids',[]))]
             templates={a['template_id'] for a in assigned}
@@ -420,7 +423,7 @@ def pair(identifier:str,body:dict|None=Body(default=None),current=Depends(scan_a
         group=require(db,batch['group_id'],'groups')
         from .school import group_students
         roster_students=group_students(db,group)
-        if group.get('grade_id'):students={s['candidate_number']:s for s in roster_students}
+        if group.get('grade_id') or group.get('roster_mode')=='selected':students={s['candidate_number']:s for s in roster_students}
         elif roster_students is not None:students.update({s['candidate_number']:s for s in roster_students})
         if any(number not in students for number in numbers): raise HTTPException(409,'考号不在学生名单中')
         for index,front in enumerate(fronts):

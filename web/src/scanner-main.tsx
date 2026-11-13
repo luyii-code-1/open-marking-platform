@@ -7,6 +7,8 @@ import zhCN from 'antd/locale/zh_CN'
 import { hasScannerHost, scannerCall, watchScanner } from './scanner-bridge'
 import { uiTheme } from './uiTheme'
 import { Brand } from './Brand'
+import { cardName,subjectGrades,unassignedGrade } from './examNavigation'
+import { rowNavigation } from './rowNavigation'
 import './scanner.css'
 
 type Row = Record<string, any> & { id: string }
@@ -15,7 +17,7 @@ function Status({ value }: { value: string }) { return <Tag color={value === 'bl
 
 function Scanner() {
   const [state, setState] = useState<any>(null), [busyKey, setBusyKey] = useState(''), [error, setError] = useState(''), [connection, setConnection] = useState(false)
-  const [inProject, setInProject] = useState(false), [subjectId, setSubject] = useState(''), [groupId, setGroup] = useState(''), [batchId, setBatch] = useState(''), [page, setPage] = useState(1)
+  const [inProject, setInProject] = useState(false), [subjectId, setSubject] = useState(''), [groupId, setGroup] = useState(''),[gradeId,setGrade]=useState(''), [batchId, setBatch] = useState(''), [page, setPage] = useState(1)
   const [creating, setCreating] = useState(false), [driver, setDriver] = useState('Twain'), [devices, setDevices] = useState<Row[]>([]), [device, setDevice] = useState(''), [side, setSide] = useState('front')
   const [preview, setPreview] = useState<Row | null>(null), [image, setImage] = useState(''), [question, setQuestion] = useState(''), [previewBusy, setPreviewBusy] = useState(false)
   const [connectForm] = Form.useForm(), [batchForm] = Form.useForm(), { message, modal } = App.useApp()
@@ -48,13 +50,10 @@ function Scanner() {
   const pack = state?.package, subject = pack?.subjects.find((s: Row) => s.id === subjectId), group = pack?.groups.find((g: Row) => g.id === groupId), batch = state?.batches.find((b: Row) => b.id === batchId)
   const cached = new Map((state?.projects || []).map((p: Row) => [p.id, p]))
   const projects: Row[] = [...new Map([...(state?.catalog.projects || []), ...(state?.projects || [])].map((p: Row) => [p.id, p])).values()] as Row[]
+  const grade=subject?subjectGrades(subject,pack?.groups||[]).find(g=>g.id===gradeId):undefined
   const locked = busy || !!state?.capturing
-  async function openProject(id: string) { await action('openProject', { project_id: id }, () => { setInProject(true); setSubject(''); setGroup(''); setBatch('') }) }
-  function openSubject(id: string) {
-    setSubject(id); setBatch('')
-    const item = pack.subjects.find((s: Row) => s.id === id), groups = pack.groups.filter((g: Row) => g.subject_id === id)
-    setGroup(groups.length === 1 && groups[0].id === item.default_group_id ? groups[0].id : '')
-  }
+  async function openProject(id: string) { await action('openProject', { project_id: id }, () => { setInProject(true); setSubject(''); setGrade('');setGroup(''); setBatch('') }) }
+  function openSubject(id:string){setSubject(id);setGrade('');setGroup('');setBatch('')}
   async function showPreview(row: Row, qid = '') {
     setPreview(row); setPreviewBusy(true); setImage(''); setQuestion(qid)
     try { const result = await scannerCall('preview', { batch_id: batchId, page_id: row.id, question_id: qid }); setImage(result.url) }
@@ -66,9 +65,10 @@ function Scanner() {
   }
   const crumbs = [
     { title: <Button type="link" disabled={locked} onClick={() => setInProject(false)}>考试项目</Button> },
-    ...(inProject && pack ? [{ title: <Button type="link" disabled={locked} onClick={() => { setSubject(''); setGroup(''); setBatch('') }}>{pack.project.name}</Button> }] : []),
-    ...(inProject && subject ? [{ title: <Button type="link" disabled={locked} onClick={() => { setGroup(''); setBatch('') }}>{subject.name}</Button> }] : []),
-    ...(inProject && group ? [{ title: <Button type="link" disabled={locked} onClick={() => setBatch('')}>{group.name}</Button> }] : []),
+    ...(inProject && pack ? [{ title: <Button type="link" disabled={locked} onClick={() => { setSubject(''); setGrade('');setGroup(''); setBatch('') }}>{pack.project.name}</Button> }] : []),
+    ...(inProject && subject ? [{ title: <Button type="link" disabled={locked} onClick={() => { setGrade('');setGroup(''); setBatch('') }}>{subject.name}</Button> }] : []),
+    ...(inProject&&grade?[{title:<Button type="link" disabled={locked} onClick={()=>{setGroup('');setBatch('')}}>{grade.name}</Button>}]:[]),
+    ...(inProject && group ? [{ title: <Button type="link" disabled={locked} onClick={() => setBatch('')}>{cardName(group,subject)}</Button> }] : []),
     ...(inProject && batch ? [{ title: batch.name }] : []),
   ]
   if (!hasScannerHost) return <main className="scanner-unavailable"><Typography.Title level={3}>扫描工作台</Typography.Title><Typography.Paragraph>请在扫描客户端打开此页面。</Typography.Paragraph></main>
@@ -82,14 +82,15 @@ function Scanner() {
       {!state?.online && <Typography.Paragraph className="scanner-offline" type="secondary">已下载的项目可继续扫描；联网后校验版本并上传。</Typography.Paragraph>}
       {error && <Alert type="error" message={error} />}
       {!state ? <Card loading /> : !inProject || !pack ? <section className="scanner-section"><div className="scanner-title"><div><Typography.Title level={2}>考试项目</Typography.Title><Typography.Text type="secondary">打开本机已下载的考试，或连接服务器下载项目配置。</Typography.Text></div><Button onClick={() => { connectForm.setFieldsValue({ server_url: state.server_url }); setConnection(true) }}>连接服务器</Button></div>
-        <Table<Row> rowKey="id" dataSource={projects} locale={{ emptyText: <Empty description="尚未下载考试项目" /> }} pagination={{ pageSize: 10 }} columns={[
+        <Table<Row> rowKey="id" onRow={row=>locked||!cached.has(row.id)?{}:rowNavigation(()=>void openProject(row.id),row.name)} dataSource={projects} locale={{ emptyText: <Empty description="尚未下载考试项目" /> }} pagination={{ pageSize: 10 }} columns={[
           { title: '考试', dataIndex: 'name' }, { title: '本地配置', render: (_, row) => cached.has(row.id) ? <Tag>已下载</Tag> : <Typography.Text type="secondary">未下载</Typography.Text> },
-          { title: '操作', width: 240, render: (_, row) => <Space><Button loading={busyKey===actionKey('openProject',{project_id:row.id})} disabled={!cached.has(row.id) || locked} onClick={() => openProject(row.id)}>打开</Button><Button loading={busyKey===actionKey('downloadProject',{project_id:row.id})} disabled={!state.online || locked} onClick={() => action('downloadProject', { project_id: row.id }, () => { setInProject(true); setSubject(''); setGroup(''); setBatch('') })}>{cached.has(row.id) ? '更新配置' : '下载配置'}</Button></Space> },
-        ]} /></section> : !subject ? <section className="scanner-section"><div className="scanner-title"><Typography.Title level={2}>{pack.project.name}</Typography.Title><Button loading={busyKey===actionKey('downloadProject',{project_id:pack.project.id})} disabled={!state.online || locked} onClick={() => action('downloadProject', { project_id: pack.project.id })}>更新项目配置</Button></div><Table<Row> rowKey="id" dataSource={pack.subjects} pagination={false} columns={[{ title: '科目', dataIndex: 'name' }, { title: '可扫描题卡组', render: (_, row) => pack.groups.filter((g: Row) => g.subject_id === row.id).length }, { title: '操作', width: 100, render: (_, row) => <Button disabled={locked} onClick={() => openSubject(row.id)}>进入</Button> }]} /></section>
-        : !group ? <section className="scanner-section"><Typography.Title level={2}>{subject.name}</Typography.Title><Table<Row> rowKey="id" dataSource={pack.groups.filter((g: Row) => g.subject_id === subject.id)} pagination={{ pageSize: 10 }} columns={[{ title: '题卡组', dataIndex: 'name' }, { title: '题卡', render: (_, row) => row.template.name }, { title: '状态', render: (_, row) => row.frozen ? <Tag>已发布成绩</Tag> : <Tag>可扫描</Tag> }, { title: '操作', width: 100, render: (_, row) => <Button disabled={locked} onClick={() => { setGroup(row.id); setBatch('') }}>进入</Button> }]} /></section>
-          : !batch ? <section className="scanner-section"><div className="scanner-title"><div><Typography.Title level={2}>{group.name}</Typography.Title><Typography.Text type="secondary">{group.grade_name&&`${group.grade_name} · `}{group.template.name} · {group.template.paper} · {group.template.sides === 2 ? '双面' : '单面'}</Typography.Text></div><Button type="primary" disabled={locked || group.frozen} onClick={() => { batchForm.resetFields(); batchForm.setFieldsValue({ name: '扫描批次', capture_mode: group.template.sides === 2 ? 'duplex' : 'separate', back_order: 'same' }); setCreating(true) }}>新建扫描批次</Button></div>
+          { title: '操作', width: 240, render: (_, row) => <Space><Button loading={busyKey===actionKey('downloadProject',{project_id:row.id})} disabled={!state.online || locked} onClick={() => action('downloadProject', { project_id: row.id }, () => { setInProject(true); setSubject(''); setGrade('');setGroup(''); setBatch('') })}>{cached.has(row.id) ? '更新配置' : '下载配置'}</Button></Space> },
+        ]} /></section> : !subject ? <section className="scanner-section"><div className="scanner-title"><Typography.Title level={2}>{pack.project.name}</Typography.Title><Button loading={busyKey===actionKey('downloadProject',{project_id:pack.project.id})} disabled={!state.online || locked} onClick={() => action('downloadProject', { project_id: pack.project.id })}>更新项目配置</Button></div><Table<Row> rowKey="id" dataSource={pack.subjects} onRow={row=>locked?{}:rowNavigation(()=>openSubject(row.id),row.name)} pagination={false} columns={[{title:'科目',dataIndex:'name'},{title:'可扫描年级',render:(_,row)=>subjectGrades(row,pack.groups).filter(g=>g.count).length},{title:'题卡',render:(_,row)=>pack.groups.filter((g:Row)=>g.subject_id===row.id).length}]}/></section>
+        : !grade ? <section className="scanner-section"><Typography.Title level={2}>{subject.name}</Typography.Title><Table<Row> rowKey="id" dataSource={subjectGrades(subject,pack.groups).filter(g=>g.count)} onRow={row=>locked?{}:rowNavigation(()=>{setGrade(row.id);setGroup('');setBatch('')},row.name)} pagination={false} columns={[{title:'年级',dataIndex:'name'},{title:'题卡',dataIndex:'count'}]}/></section>
+        : !group ? <section className="scanner-section"><Typography.Title level={2}>{grade.name}</Typography.Title><Table<Row> rowKey="id" dataSource={pack.groups.filter((g:Row)=>g.subject_id===subject.id&&(g.grade_id||unassignedGrade)===gradeId)} onRow={row=>locked?{}:rowNavigation(()=>{setGroup(row.id);setBatch('')},cardName(row,subject))} pagination={{pageSize:10}} columns={[{title:'题卡',render:(_,row)=>cardName(row,subject)},{title:'版式',render:(_,row)=>row.template.name},{title:'状态',render:(_,row)=>row.frozen?<Tag>成绩已发布</Tag>:<Tag>可扫描</Tag>}]}/></section>
+          : !batch ? <section className="scanner-section"><div className="scanner-title"><div><Typography.Title level={2}>{cardName(group,subject)}</Typography.Title><Typography.Text type="secondary">{group.grade_name&&`${group.grade_name} · `}{group.template.name} · {group.template.paper} · {group.template.sides === 2 ? '双面' : '单面'}</Typography.Text></div><Button type="primary" disabled={locked || group.frozen} onClick={() => { batchForm.resetFields(); batchForm.setFieldsValue({ name: '扫描批次', capture_mode: group.template.sides === 2 ? 'duplex' : 'separate', back_order: 'same' }); setCreating(true) }}>新建扫描批次</Button></div>
             {group.grade_id&&<><Typography.Paragraph type="secondary">{group.grade_name} · 考场进度来自上次下载的项目配置，更新配置可刷新服务端已确认人数。本机采集按正面张数统计。</Typography.Paragraph><Table<Row> size="small" rowKey="id" dataSource={(pack.room_tags||[]).filter((t:Row)=>t.group_id===group.id&&!t.archived)} pagination={false} columns={[{title:'年级－考场',render:(_,row)=>row.label||row.name},{title:'预期人数',dataIndex:'expected_students'},{title:'服务端已确认实考',dataIndex:'scanned_students'},{title:'本机已采集正面',render:(_,row)=>state.batches.filter((b:Row)=>b.group_id===group.id&&b.room_tags?.some((t:Row)=>t.id===row.id)).reduce((sum:number,b:Row)=>sum+(b.front_count||0),0)}]}/></>}
-            <Table<Row> rowKey="id" dataSource={state.batches.filter((b: Row) => b.group_id === group.id)} pagination={{ pageSize: 10 }} columns={[{ title: '批次', dataIndex: 'name' }, {title:'考场标签',render:(_,row)=><Space wrap>{(row.room_tags||[]).map((t:Row)=><Tag key={t.id}>{t.label||[t.grade_name,t.name].filter(Boolean).join('－')}</Tag>)}</Space>},{title:'预期人数',render:(_,row)=>(row.room_tags||[])[0]?.expected_students??'—'}, { title: '考场备注', dataIndex: 'room' }, { title: '同步', render: (_, row) => `${row.uploaded}/${row.total}` }, { title: '状态', dataIndex: 'status', render: value => <Status value={value} /> }, { title: '操作', width: 100, render: (_, row) => <Button disabled={locked} onClick={() => { setBatch(row.id); setPage(1) }}>打开</Button> }]} /></section>
+            <Table<Row> rowKey="id" onRow={row=>locked?{}:rowNavigation(()=>{setBatch(row.id);setPage(1)},row.name)} dataSource={state.batches.filter((b: Row) => b.group_id === group.id)} pagination={{ pageSize: 10 }} columns={[{ title: '批次', dataIndex: 'name' }, {title:'考场标签',render:(_,row)=><Space wrap>{(row.room_tags||[]).map((t:Row)=><Tag key={t.id}>{t.label||[t.grade_name,t.name].filter(Boolean).join('－')}</Tag>)}</Space>},{title:'预期人数',render:(_,row)=>(row.room_tags||[])[0]?.expected_students??'—'}, { title: '考场备注', dataIndex: 'room' }, { title: '同步', render: (_, row) => `${row.uploaded}/${row.total}` }, { title: '状态', dataIndex: 'status', render: value => <Status value={value} /> }]} /></section>
             : <section className="scanner-section"><div className="scanner-title"><div><Space align="center"><Typography.Title level={2}>{batch.name}</Typography.Title><Status value={batch.status} /></Space><Typography.Paragraph type="secondary">{batch.paper} · {batch.sides === 2 ? '双面' : '单面'} · {batch.capture_mode === 'duplex' ? '自动双面' : '分面采集'} · 已上传 {batch.uploaded}/{batch.total}</Typography.Paragraph></div><Space>
               <Button type="primary" loading={busyKey===actionKey('start',{batch_id:batchId})} disabled={locked || !device || batch.status !== 'open'} onClick={() => action('start', { batch_id: batchId, device_id: device, side })}>开始扫描</Button><Button danger loading={busyKey===actionKey('stop')} disabled={!state.capturing} onClick={() => action('stop')}>停止</Button>
               <Dropdown menu={{ items: [
@@ -108,7 +109,7 @@ function Scanner() {
               ]} />
             </section>}
     </main>
-    <Drawer title="连接服务器" open={connection} onClose={() => setConnection(false)} width={420}><Form form={connectForm} layout="vertical" onFinish={values => action('connect', values, () => { connectForm.setFieldValue('pairing_code', ''); setConnection(false); setInProject(false); setSubject(''); setGroup(''); setBatch('') })}>
+    <Drawer title="连接服务器" open={connection} onClose={() => setConnection(false)} width={420}><Form form={connectForm} layout="vertical" onFinish={values => action('connect', values, () => { connectForm.setFieldValue('pairing_code', ''); setConnection(false); setInProject(false); setSubject(''); setGrade('');setGroup(''); setBatch('') })}>
       <Form.Item name="server_url" label="服务端地址" rules={[{ required: true }]}><Input placeholder="https://服务器地址" /></Form.Item>
       <Typography.Paragraph type="secondary">已登记的设备可直接连接。首次使用时在管理后台生成配对码，再在此处填写完成绑定。</Typography.Paragraph>
       <Form.Item name="pairing_code" label="配对码（首次连接）"><Input autoComplete="one-time-code" maxLength={14}/></Form.Item><Button htmlType="submit" type="primary" loading={busyKey===actionKey('connect')}>连接</Button><Typography.Paragraph style={{marginTop:32}} type="secondary">本机数据目录</Typography.Paragraph><Typography.Text copyable>{state?.storage_path}</Typography.Text>

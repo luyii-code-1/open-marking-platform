@@ -61,7 +61,7 @@ export function TemplateEditor({ groupId }: { groupId?: string }) {
   }
   async function save(publish = false) {
     if (readOnly || saving) return
-    if (!value.group_id || (groupId && value.group_id !== groupId)) { message.warning('请确认所属题卡组'); return }
+    if (!value.group_id || (groupId && value.group_id !== groupId)) { message.warning('请确认所属题卡'); return }
     setSaveAction(publish ? 'publish' : 'save')
     try {
       if (publish) {
@@ -77,7 +77,7 @@ export function TemplateEditor({ groupId }: { groupId?: string }) {
     finally { setSaveAction('') }
   }
   const setup = <div className="editor-section"><Form layout="vertical" disabled={readOnly || saving}>
-    {!groupId && <Form.Item label="所属题卡组" required><HierarchyPicker value={value.group_id} onChange={group_id => change({ group_id })} /></Form.Item>}
+    {!groupId && <Form.Item label="所属题卡" required><HierarchyPicker value={value.group_id} onChange={group_id => change({ group_id })} /></Form.Item>}
     <Form.Item label="题卡标题"><Input value={value.name} onChange={event => change({ name: event.target.value })} /></Form.Item>
     <Form.Item label="副标题"><Input value={value.subtitle || ''} onChange={event => change({ subtitle: event.target.value })} /></Form.Item>
     <div className="editor-form-grid"><Form.Item label="纸张"><Select value={value.paper} options={[{ label: 'A4 纵向', value: 'A4' }, { label: 'A3 横向', value: 'A3' }]} onChange={paper => change({ paper, sheet_columns: paper==='A3'?2:1, layout_version:3 })} /></Form.Item><Form.Item label="面数"><Select value={value.sides} options={[{ label: '单面', value: 1 }, { label: '双面', value: 2 }]} onChange={sides => { if (sides === 1 && (value.questions.some(q => q.regions.some(r => r.page === 2))||(value.forbidden_regions||[]).some(r=>r.page===2))) { message.warning('背面已有答题区域，请先调整后再改为单面'); return } change({ sides }); setPage(1) }} /></Form.Item></div>

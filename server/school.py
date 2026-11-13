@@ -41,11 +41,25 @@ def student_view(db,student):
 
 
 def group_students(db,group):
+    if group.get('roster_mode')=='selected':
+        roster=get(db,group.get('roster_id'),'rosters') or {}
+        students={s['id']:s for s in objects(db,'students')}
+        return [student_view(db,students[sid]) for sid in roster.get('student_ids',[]) if sid in students]
     if group.get('grade_id'):
         classes={c['id'] for c in objects(db,'classes') if c.get('grade_id')==group['grade_id']}
         return [student_view(db,s) for s in objects(db,'students') if s.get('class_id') in classes]
     roster=get(db,group.get('roster_id'),'rosters')
     return roster.get('students',[]) if roster else None
+
+
+@router.post('/subjects/{identifier}/grades')
+def add_subject_grade(identifier:str,body:dict,current=Depends(admin)):
+    with connect() as db:
+        db.execute('BEGIN IMMEDIATE')
+        subject=require(db,identifier,'subjects');grade=require(db,body.get('grade_id'),'grades')
+        if grade.get('archived'):raise HTTPException(422,'年级已停用')
+        subject['grade_ids']=list(dict.fromkeys([*subject.get('grade_ids',[]),grade['id']]))
+        return put(db,'subjects',subject,current['id'])
 
 
 def bind_group(db,group,grade_id,actor):
@@ -88,4 +102,6 @@ def edit_grade(identifier:str,body:dict,current=Depends(admin)):
 def group_grade(identifier:str,body:dict,current=Depends(admin)):
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
-        return bind_group(db,require(db,identifier,'groups'),body.get('grade_id'),current['id'])
+        group=require(db,identifier,'groups')
+        if group.get('frozen'):raise HTTPException(409,'成绩已冻结，请先发起复核')
+        return bind_group(db,group,body.get('grade_id'),current['id'])

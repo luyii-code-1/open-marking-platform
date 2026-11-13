@@ -6,7 +6,7 @@ import { announceChanges, download, request, send, type Row } from './api'
 
 export function HierarchyDelete({ kind, target, onDeleted }: { kind: 'projects' | 'subjects' | 'groups'; target: Row; onDeleted: () => void | Promise<unknown> }) {
   const [plan, setPlan] = useState<Row | null>(null), [reason, setReason] = useState(''), [accepted, setAccepted] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState('')
-  const { message } = App.useApp(), label = ({ projects: '考试项目', subjects: '科目', groups: '题卡组' })[kind]
+  const { message } = App.useApp(), label = ({ projects: '考试项目', subjects: '科目', groups: '题卡' })[kind]
   const [job, setJob] = useState<Row | null>(null), done = useRef(''), callback = useRef(onDeleted)
   callback.current = onDeleted
   const executing = !!plan && plan.status !== 'preview', jobId = plan?.job_id
