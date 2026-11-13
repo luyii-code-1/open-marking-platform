@@ -102,11 +102,10 @@ def login(body: Login,request:Request=None):
             raise HTTPException(401,'账号或密码错误')
         if body.portal not in (None,'admin','marking'):raise HTTPException(422,'登录入口无效')
         if body.portal=='admin' and row['role'] not in ('admin','manager'):raise HTTPException(403,'此账号没有管理后台权限，请使用阅卷台入口')
-        token=secrets.token_urlsafe(40)
-        db.execute('INSERT INTO sessions VALUES(?,?,?)',(hashlib.sha256(token.encode()).hexdigest(),row['id'],time.time()+43200))
-        put(db,'account-events',{'user_id':row['id'],'action':'login','method':'password'},row['id'])
+        from .accounts import session
+        value=session(db,dict(row),'password')
         if request is not None:request.state.actor=row['id']
-        return {'token':token,'user':{k:row[k] for k in ('id','username','name','role')}}
+        return value
 
 
 @app.get('/api/v1/auth/me')

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Alert, App, Card, Form, Input, Radio, Space, Typography } from 'antd'
 import { Button } from './Button'
 import { ArrowLeftOutlined, AuditOutlined, SettingOutlined } from '@ant-design/icons'
-import { send, setToken, type User } from './api'
+import { send, setToken, type User,type AuthSession } from './api'
 import { loginPasskey } from './passkeys'
 import { Brand } from './Brand'
 
@@ -17,8 +17,8 @@ export function Login({ portal, onPortal, onLogin }: { portal?: Portal; onPortal
     setLoading(true); setError('')
     try {
       if (mode === 'bootstrap') await send('/auth/bootstrap', values)
-      const result = mode === 'passkey' ? await loginPasskey(values.username, portal) : await send<{ token: string; user: User }>('/auth/login', { username: values.username, password: values.password, portal })
-      setToken(result.token); onLogin(result.user, portal)
+      const result = mode === 'passkey' ? await loginPasskey(values.username, portal) : await send<AuthSession&{token:string}>('/auth/login', { username: values.username, password: values.password, portal })
+      setToken(result.token,result); onLogin(result.user, portal)
     } catch (e) { setError((e as Error).message) }
     finally { setLoading(false) }
   }

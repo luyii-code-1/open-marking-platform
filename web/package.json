@@ -13,6 +13,7 @@
     "test:review-interaction": "node tools/test-review-interaction.mjs",
     "test:review-offline": "node tools/test-review-offline.mjs",
     "test:auto-update": "node tools/test-auto-update.mjs",
+    "test:session": "node tools/test-auth-session.mjs",
     "test:actions": "node tools/test-actions.mjs",
     "test:icons": "node tools/test-icons.mjs"
   },

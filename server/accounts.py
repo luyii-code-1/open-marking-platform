@@ -5,15 +5,43 @@ import time
 from fastapi import APIRouter,Depends,HTTPException,Header,Request
 from .db import connect,find,put
 from .dependencies import user,require,password_hash
+from .browser_sessions import issue,digest,SESSION_SECONDS
+from pydantic import BaseModel,Field
 
 router=APIRouter(prefix='/api/v1')
 
 
 def session(db,person,method):
-    token=secrets.token_urlsafe(40)
-    db.execute('INSERT INTO sessions VALUES(?,?,?)',(hashlib.sha256(token.encode()).hexdigest(),person['id'],time.time()+43200))
+    value=issue(db,person)
     put(db,'account-events',{'user_id':person['id'],'action':'login','method':method},person['id'])
-    return {'token':token,'user':{k:person[k] for k in ('id','username','name','role')}}
+    return value
+
+
+class BrowserActivity(BaseModel):
+    idle_ms:float=Field(default=0,ge=0,le=SESSION_SECONDS*1000)
+
+
+@router.get('/auth/session')
+def browser_session(authorization:str=Header(),current=Depends(user)):
+    now=time.time()
+    with connect() as db:
+        row=db.execute('SELECT expires FROM sessions WHERE token=? AND user_id=? AND expires>?',(digest(authorization[7:]),current['id'],now)).fetchone()
+        if not row:raise HTTPException(401,'登录已过期')
+        return {'user':current,'expires_at':row['expires'],'server_time':now}
+
+
+@router.post('/auth/activity')
+def browser_activity(body:BrowserActivity,authorization:str=Header(),current=Depends(user)):
+    with connect() as db:
+        db.execute('BEGIN IMMEDIATE')
+        now=time.time();key=digest(authorization[7:])
+        # Coalesced browser events report elapsed idle time, so a delayed trailing
+        # request does not extend the lease beyond the last actual interaction.
+        expires=now+SESSION_SECONDS-body.idle_ms/1000
+        updated=db.execute('UPDATE sessions SET expires=MAX(expires,?) WHERE token=? AND user_id=? AND expires>?',(expires,key,current['id'],now))
+        if updated.rowcount!=1:raise HTTPException(401,'登录已过期')
+        row=db.execute('SELECT expires FROM sessions WHERE token=?',(key,)).fetchone()
+        return {'expires_at':row['expires'],'server_time':now}
 
 
 def verify_password(db,current,password):

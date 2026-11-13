@@ -2,7 +2,7 @@ import { ZoomInOutlined, ZoomOutOutlined } from '@ant-design/icons'
 import { useEffect,useRef,useState } from 'react'
 import { Alert, App, Checkbox, Input, Select, Space, Tag, Typography } from 'antd'
 import { Button } from './Button'
-import { send,useResource,type Row } from './api'
+import { send,requestBlob,useResource,type Row } from './api'
 
 type Point={x:number;y:number}
 export function AlignmentEditor({pageId,initialReason,onSaved}:{pageId:string;initialReason:string;onSaved:(page:Row)=>Promise<void>}) {
@@ -12,7 +12,7 @@ export function AlignmentEditor({pageId,initialReason,onSaved}:{pageId:string;in
   useEffect(()=>{setPoints([]);setConfirmed(false);operation.current=crypto.randomUUID()},[rotation,pageId])
   useEffect(()=>{
     let cancelled=false,objectUrl='';const abort=new AbortController();setUrl('');setError('');if(!info)return
-    void fetch(info.image_url,{headers:{Authorization:`Bearer ${sessionStorage.getItem('omp-token')||''}`},signal:abort.signal}).then(async response=>{if(!response.ok)throw new Error('原始扫描图无法加载');return response.blob()}).then(blob=>{if(!cancelled){objectUrl=URL.createObjectURL(blob);setUrl(objectUrl)}}).catch(e=>{if(!cancelled)setError(e.message)})
+    void requestBlob(info.image_url.replace(/^\/api\/v1/,''),{signal:abort.signal}).then(blob=>{if(!cancelled){objectUrl=URL.createObjectURL(blob);setUrl(objectUrl)}}).catch(e=>{if(!cancelled)setError(e.message)})
     return()=>{cancelled=true;abort.abort();if(objectUrl)URL.revokeObjectURL(objectUrl)}
   },[info?.image_url])
   function change(value:Point[]){setPoints(value);operation.current=crypto.randomUUID()}

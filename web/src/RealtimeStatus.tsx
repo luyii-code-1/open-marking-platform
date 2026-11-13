@@ -1,11 +1,11 @@
 import { useEffect, useRef } from 'react'
-import { announceChanges,currentToken,request,watchChanges,type User } from './api'
+import { ApiError,announceChanges,currentToken,request,updateSession,watchChanges,type AuthSession,type User } from './api'
 
 export function RealtimeStatus({user,onExpired,onProfile}:{user:User;onExpired:()=>void;onProfile:(user:User)=>void}) {
   const callbacks=useRef({onExpired,onProfile});callbacks.current={onExpired,onProfile}
   useEffect(()=>{
-    let active=true
-    const unwatch=watchChanges(roots=>{if(!roots||roots.includes('auth'))void request<User>('/auth/me').then(value=>{if(active&&currentToken())callbacks.current.onProfile(value)}).catch(()=>{})})
+    let active=true;const token=currentToken()
+    const unwatch=watchChanges(roots=>{if(!roots||roots.includes('auth'))void request<User>('/auth/me').then(value=>{if(active&&currentToken()===token)callbacks.current.onProfile(value)}).catch(()=>{})})
     return()=>{active=false;unwatch()}
   },[])
   useEffect(()=>{
@@ -17,8 +17,8 @@ export function RealtimeStatus({user,onExpired,onProfile}:{user:User;onExpired:(
       if(stopped||!currentToken())return
       if(!navigator.onLine){return}
       const target=new URL('/api/v1/events',location.href);target.protocol=location.protocol==='https:'?'wss:':'ws:'
-      const active=new WebSocket(target.href);socket=active
-      active.onopen=()=>{if(!stopped)active.send(JSON.stringify({type:'auth',token:currentToken()}))}
+      const signedToken=currentToken(),active=new WebSocket(target.href);socket=active
+      active.onopen=()=>{if(!stopped)active.send(JSON.stringify({type:'auth',token:signedToken}))}
       active.onmessage=event=>{
         if(stopped||socket!==active)return
         let value:{type:string;roots?:string[]};try{value=JSON.parse(event.data)}catch{return}
@@ -30,7 +30,13 @@ export function RealtimeStatus({user,onExpired,onProfile}:{user:User;onExpired:(
       active.onclose=event=>{
         if(stopped||socket!==active)return
         socket=null
-        if(event.code===4401){stopped=true;callbacks.current.onExpired();return}
+        if(event.code===4401){
+          if(currentToken()!==signedToken)return
+          void request<AuthSession>('/auth/session').then(value=>{
+            if(!stopped&&currentToken()===signedToken){updateSession(signedToken,value);callbacks.current.onProfile(value.user);retryTimer=setTimeout(connect,1000)}
+          }).catch(error=>{if(stopped||currentToken()&&currentToken()!==signedToken)return;if(error instanceof ApiError&&error.status===401){stopped=true;callbacks.current.onExpired()}else retryTimer=setTimeout(connect,5000)})
+          return
+        }
         const delay=Math.min(30000,1000*2**Math.min(attempt++,5))+Math.random()*500
         retryTimer=setTimeout(connect,delay)
       }
