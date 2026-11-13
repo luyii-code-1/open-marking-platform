@@ -12,7 +12,8 @@ import { ObjectiveEditor } from './ObjectiveEditor'
 import { QuestionSettings } from './QuestionSettings'
 
 const { Text } = Typography
-const emptyTemplate = (groupId = ''): Template => ({ id: '', name: '新答题卡', group_id: groupId, paper: 'A4', sides: 2, layout_version: 3, sheet_columns: 1, candidate_length: 8, revision: 0, questions: [] })
+const emptyTemplate = (groupId = ''): Template => ({ id: '', name: '新答题卡', group_id: groupId, paper: 'A4', sides: 2, layout_version: 3, sheet_columns: 1, notice_template:'standard-v1', candidate_length: 8, revision: 0, questions: [] })
+const editableCopy = (template:Template):Template => ({...structuredClone(template),...(template.status==='published'?{}:{notice_template:template.notice_template||'standard-v1'})})
 export function TemplateEditor({ groupId }: { groupId?: string }) {
   const templates = useResource<Template[]>('/templates', []), groups = useResource<Row[]>('/groups', [])
   const [value, setValue] = useState<Template>(() => emptyTemplate(groupId)), [questionId, setQuestionId] = useState(''), [page, setPage] = useState(1), [draw, setDraw] = useState(true)
@@ -29,7 +30,7 @@ export function TemplateEditor({ groupId }: { groupId?: string }) {
     if (!group) return
     initialized.current = groupId
     const existing = saved.find(t => t.id === group.template_id) || saved.find(t => t.status === 'draft')
-    setValue(existing ? structuredClone(existing) : emptyTemplate(groupId)); setDirty(false)
+    setValue(existing ? editableCopy(existing) : emptyTemplate(groupId)); setDirty(false)
   }, [groupId, templates.loaded, groups.loaded, templates.data, groups.data])
   function change(update: Partial<Template>) {
     if (readOnly || saving) return
@@ -55,7 +56,7 @@ export function TemplateEditor({ groupId }: { groupId?: string }) {
     if (patch.type) setPane(patch.type === 'subjective' ? 'subjective' : 'objective')
   }
   function load(template: Template) {
-    const apply = () => { setValue(structuredClone(template)); setQuestionId(''); setPage(1); setDirty(false); setSettingsOpen(false); setAnswerMode(template.questions.some(q=>q.type!=='subjective')); setPane(template.questions.some(q => q.type !== 'subjective') ? 'objective' : template.questions.length ? 'subjective' : 'setup') }
+    const apply = () => { setValue(editableCopy(template)); setQuestionId(''); setPage(1); setDirty(false); setSettingsOpen(false); setAnswerMode(template.questions.some(q=>q.type!=='subjective')); setPane(template.questions.some(q => q.type !== 'subjective') ? 'objective' : template.questions.length ? 'subjective' : 'setup') }
     if (dirty) modal.confirm({ title: '切换题卡前放弃未保存修改？', onOk: apply }); else apply()
   }
   async function save(publish = false) {
@@ -82,6 +83,7 @@ export function TemplateEditor({ groupId }: { groupId?: string }) {
     <div className="editor-form-grid"><Form.Item label="纸张"><Select value={value.paper} options={[{ label: 'A4 纵向', value: 'A4' }, { label: 'A3 横向', value: 'A3' }]} onChange={paper => change({ paper, sheet_columns: paper==='A3'?2:1, layout_version:3 })} /></Form.Item><Form.Item label="面数"><Select value={value.sides} options={[{ label: '单面', value: 1 }, { label: '双面', value: 2 }]} onChange={sides => { if (sides === 1 && value.questions.some(q => q.regions.some(r => r.page === 2))) { message.warning('背面已有答题区域，请先调整后再改为单面'); return } change({ sides }); setPage(1) }} /></Form.Item></div>
     {value.paper==='A3' && <Form.Item label="题卡分栏模板"><Select value={value.sheet_columns||2} options={[{label:"2×2 · 正反面各2栏",value:2},{label:"3×3 · 正反面各3栏",value:3}]} onChange={sheet_columns=>change({sheet_columns,layout_version:3})}/><Text type="secondary">内容依次续排到下一栏、下一面。改变模板后请重新排布客观题。</Text></Form.Item>}
     <Form.Item label="准考证号位数"><InputNumber min={1} max={20} value={value.candidate_length} onChange={length => change({ candidate_length: length || 8 })} /></Form.Item>
+    <Form.Item label="内置须知"><Select value={value.notice_template||'none'} options={[{label:'标准模板 · 考生禁填、注意事项与填涂样例',value:'standard-v1'},{label:'不添加',value:'none'}]} onChange={notice_template=>change({notice_template})}/><Text type="secondary">标准模板保留条形码核对及错区扣分说明；扣分文字用于印刷说明，不自动扣分。</Text></Form.Item>
     <Upload disabled={readOnly} accept="image/*" showUploadList={false} beforeUpload={async file => { const data = new FormData(); data.append('file', file); try { const asset = await request<Row>('/assets', { method: 'POST', body: data }); change({ background_assets: { ...value.background_assets, [String(page)]: asset.id } }); message.success('当前面底图已导入') } catch (e) { message.error((e as Error).message) } return false }}><Button disabled={readOnly || saving}>导入当前面题卡底图</Button></Upload>
   </Form><div className="library-actions"><TemplateLibrary value={value} dirty={dirty} groupId={groupId} onCreated={async template => { await Promise.all([templates.reload(), groups.reload()]); load(template) }} /></div></div>
   const subjective = value.questions.filter(q => q.type === 'subjective').sort((a, b) => a.number - b.number)
@@ -90,7 +92,7 @@ export function TemplateEditor({ groupId }: { groupId?: string }) {
     <Card className="template-action-bar"><div className="template-actions">
       <Space wrap><Select className="template-select" showSearch optionFilterProp="label" placeholder="切换题卡" value={value.id || undefined} options={saved.map(t => ({ label: `${t.name} · ${t.status === 'published' ? '已发布' : '草稿'}`, value: t.id }))} onChange={id => { const item = saved.find(t => t.id === id); if (item) load(item) }} /><Dropdown menu={{ items: [
         { key: 'new', label: '新建题卡', icon: <PlusOutlined />, onClick: () => load(emptyTemplate(groupId)) },
-        { key: 'copy', label: '复制为新草稿', icon: <CopyOutlined />, disabled: !value.id, onClick: () => load({ ...structuredClone(value), id: '', name: `${value.name}（副本）`, status: 'draft', revision: 0, layout_version:3, sheet_columns:value.paper==='A3'?(value.sheet_columns||2):1, group_id: groupId || value.group_id, questions: value.questions.map(q => ({ ...q, id: crypto.randomUUID() })) }) },
+        { key: 'copy', label: '复制为新草稿', icon: <CopyOutlined />, disabled: !value.id, onClick: () => load({ ...structuredClone(value), id: '', name: `${value.name}（副本）`, status: 'draft', revision: 0, layout_version:3, sheet_columns:value.paper==='A3'?(value.sheet_columns||2):1, notice_template:value.notice_template||'standard-v1', group_id: groupId || value.group_id, questions: value.questions.map(q => ({ ...q, id: crypto.randomUUID() })) }) },
       ] }}><Button>题卡操作</Button></Dropdown></Space>
       <Space wrap><Text type="secondary">{value.questions.length} 题 · {total} 分</Text><Tag color={readOnly ? 'green' : dirty ? 'orange' : 'default'}>{readOnly ? '已发布' : dirty ? '未保存' : '草稿'}</Tag><Button icon={<SaveOutlined />} disabled={readOnly || saving} loading={saveAction === 'save'} onClick={() => save()}>保存草稿</Button><Button type="primary" disabled={readOnly || saving} loading={saveAction === 'publish'} onClick={() => modal.confirm({ title: '审查并发布题卡？', content: '发布后固定版式与评分定义，后续修改需复制为新草稿。', onOk: () => save(true) })}>审查发布</Button><Button icon={<DownloadOutlined />} disabled={!value.id || dirty || !readOnly} aria-label="导出打印PDF" onClick={async () => { try { await download(`/templates/${value.id}/pdf`, `${value.name}.pdf`) } catch (e) { message.error((e as Error).message) } }}>打印稿</Button></Space>
     </div></Card>

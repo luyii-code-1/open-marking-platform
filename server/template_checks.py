@@ -10,6 +10,7 @@ def issues(template,complete=False):
     if template.get('paper') not in ('A3','A4'):errors.append('纸型应为A3或A4')
     if type(template.get('sides')) is not int or template['sides'] not in (1,2):errors.append('请选择单面或双面')
     if not isinstance(template.get('name'),str) or not template['name'].strip():errors.append('请填写题卡标题')
+    if template.get('notice_template','none') not in ('none','standard-v1'):errors.append('内置须知模板无效')
     questions=template.get('questions',[])
     if not isinstance(questions,list) or any(not isinstance(q,dict) for q in questions):return errors+['题目应为对象列表']
     if complete and not questions:errors.append('至少创建一道题')

@@ -15,7 +15,7 @@ from .identifiers import prepare_questions
 
 router=APIRouter(prefix='/api/v1')
 _render_slots=threading.BoundedSemaphore(2)
-DEFINITION_FIELDS=('name','subtitle','paper','sides','candidate_length','layout_version','sheet_columns','background_assets','background_asset_id','questions')
+DEFINITION_FIELDS=('name','subtitle','paper','sides','candidate_length','layout_version','sheet_columns','notice_template','background_assets','background_asset_id','questions')
 
 
 def default_group(db,subject_id,actor):
@@ -68,6 +68,7 @@ def instantiate(identifier:str,body:dict,current=Depends(admin)):
         name=body.get('name',entry['name'])
         if not isinstance(name,str) or not 1<=len(name.strip())<=100:raise HTTPException(422,'请填写100字以内题卡标题')
         definition.update(name=name.strip(),group_id=group['id'],revision=0,status='draft',layout_version=3,library_id=identifier)
+        definition.setdefault('notice_template','standard-v1')
         prepare_questions(definition)
         return put(db,'templates',definition,current['id'])
 

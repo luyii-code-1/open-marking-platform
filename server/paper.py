@@ -11,6 +11,7 @@ from .paper_fonts import FONT
 from reportlab.lib.utils import ImageReader
 from . import db as database
 from .richtext import layout as rich_layout
+from . import sheet_notices
 
 from .omr import ABSENT_X, ABSENT_Y, dimensions, code, bubbles, decode, align, manual_align, absent_mark, recognize, manual_binding, panels, absent_position
 
@@ -27,6 +28,10 @@ def validate(template):
     panel_width=(w-24-(columns-1)*8)/columns
     if manual_binding(template) and 18+(template.get('candidate_length',8)-1)*6+2>12+panel_width:raise ValueError('准考证号超出首栏，请减少位数或选择较宽的模板')
     if not isinstance(template.get('candidate_length',8),int) or not 1<=template.get('candidate_length',8)<=20: raise ValueError('准考证号长度应为1至20位')
+    if sheet_notices.enabled(template):
+        _,notice_width=sheet_notices.geometry(template)
+        if notice_width<54:raise ValueError('当前考号位数与须知区域冲突，请选择较宽的分栏、减少考号位数或关闭内置须知')
+        sheet_notices.fitted_notices(notice_width)
     occupied=[]
     for question in template.get('questions',[]):
         for region in question.get('regions',[]):
@@ -129,13 +134,16 @@ def pdf(template):
         for x,y in ((7,7),(w-7,7),(7,h-7),(w-7,h-7)):
             c.rect((x-2)*mm,(h-y-2)*mm,4*mm,4*mm,fill=1,stroke=0)
         if page==1:
-            c.drawString(15*mm,(h-39)*mm,'姓名：____________  班级：____________  考场：____________')
+            standard_notices=sheet_notices.enabled(template)
+            c.setFont(FONT,8 if standard_notices else 9)
+            c.drawString(15*mm,(h-(33 if standard_notices else 39))*mm,'姓名：____________  班级：____________  考场：____________')
             if template.get('layout_version',1)>=2:
                 c.drawString(15*mm,(h-46)*mm,'准考证号：')
                 ax,ay=absent_position(template)
-                c.drawString((ax-23)*mm,(h-46)*mm,'缺考标记：')
-                c.rect((ax-2)*mm,(h-ay-1.5)*mm,4*mm,3*mm)
-                c.setFont(FONT,7);c.drawString((ax-24)*mm,(h-51)*mm,'由监考教师填涂')
+                if not standard_notices:
+                    c.drawString((ax-23)*mm,(h-46)*mm,'缺考标记：')
+                    c.rect((ax-2)*mm,(h-ay-1.5)*mm,4*mm,3*mm)
+                    c.setFont(FONT,7);c.drawString((ax-24)*mm,(h-51)*mm,'由监考教师填涂')
             else:c.drawString(15*mm,(h-46)*mm,'准考证号：                       缺考标记：□（由监考教师填写）')
             for column in range(int(template.get('candidate_length',8))):
                 x=18+column*6
@@ -144,6 +152,7 @@ def pdf(template):
                     y=57+digit*3.5
                     c.rect((x-1.6)*mm,(h-y-1.2)*mm,3.2*mm,2.4*mm)
                     c.setFont('Helvetica',5); c.drawCentredString(x*mm,(h-y-.6)*mm,str(digit))
+            if standard_notices:sheet_notices.draw(c,template)
         column_tops={}
         for q in template.get('questions',[]):
             if q.get('choice_style') in ('bracket','compact') and q['type']!='subjective':
