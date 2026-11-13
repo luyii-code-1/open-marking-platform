@@ -127,10 +127,13 @@ def remove(identifier:str,current=Depends(system_admin)):
 @router.put('/projects/{identifier}/storage')
 def bind(identifier:str,body:dict,current=Depends(admin)):
     connection_id=body.get('connection_id')
+    delivery=body.get('review_image_delivery')
+    if delivery is not None and delivery not in ('direct','proxy'):raise HTTPException(422,'图片访问方式无效')
     with connect() as db:
         db.execute('BEGIN IMMEDIATE');project=require(db,identifier,'projects')
         if connection_id:require(db,connection_id,'storage-connections')
         project['storage_connection_id']=connection_id or None
+        if delivery is not None:project['review_image_delivery']=delivery
         put(db,'projects',project,current['id'])
     return {'project_id':identifier,'connection_id':connection_id or None}
 

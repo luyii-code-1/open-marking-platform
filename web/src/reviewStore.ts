@@ -1,8 +1,9 @@
+import type {ReviewSheet} from './reviewImages'
 import type { Question, Row, User } from './api'
 
 export type ReviewRecord = {
   key:string; owner:string; task:Row; template:{id:string;name:string;group_id:string;revision:number}; question:Question
-  image:Blob; draft:number|null; status:'draft'|'queued'|'conflict'|'confirmed'; updatedAt:number
+  image:Blob; sheet?:ReviewSheet; draft:number|null; status:'draft'|'queued'|'conflict'|'confirmed'; updatedAt:number
   operation?:{id:string;score:number;revision:number;protocol:1}; error?:string
 }
 export const REVIEW_DB='omp-review'
@@ -61,11 +62,11 @@ export async function listReviews(owner:string):Promise<ReviewRecord[]>{
   const db=await open()
   return new Promise((resolve,reject)=>{const request=db.transaction('work').objectStore('work').getAll();request.onsuccess=()=>resolve((request.result as ReviewRecord[]).filter(r=>r.owner===owner).sort((a,b)=>b.updatedAt-a.updatedAt));request.onerror=()=>reject(request.error)})
 }
-export function cacheReview(owner:string,task:Row,template:ReviewRecord['template'],question:Question,image:Blob){
+export function cacheReview(owner:string,task:Row,template:ReviewRecord['template'],question:Question,image:Blob,sheet?:ReviewSheet){
   if(updateLocked)return Promise.reject(new Error('页面正在准备更新'))
   return tracked(mutate(recordKey(owner,task.id),old=>{
     if(old&&old.status!=='confirmed')return {value:old,result:old}
-    const value:ReviewRecord={key:recordKey(owner,task.id),owner,task,template,question,image,draft:task.regrading||task.status==='completed'?task.score:null,status:'draft',updatedAt:Date.now()}
+    const value:ReviewRecord={key:recordKey(owner,task.id),owner,task,template,question,image,sheet,draft:task.regrading||task.status==='completed'?task.score:null,status:'draft',updatedAt:Date.now()}
     return {value,result:value}
   }),recordKey(owner,task.id))
 }

@@ -82,3 +82,5 @@
 .template-design-page .template-workbench{grid-template-columns:minmax(340px,420px) minmax(0,1fr);gap:24px}
 .template-design-page .template-preview{top:100px}
 @media(max-width:1000px){.template-design-page .template-workbench{grid-template-columns:1fr}.template-design-page .template-preview{position:static}.template-fullscreen{padding:16px}.template-design-page .template-action-bar{position:static}}
+
+.review-sheet{display:block;width:100%;max-width:100%;transform-origin:center;user-select:none}.answer-viewport>.review-sheet{height:100%;max-height:100%}

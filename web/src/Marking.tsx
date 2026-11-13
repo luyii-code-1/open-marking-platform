@@ -1,3 +1,5 @@
+import {ReviewImage} from './ReviewImage'
+import {loadReviewSheet} from './reviewImages'
 import { ArrowLeftOutlined, ArrowRightOutlined, HistoryOutlined, SettingOutlined, BarChartOutlined, ReloadOutlined, ZoomInOutlined, ZoomOutOutlined } from '@ant-design/icons'
 import { Button } from './Button'
 import { useAction } from './useAction'
@@ -7,7 +9,7 @@ import { focusScoreInput, previousReview, scorePresets } from './reviewInteracti
 import { useReviewWorkspace } from './ReviewWorkspace'
 import { cacheReview, enqueueReview, forgetReview, saveReviewDraft, settleReviewWrites, type ReviewRecord } from './reviewStore'
 import { useUnsavedChanges } from './useNavigation'
-import { request, requestBlob, send, useResource, watchChanges, type Row, type Template } from './api'
+import { request, send, useResource, watchChanges, type Row, type Template } from './api'
 import { ErrorNotice } from './Management'
 
 export function Marking({ admin, groupId, initialTemplateId, initialQuestionId, onExit }: { admin: boolean; groupId?: string; initialTemplateId?: string; initialQuestionId?: string; onExit?: () => void }) {
@@ -24,7 +26,7 @@ export function Marking({ admin, groupId, initialTemplateId, initialQuestionId, 
   useEffect(() => { if(groupId && !templateId) { const published=templates.data.find(t=>t.id===groups.data.find(g=>g.id===groupId)?.template_id); if(published)setTemplateId(published.id) } },[groupId,templateId,templateResource.data,groups.data])
   const record=workspace.records.find(r=>r.task.id===task?.id)
   const template = templates.data.find(t => t.id === templateId), question = record?.question||template?.questions.find(q => q.id === questionId)
-  const [imageUrl,setImageUrl]=useState(''),[saveState,setSaveState]=useState(''),saveVersion=useRef(0),restored=useRef(false),submitted=useRef<string|null>(null)
+  const [saveState,setSaveState]=useState(''),saveVersion=useRef(0),restored=useRef(false),submitted=useRef<string|null>(null)
   const locked=busy||workspace.updateLocked||!!workspace.storageError
   const editable=record?.status==='draft'&&!locked
   const pageRef=useRef<HTMLDivElement>(null),scoreRef=useRef<HTMLDivElement>(null)
@@ -42,7 +44,7 @@ export function Marking({ admin, groupId, initialTemplateId, initialQuestionId, 
   useUnsavedChanges(saveState==='正在保存本地草稿'||saveState==='本地保存失败')
   function showRecord(row:ReviewRecord){started.current=Date.now();setTemplateId(row.template.id);setQuestionId(row.question.id);setTask(row.task);setValue(row.draft);setSaveState('本地草稿已保存');setSkipWarn(false);setPan({x:0,y:0});setZoom(1)}
   useEffect(()=>{if(initialTemplateId||!workspace.ready||restored.current)return;restored.current=true;const row=workspace.records.find(r=>r.status!=='confirmed'&&(!groupId||r.template.group_id===groupId));if(row)showRecord(row)},[workspace.ready,workspace.records,groupId])
-  useEffect(()=>{if(!record?.image){setImageUrl('');return}const url=URL.createObjectURL(record.image);setImageUrl(url);return()=>URL.revokeObjectURL(url)},[task?.id,record?.image.size,record?.image.type])
+
   const [pan, setPan] = useState({ x: 0, y: 0 }), drag = useRef<{ x: number; y: number; px: number; py: number } | null>(null)
   useEffect(() => { historyVersion.current++;setHistory([]);setError('') }, [templateId, questionId])
   useEffect(() => { if (!osd) return; const timer = setTimeout(() => setOsd(''), 1000); return () => clearTimeout(timer) }, [osd])
@@ -50,8 +52,8 @@ export function Marking({ admin, groupId, initialTemplateId, initialQuestionId, 
     if(!template)return
     const selected=template.questions.find(q=>q.id===row.question_id)
     if(!selected)throw new Error('题目配置不可用')
-    const image=await requestBlob(`/tasks/${row.id}/image`,{signal:AbortSignal.timeout(15000)})
-    const saved=await cacheReview(workspace.user.id,row,{id:template.id,name:template.name,group_id:template.group_id,revision:template.revision},selected,image)
+    const sheet=await loadReviewSheet(row.id)
+    const saved=await cacheReview(workspace.user.id,row,{id:template.id,name:template.name,group_id:template.group_id,revision:template.revision},selected,new Blob([]),sheet)
     showRecord(saved)
   }
   async function next() {
@@ -149,7 +151,7 @@ export function Marking({ admin, groupId, initialTemplateId, initialQuestionId, 
           <Checkbox checked={contrast>1} onChange={e=>{setContrast(e.target.checked?1.5:1);refocusScore()}}>优化显示</Checkbox>
         </Space></div>
         <div className="answer-viewport" onPointerDown={e=>{drag.current={x:e.clientX,y:e.clientY,px:pan.x,py:pan.y};e.currentTarget.setPointerCapture(e.pointerId)}} onPointerMove={e=>{const d=drag.current;if(d)setPan({x:d.px+e.clientX-d.x,y:d.py+e.clientY-d.y})}} onPointerUp={()=>{drag.current=null;refocusScore()}} onPointerCancel={()=>drag.current=null}>
-          {imageUrl?<img src={imageUrl} alt="当前作答图像" draggable={false} style={{transform:`translate(${pan.x}px,${pan.y}px) scale(${zoom})`,filter:`contrast(${contrast})`}}/>:<Empty description="正在准备题图"/>}
+          {record?<ReviewImage sheet={record.sheet} image={record.image} style={{transform:`translate(${pan.x}px,${pan.y}px) scale(${zoom})`,filter:`contrast(${contrast})`}}/>:<Empty description="正在准备题图"/>}
           {osd&&<div className="score-osd" role="status">{osd}</div>}
         </div>
       </section>

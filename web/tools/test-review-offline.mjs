@@ -105,4 +105,8 @@ assert.ok(replies.some(r=>r.requestId==='safe'&&r.ready));assert.equal((await st
 message({type:'UPDATE_COMMIT'});workerEvents.dispatchEvent(new Event('controllerchange'));assert.equal(reloaded,1)
 store.lockReviewUpdate(false)
 Date.now=realNow
+const sheet={pages:[{blob:new Blob(['full-sheet']),width:840,height:1188,key:'page:hash'}],regions:[{page:0,rect:[40,440,400,120]}]}
+await store.cacheReview(owner,task('full-sheet'),template,question,new Blob([]),sheet)
+const restoredSheet=(await reopened.getReview(owner,'full-sheet')).sheet
+assert.equal(await restoredSheet.pages[0].blob.text(),'full-sheet');assert.deepEqual(restoredSheet.regions,sheet.regions)
 console.log('Offline grading passed: IndexedDB refresh, images/drafts, account isolation, two-tab idempotency, response loss, auth pause, protocol gating, conflict retention and page update handshake')

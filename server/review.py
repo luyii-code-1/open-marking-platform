@@ -433,3 +433,16 @@ def publish_results(body:dict,current=Depends(admin)):
             group['conversion_revision']=group['conversion_snapshot'].get('revision',1)
         group.update(frozen=True,published_at=time.time(),published_unscanned_count=len(unscanned))
         return put(db,'groups',group,current['id'])
+
+
+@router.get('/tasks/{identifier}/image-manifest')
+def image_manifest(identifier:str,current=Depends(user)):
+    from .review_images import manifest
+    from fastapi.responses import JSONResponse
+    return JSONResponse(manifest(identifier,current),headers={'Cache-Control':'private, no-store'})
+
+
+@router.get('/tasks/{identifier}/image-source/{index}')
+def image_source(identifier:str,index:int,version:str='',current=Depends(user)):
+    from .review_images import proxy
+    return proxy(identifier,index,version,current)
