@@ -18,6 +18,10 @@ def panels(template):
 
 def absent_position(template=None):
     if template and manual_binding(template):
+        from . import sheet_notices
+        if sheet_notices.enabled(template) and template.get('notice_layout',1)==2:
+            left,width=sheet_notices.geometry(template)
+            return left+width*.275,88
         width,_=dimensions(template)
         return min(124, (width-24-(panels(template)-1)*8)/panels(template)-8),45
     return ABSENT_X,ABSENT_Y

@@ -110,6 +110,17 @@ def image_bytes(file, expected_shape=None):
     return content
 
 
+def verified_absence(template, side, result, normalized):
+    # Recheck moved marks on the corrected image supplied by existing scanner engines.
+    from . import sheet_notices
+    if template.get('notice_layout',1)==2 and sheet_notices.enabled(template):
+        from .omr import absent_mark
+        image=cv2.imdecode(np.frombuffer(normalized,np.uint8),cv2.IMREAD_GRAYSCALE)
+        if image is None:raise HTTPException(422,'校正图无法解码')
+        return absent_mark(image,side,template)
+    return result['absent_mark']
+
+
 def verify_result(template, side, result, original, normalized, cuts):
     supported={ENGINE_VERSION} if template.get('layout_version',2)>=3 or any(q.get('choice_style')=='compact' for q in template['questions']) else {ENGINE_VERSION,'omp-omr-2'} if any(q.get('choice_style')=='bracket' for q in template['questions']) else {ENGINE_VERSION,'omp-omr-2','omp-omr-1'}
     if result.get('engine_version') not in supported or result.get('template_id') != template['id'] or result.get('template_revision') != template['revision'] or result.get('config_sha256') != config_hash(template): raise HTTPException(409, '本地识读引擎或题卡版本不匹配，请更新扫描端并下载配置')
@@ -178,7 +189,7 @@ def upload_processed(identifier: str, file: UploadFile = File(), normalized: Upl
                                    'sha256': result['source_sha256'], 'normalized_sha256': result['normalized_sha256'],
                                    'local_cuts_sha256': result['local_cuts_sha256'], 'local_cuts_normalized_sha256': result['normalized_sha256'],
                                    'local_cuts': result['cuts'], 'candidate_number': result['candidate_number'], 'selections': result['selections'],
-                                   'absent_mark': result['absent_mark'], 'recognition_engine': result['engine_version'], 'recognition_source': 'device',
+                                   'absent_mark': verified_absence(template,side,result,corrected), 'recognition_engine': result['engine_version'], 'recognition_source': 'device',
                                    'image_url': f'/api/v1/pages/{capture_id}/image'}, current['id'])
             from .anomalies import check_candidate
             check_candidate(db, page, current['id'])

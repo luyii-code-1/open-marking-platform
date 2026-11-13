@@ -50,6 +50,8 @@ def draw(c,template):
     from . import sheet_style
     _,height=dimensions(template);left,width=geometry(template)
     if width<54:raise ValueError('当前考号位数与须知区域冲突，请选择较宽的分栏、减少考号位数或关闭内置须知')
+    if template.get('notice_layout',1)==2:
+        return draw_stacked(c,template,left,width,height)
     size,leading,lines=fitted_notices(width)
     ax,ay=absent_position(template)
     current=sheet_style.enabled(template)
@@ -79,6 +81,39 @@ def draw(c,template):
             c.line(x*mm,(height-y-2.3)*mm,(x+4)*mm,(height-y)*mm)
         elif index==1:
             path=c.beginPath();path.moveTo((x+.2)*mm,(height-y-1.1)*mm);path.lineTo((x+1.5)*mm,(height-y-2)*mm);path.lineTo((x+3.7)*mm,(height-y-.2)*mm);c.drawPath(path)
+        elif index==2:c.ellipse((x+.5)*mm,(height-y-2.1)*mm,(x+3.5)*mm,(height-y-.2)*mm)
+        else:
+            c.setFillGray(.6);box(x,y,1.7,2.3,1);c.setFillGray(0)
+    c.restoreState()
+
+
+def draw_stacked(c,template,left,width,height):
+    """Aligned header: notices above absence instructions and fill examples."""
+    from .omr import absent_position
+    size,leading,lines=fitted_notices(width)
+    split=left+width*.55;right=left+width
+    def text(x,y,value,font_size=6):
+        c.setFont(FONT,font_size);c.drawString(x*mm,(height-y)*mm,value)
+    def box(x,y,w,h,fill=0):c.rect(x*mm,(height-y-h)*mm,w*mm,h*mm,fill=fill,stroke=1)
+    def line(x1,y1,x2,y2):c.line(x1*mm,(height-y1)*mm,x2*mm,(height-y2)*mm)
+    c.saveState();c.setFillGray(0);c.setStrokeGray(0);c.setLineWidth(.18*mm)
+    box(left,35,width,59);line(left,72,right,72);line(split,72,split,94)
+    text(left+2,39,'注意事项',7.5)
+    for index,value in enumerate(lines):text(left+2,43+index*leading,value,size)
+    text(left+2,76,'考生禁填',7)
+    for index,value in enumerate(wrap(ABSENCE,split-left-4,6)):
+        text(left+2,79.2+index*2.5,value)
+    ax,ay=absent_position(template);box(ax-2,ay-1.5,4,3)
+    c.setFont(FONT,6);c.drawCentredString(ax*mm,(height-92.5)*mm,'缺考标记')
+    text(split+2,76,'填涂样例',7)
+    text(split+2,80.5,'正确填涂');box(right-7,78.5,4,2.3,1)
+    text(split+2,84.8,'错误填涂')
+    for index in range(4):
+        x=split+2+index*5.4;y=88
+        box(x,y,4,2.3)
+        if index==0:line(x,y,x+4,y+2.3);line(x,y+2.3,x+4,y)
+        elif index==1:
+            line(x+.2,y+1.1,x+1.5,y+2);line(x+1.5,y+2,x+3.7,y+.2)
         elif index==2:c.ellipse((x+.5)*mm,(height-y-2.1)*mm,(x+3.5)*mm,(height-y-.2)*mm)
         else:
             c.setFillGray(.6);box(x,y,1.7,2.3,1);c.setFillGray(0)

@@ -14,8 +14,8 @@ import { ObjectiveEditor } from './ObjectiveEditor'
 import { QuestionSettings } from './QuestionSettings'
 
 const { Text } = Typography
-const emptyTemplate = (groupId = ''): Template => ({ id: crypto.randomUUID(), name: '新答题卡', group_id: groupId, paper: 'A4', sides: 2, layout_version: 3, sheet_columns: 1, notice_template:'standard-v1', print_style:'standard-v2', forbidden_regions:[], candidate_length: 9, revision: 0, questions: [] })
-const editableCopy = (template:Template):Template => ({...structuredClone(template),...(template.status==='published'?{}:{notice_template:template.notice_template||'standard-v1',print_style:'standard-v2',forbidden_regions:template.forbidden_regions||[]})})
+const emptyTemplate = (groupId = ''): Template => ({ id: crypto.randomUUID(), name: '新答题卡', group_id: groupId, paper: 'A4', sides: 2, layout_version: 3, sheet_columns: 1, notice_template:'standard-v1', notice_layout:2, print_style:'standard-v2', forbidden_regions:[], candidate_length: 9, revision: 0, questions: [] })
+const editableCopy = (template:Template):Template => ({...structuredClone(template),...(template.status==='published'?{}:{notice_layout:2,notice_template:template.notice_template||'standard-v1',print_style:'standard-v2',forbidden_regions:template.forbidden_regions||[]})})
 export function TemplateEditor({ groupId }: { groupId?: string }) {
   const templates = useResource<Template[]>('/templates', []), groups = useResource<Row[]>('/groups', [])
   const [value, setValue] = useState<Template>(() => emptyTemplate(groupId)), [questionId, setQuestionId] = useState(''), [page, setPage] = useState(1), [draw, setDraw] = useState(true)
@@ -40,6 +40,7 @@ export function TemplateEditor({ groupId }: { groupId?: string }) {
     initialized.current = groupId
     const existing = saved.find(t => t.id === group.template_id) || saved.find(t => t.status === 'draft')
     saver.load(existing ? editableCopy(existing) : emptyTemplate(groupId))
+    if(existing&&existing.status!=='published'&&existing.notice_layout!==2)saver.edit(saver.value)
   }, [groupId, templates.loaded, groups.loaded, templates.data, groups.data])
   function change(update: Partial<Template>) {
     if (readOnly || saving) return
@@ -66,7 +67,7 @@ export function TemplateEditor({ groupId }: { groupId?: string }) {
   }
   function load(template: Template) {
     if(saver.saving)return
-    const apply = () => { saver.load(editableCopy(template)); setQuestionId(''); setPage(1); setDirty(false); setSettingsOpen(false); setForbiddenMode(false); setAnswerMode(template.questions.some(q=>q.type!=='subjective')); setPane(template.questions.some(q => q.type !== 'subjective') ? 'objective' : template.questions.length ? 'subjective' : 'setup') }
+    const apply = () => { saver.load(editableCopy(template)); if(template.status!=='published'&&template.notice_layout!==2)saver.edit(saver.value); setQuestionId(''); setPage(1); setSettingsOpen(false); setForbiddenMode(false); setAnswerMode(template.questions.some(q=>q.type!=='subjective')); setPane(template.questions.some(q => q.type !== 'subjective') ? 'objective' : template.questions.length ? 'subjective' : 'setup') }
     if (dirty) modal.confirm({ title: '切换题卡前放弃未保存修改？', onOk: apply }); else apply()
   }
   async function save(publish = false) {

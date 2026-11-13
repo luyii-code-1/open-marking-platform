@@ -11,9 +11,10 @@ from server.main import app
 
 @pytest.mark.parametrize('size,columns',[('A4',1),('A3',2),('A3',3)])
 @pytest.mark.parametrize('length',[9,11])
-def test_reference_notices_render_once_and_do_not_mark_candidate_or_absence(tmp_path,monkeypatch,size,columns,length):
+@pytest.mark.parametrize('notice_layout',[1,2])
+def test_reference_notices_render_once_and_do_not_mark_candidate_or_absence(tmp_path,monkeypatch,size,columns,length,notice_layout):
     if not shutil.which('pdftoppm'):pytest.skip('Poppler required')
-    definition={'id':str(uuid4()),'name':'标准答题卡','paper':size,'sheet_columns':columns,'sides':2,'layout_version':3,'notice_template':'standard-v1','print_style':'standard-v2','candidate_length':length,'revision':1,'questions':[{'id':str(uuid4()),'number':1,'type':'single','choice_style':'compact','options':4,'answer':['B'],'points':2,'regions':[{'page':1,'x':15,'y':100,'width':40,'height':4.6}]}]}
+    definition={'id':str(uuid4()),'name':'标准答题卡','paper':size,'sheet_columns':columns,'sides':2,'layout_version':3,'notice_template':'standard-v1','notice_layout':notice_layout,'print_style':'standard-v2','candidate_length':length,'revision':1,'questions':[{'id':str(uuid4()),'number':1,'type':'single','choice_style':'compact','options':4,'answer':['B'],'points':2,'regions':[{'page':1,'x':15,'y':100,'width':40,'height':4.6}]}]}
     captured=[];original=canvas.Canvas.drawString
     def capture(self,x,y,text,*args,**kwargs):captured.append(text);return original(self,x,y,text,*args,**kwargs)
     monkeypatch.setattr(canvas.Canvas,'drawString',capture)
@@ -84,3 +85,17 @@ def test_header_square_cells_and_manual_forbidden_regions(monkeypatch):
     assert issues({**definition,'forbidden_regions':[{**area,'page':1,'y':90}]})
     assert issues({**definition,'forbidden_regions':[{**area,'x':120}]})
     assert issues({**definition,'forbidden_regions':[area,area]})
+
+
+def test_uploaded_absence_is_checked_at_current_layout_position():
+    import numpy as np
+    from server.scanner_pipeline import verified_absence
+    template={'paper':'A4','layout_version':3,'notice_template':'standard-v1','notice_layout':2,'print_style':'standard-v2','candidate_length':9}
+    image=np.full((297*4,210*4),255,dtype=np.uint8)
+    def encoded():return cv2.imencode('.png',image)[1].tobytes()
+    assert not verified_absence(template,'front',{'absent_mark':True},encoded())
+    x,y=paper.absent_position(template)
+    cv2.rectangle(image,(round((x-1.5)*4),round((y-1)*4)),(round((x+1.5)*4),round((y+1)*4)),0,-1)
+    assert verified_absence(template,'front',{'absent_mark':False},encoded())
+    assert not verified_absence(template,'back',{'absent_mark':True},encoded())
+    assert verified_absence({**template,'notice_layout':1},'front',{'absent_mark':True},encoded())

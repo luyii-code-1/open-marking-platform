@@ -9,6 +9,7 @@ def enabled(template):
 
 def defaults(template):
     template.setdefault('print_style', STANDARD)
+    template.setdefault('notice_layout', 2)
     template.setdefault('candidate_length', 9)
     template.setdefault('forbidden_regions', [])
 
