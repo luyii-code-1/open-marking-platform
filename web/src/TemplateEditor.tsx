@@ -26,6 +26,7 @@ export function TemplateEditor({ groupId }: { groupId?: string }) {
   const [,renderSave]=useState(0)
   if(!saverRef.current)saverRef.current=new DraftSaver(value,({value,request_id,base_version})=>request<Template>(`/groups/${value.group_id}/drafts/${value.id}`,{method:'PUT',body:JSON.stringify({value,request_id,base_version}),signal:AbortSignal.timeout(20000)}),()=>{setValue({...saverRef.current!.value});setDirty(saverRef.current!.dirty);renderSave(n=>n+1)})
   const saver=saverRef.current
+  useEffect(()=>{if(saver.savedAt)void templates.reload()},[saver.savedAt])
   useEffect(()=>{if(!dirty||saver.error||saveAction||!value.group_id)return;const timer=setTimeout(()=>{void saver.flush().catch(()=>{})},2000);return()=>clearTimeout(timer)},[value,dirty,saveAction,saver.error])
   const saved = templates.data.filter(t => !groupId || t.group_id === groupId), readOnly = value.status === 'published'
   const official=groups.data.find(g=>g.id===(groupId||value.group_id))?.template_id
