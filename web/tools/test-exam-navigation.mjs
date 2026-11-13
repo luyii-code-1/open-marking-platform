@@ -71,3 +71,27 @@ row.onKeyDown({target:{},currentTarget:element,key:'Enter',preventDefault(){}});
 window.getSelection=()=>({toString:()=> 'copied text'})
 row.onClick({currentTarget:{contains:()=>true},target:{closest:()=>null}});assert.equal(entered,2,'Copying a field must not open the row')
 console.log('Exam navigation passed: four-level paths and choices, grade ownership, legacy links, empty grades and scoped creation')
+
+// The same event contract is shared by exam, grade, card and scanner lists.
+window.getSelection=()=>({toString:()=>''})
+for(const selector of ['a','button','input','select','textarea','label','[role="button"]','[role="menuitem"]','.ant-dropdown-trigger','.row-actions']){
+  let opened=0
+  const props=rowNavigation(()=>opened++,'record')
+  const target={closest:query=>query.split(',').includes(selector)?{}:null}
+  props.onClick({target,currentTarget:{contains:()=>true}})
+  assert.equal(opened,0,`${selector}: control, nested icon or action cell must keep its own action`)
+}
+for(const kind of ['delete menu','edit modal','confirmation content','confirmation cancel','confirmation mask']){
+  let opened=0
+  rowNavigation(()=>opened++,'record').onClick({target:{closest:()=>null},currentTarget:{contains:()=>false}})
+  assert.equal(opened,0,`${kind}: portal events must not navigate`)
+}
+for(const key of ['Enter',' ']){
+  let opened=0,prevented=0;const element={},props=rowNavigation(()=>opened++,'record')
+  props.onKeyDown({key,target:{},currentTarget:element,preventDefault:()=>prevented++})
+  props.onKeyDown({key,defaultPrevented:true,target:element,currentTarget:element,preventDefault:()=>prevented++})
+  assert.equal(opened,0);assert.equal(prevented,0)
+  props.onKeyDown({key,target:element,currentTarget:element,preventDefault:()=>prevented++})
+  assert.equal(opened,1);assert.equal(prevented,1)
+}
+console.log('Row actions passed: controls, action-cell gaps, portal dialogs and keyboard isolation')
