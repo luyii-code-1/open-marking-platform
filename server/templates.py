@@ -18,6 +18,36 @@ _render_slots=threading.BoundedSemaphore(2)
 DEFINITION_FIELDS=('name','subtitle','paper','sides','candidate_length','layout_version','sheet_columns','notice_template','print_style','forbidden_regions','background_assets','background_asset_id','questions')
 
 
+@router.put('/groups/{group_id}/drafts/{identifier}')
+def save_draft(group_id:str,identifier:str,body:dict,current=Depends(admin)):
+    import hashlib,json
+    from uuid import UUID
+    try:
+        if str(UUID(identifier))!=identifier:raise ValueError()
+        UUID(body.get('request_id',''))
+    except (ValueError,TypeError,AttributeError):raise HTTPException(422,'草稿或保存请求编号无效')
+    definition=body.get('value');version=body.get('base_version')
+    if not isinstance(definition,dict) or type(version) is not int or version<0:raise HTTPException(422,'草稿内容或版本无效')
+    if definition.get('group_id')!=group_id:raise HTTPException(422,'草稿所属题卡不符')
+    signature=hashlib.sha256(json.dumps(body,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
+    with connect() as db:
+        db.execute('BEGIN IMMEDIATE');group=require(db,group_id,'groups')
+        old=get(db,identifier,'templates')
+        if old and old.get('group_id')!=group_id:raise HTTPException(409,'草稿属于另一题卡')
+        if group.get('frozen') or group.get('template_id') or old and old.get('status')=='published':raise HTTPException(409,'题卡已发布，不能保存草稿')
+        if old and old.get('draft_request_id')==body['request_id']:
+            if old.get('draft_signature')!=signature:raise HTTPException(409,'保存请求编号重复')
+            return old
+        if version!=(old or {}).get('draft_version',0):raise HTTPException(409,'草稿已在其他窗口更新，请重新载入服务器草稿后编辑')
+        if definition.get('paper') not in ('A3','A4') or definition.get('sides') not in (1,2) or not isinstance(definition.get('name'),str):raise HTTPException(422,'纸型、面数或标题无效')
+        value={k:deepcopy(definition[k]) for k in DEFINITION_FIELDS if k in definition}
+        value.update(id=identifier,group_id=group_id,status='draft',revision=(old or {}).get('revision',0),draft_version=version+1,draft_request_id=body['request_id'],draft_signature=signature)
+        value.setdefault('notice_template','standard-v1')
+        from .sheet_style import defaults
+        defaults(value);prepare_questions(value)
+        return put(db,'templates',value,current['id'])
+
+
 def default_group(db,subject_id,actor):
     subject=require(db,subject_id,'subjects')
     existing=get(db,subject.get('default_group_id'),'groups')

@@ -22,9 +22,7 @@ export function useNavigation() {
     const changed = () => {
       const next = window.location.hash
       if (next === previous.current) return
-      const before = readLocation(previous.current), after = readLocation(next)
-      const sameGroup = before.page === 'exams' && after.page === 'exams' && !!before.groupId && before.groupId === after.groupId && before.subjectId === after.subjectId && before.projectId === after.projectId
-      if (!sameGroup && !confirmLeaving()) { window.history.replaceState(null, '', previous.current || '#/dashboard'); return }
+      if (!confirmLeaving()) { window.history.replaceState(null, '', previous.current || '#/dashboard'); return }
       previous.current = next; setLocation(readLocation(next))
     }
     window.addEventListener('hashchange', changed)

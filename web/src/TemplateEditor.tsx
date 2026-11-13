@@ -1,6 +1,7 @@
+import { DraftSaver } from './draftSaver'
 import {ScoringChanges} from './ScoringChanges'
 import { useEffect, useRef, useState } from 'react'
-import { App, Card, Dropdown, Empty, Form, Input, InputNumber, Modal, Radio, Select, Space, Table, Tabs, Tag, Typography, Upload } from 'antd'
+import { Alert, App, Card, Dropdown, Empty, Form, Input, InputNumber, Modal, Radio, Select, Space, Table, Tabs, Tag, Typography, Upload } from 'antd'
 import { Button } from './Button'
 import { CopyOutlined, DownloadOutlined, PlusOutlined, SaveOutlined } from '@ant-design/icons'
 import { request, download, newQuestion, send, useResource, type Question, type Row, type Template } from './api'
@@ -13,7 +14,7 @@ import { ObjectiveEditor } from './ObjectiveEditor'
 import { QuestionSettings } from './QuestionSettings'
 
 const { Text } = Typography
-const emptyTemplate = (groupId = ''): Template => ({ id: '', name: '新答题卡', group_id: groupId, paper: 'A4', sides: 2, layout_version: 3, sheet_columns: 1, notice_template:'standard-v1', print_style:'standard-v2', forbidden_regions:[], candidate_length: 9, revision: 0, questions: [] })
+const emptyTemplate = (groupId = ''): Template => ({ id: crypto.randomUUID(), name: '新答题卡', group_id: groupId, paper: 'A4', sides: 2, layout_version: 3, sheet_columns: 1, notice_template:'standard-v1', print_style:'standard-v2', forbidden_regions:[], candidate_length: 9, revision: 0, questions: [] })
 const editableCopy = (template:Template):Template => ({...structuredClone(template),...(template.status==='published'?{}:{notice_template:template.notice_template||'standard-v1',print_style:'standard-v2',forbidden_regions:template.forbidden_regions||[]})})
 export function TemplateEditor({ groupId }: { groupId?: string }) {
   const templates = useResource<Template[]>('/templates', []), groups = useResource<Row[]>('/groups', [])
@@ -21,9 +22,14 @@ export function TemplateEditor({ groupId }: { groupId?: string }) {
   const [saveAction, setSaveAction] = useState(''), [dirty, setDirty] = useState(false), [pane, setPane] = useState('objective'), [settingsOpen, setSettingsOpen] = useState(false)
   const [answerMode,setAnswerMode]=useState(true),[forbiddenMode,setForbiddenMode]=useState(false)
   const initialized = useRef(''), { message, modal } = App.useApp()
+  const saverRef=useRef<DraftSaver<Template>|null>(null)
+  const [,renderSave]=useState(0)
+  if(!saverRef.current)saverRef.current=new DraftSaver(value,({value,request_id,base_version})=>request<Template>(`/groups/${value.group_id}/drafts/${value.id}`,{method:'PUT',body:JSON.stringify({value,request_id,base_version}),signal:AbortSignal.timeout(20000)}),()=>{setValue({...saverRef.current!.value});setDirty(saverRef.current!.dirty);renderSave(n=>n+1)})
+  const saver=saverRef.current
+  useEffect(()=>{if(!dirty||saver.error||saveAction||!value.group_id)return;const timer=setTimeout(()=>{void saver.flush().catch(()=>{})},2000);return()=>clearTimeout(timer)},[value,dirty,saveAction,saver.error])
   const saved = templates.data.filter(t => !groupId || t.group_id === groupId), readOnly = value.status === 'published'
   const official=groups.data.find(g=>g.id===(groupId||value.group_id))?.template_id
-  const saving = !!saveAction
+  const saving = !!saveAction || (!!groupId && initialized.current !== groupId)
   const question = value.questions.find(q => q.id === questionId), total = value.questions.reduce((sum, q) => sum + Number(q.points || 0), 0)
   useUnsavedChanges(dirty)
   useEffect(() => {
@@ -32,11 +38,11 @@ export function TemplateEditor({ groupId }: { groupId?: string }) {
     if (!group) return
     initialized.current = groupId
     const existing = saved.find(t => t.id === group.template_id) || saved.find(t => t.status === 'draft')
-    setValue(existing ? editableCopy(existing) : emptyTemplate(groupId)); setDirty(false)
+    saver.load(existing ? editableCopy(existing) : emptyTemplate(groupId))
   }, [groupId, templates.loaded, groups.loaded, templates.data, groups.data])
   function change(update: Partial<Template>) {
     if (readOnly || saving) return
-    setValue(v => ({ ...v, ...update })); setDirty(true)
+    saver.edit({ ...saver.value, ...update })
   }
   function select(id: string, edit = false) {
     setQuestionId(id);setForbiddenMode(false)
@@ -58,7 +64,8 @@ export function TemplateEditor({ groupId }: { groupId?: string }) {
     if (patch.type) setPane(patch.type === 'subjective' ? 'subjective' : 'objective')
   }
   function load(template: Template) {
-    const apply = () => { setValue(editableCopy(template)); setQuestionId(''); setPage(1); setDirty(false); setSettingsOpen(false); setForbiddenMode(false); setAnswerMode(template.questions.some(q=>q.type!=='subjective')); setPane(template.questions.some(q => q.type !== 'subjective') ? 'objective' : template.questions.length ? 'subjective' : 'setup') }
+    if(saver.saving)return
+    const apply = () => { saver.load(editableCopy(template)); setQuestionId(''); setPage(1); setDirty(false); setSettingsOpen(false); setForbiddenMode(false); setAnswerMode(template.questions.some(q=>q.type!=='subjective')); setPane(template.questions.some(q => q.type !== 'subjective') ? 'objective' : template.questions.length ? 'subjective' : 'setup') }
     if (dirty) modal.confirm({ title: '切换题卡前放弃未保存修改？', onOk: apply }); else apply()
   }
   async function save(publish = false) {
@@ -70,9 +77,9 @@ export function TemplateEditor({ groupId }: { groupId?: string }) {
         const check = await send<{ valid: boolean; issues: string[] }>('/templates/check', value)
         if (!check.valid) { modal.warning({ title: '发布前请完善以下内容', content: <ul className="validation-issues">{check.issues.map((issue, index) => <li key={index}>{issue}</li>)}</ul> }); return }
       }
-      const stored = await send<Template>(value.id ? `/templates/${value.id}` : '/templates', value, value.id ? 'PUT' : 'POST')
-      setValue(stored); setDirty(false)
-      if (publish) { setValue(await send<Template>(`/templates/${stored.id}/publish`)); message.success('题卡已发布，可以导出打印稿') }
+      if(!dirty&&!saved.some(t=>t.id===value.id))saver.edit(value)
+      const stored = await saver.flush()
+      if (publish) { saver.load(await send<Template>(`/templates/${stored.id}/publish`)); message.success('题卡已发布，可以导出打印稿') }
       else message.success('草稿已保存')
       await Promise.all([templates.reload(), groups.reload()])
     } catch (e) { message.error((e as Error).message) }
@@ -87,17 +94,18 @@ export function TemplateEditor({ groupId }: { groupId?: string }) {
     <Form.Item label="准考证号位数"><InputNumber min={1} max={readOnly&&value.print_style!=='standard-v2'?20:11} value={value.candidate_length} onChange={length => change({ candidate_length: length || 9 })} /></Form.Item>
     <Form.Item label="内置须知"><Select value={value.notice_template||'none'} options={[{label:'标准模板 · 考生禁填、注意事项与填涂样例',value:'standard-v1'},{label:'不添加',value:'none'}]} onChange={notice_template=>change({notice_template})}/><Text type="secondary">标准模板保留条形码核对及错区扣分说明；扣分文字用于印刷说明，不自动扣分。</Text></Form.Item>
     <Upload disabled={readOnly} accept="image/*" showUploadList={false} beforeUpload={async file => { const data = new FormData(); data.append('file', file); try { const asset = await request<Row>('/assets', { method: 'POST', body: data }); change({ background_assets: { ...value.background_assets, [String(page)]: asset.id } }); message.success('当前面底图已导入') } catch (e) { message.error((e as Error).message) } return false }}><Button disabled={readOnly || saving}>导入当前面题卡底图</Button></Upload>
-  </Form><div className="library-actions"><TemplateLibrary value={value} dirty={dirty} groupId={groupId} onCreated={async template => { await Promise.all([templates.reload(), groups.reload()]); load(template) }} /></div></div>
+  </Form><div className="library-actions"><TemplateLibrary disabled={saving||saver.saving} value={value} dirty={dirty||(!saved.some(t=>t.id===value.id)&&!saver.savedAt)} groupId={groupId} onCreated={async template => { await Promise.all([templates.reload(), groups.reload()]); load(template) }} /></div></div>
   const subjective = value.questions.filter(q => q.type === 'subjective').sort((a, b) => a.number - b.number)
   return <div className="template-workspace">
     <ErrorNotice error={templates.error || groups.error} retry={() => { void templates.reload(); void groups.reload() }} />
     <Card className="template-action-bar"><div className="template-actions">
-      <Space wrap><Select className="template-select" showSearch optionFilterProp="label" placeholder="选择版式草稿" value={value.id || undefined} options={saved.map(t => ({ label: `${t.name} · ${t.status === 'published' ? '已发布' : '草稿'}`, value: t.id }))} onChange={id => { const item = saved.find(t => t.id === id); if (item) load(item) }} /><Dropdown menu={{ items: [
+      <Space wrap><Select disabled={saving||saver.saving} className="template-select" showSearch optionFilterProp="label" placeholder="选择版式草稿" value={value.id || undefined} options={[...saved.filter(t=>t.id!==value.id),value].map(t => ({ label: `${t.name} · ${t.status === 'published' ? '已发布' : '草稿'}`, value: t.id }))} onChange={id => { const item = saved.find(t => t.id === id); if (item) load(item) }} /><Dropdown menu={{ items: [
         { key: 'new', label: '新建版式草稿', disabled:!!official, icon: <PlusOutlined />, onClick: () => load(emptyTemplate(groupId)) },
-        { key: 'copy', label: '复制为新草稿', icon: <CopyOutlined />, disabled: !value.id||!!official, onClick: () => load({ ...structuredClone(value), id: '', name: `${value.name}（副本）`, status: 'draft', revision: 0, layout_version:3, sheet_columns:value.paper==='A3'?(value.sheet_columns||2):1, notice_template:value.notice_template||'standard-v1', print_style:'standard-v2', forbidden_regions:value.forbidden_regions||[], group_id: groupId || value.group_id, questions: value.questions.map(q => ({ ...q, id: crypto.randomUUID() })) }) },
-      ] }}><Button>题卡操作</Button></Dropdown></Space>
-      <Space wrap><Text type="secondary">{value.questions.length} 题 · {total} 分</Text><Tag color={readOnly ? 'green' : dirty ? 'orange' : 'default'}>{readOnly ? '已发布' : dirty ? '未保存' : '草稿'}</Tag><Button icon={<SaveOutlined />} disabled={readOnly || saving} loading={saveAction === 'save'} onClick={() => save()}>保存草稿</Button><Button type="primary" disabled={readOnly || saving || !!official} loading={saveAction === 'publish'} onClick={() => modal.confirm({ title: '审查并发布题卡？', content: '发布后该题卡使用此正式版式。答案与评分规则可通过影响预览及复核调整。', onOk: () => save(true) })}>审查发布</Button>{readOnly&&<ScoringChanges template={value} onSaved={async()=>{const next=await request<Template[]>('/templates');const t=next.find(t=>t.id===value.id);if(t)load(t);await templates.reload();await groups.reload()}}/>}<Button icon={<DownloadOutlined />} disabled={!value.id || dirty || !readOnly} aria-label="导出打印PDF" onClick={async () => { try { await download(`/templates/${value.id}/pdf`, `${value.name}.pdf`) } catch (e) { message.error((e as Error).message) } }}>打印稿</Button></Space>
+        { key: 'copy', label: '复制为新草稿', icon: <CopyOutlined />, disabled: !value.id||!!official, onClick: () => load({ ...structuredClone(value), id: crypto.randomUUID(), draft_version:0, name: `${value.name}（副本）`, status: 'draft', revision: 0, layout_version:3, sheet_columns:value.paper==='A3'?(value.sheet_columns||2):1, notice_template:value.notice_template||'standard-v1', print_style:'standard-v2', forbidden_regions:value.forbidden_regions||[], group_id: groupId || value.group_id, questions: value.questions.map(q => ({ ...q, id: crypto.randomUUID() })) }) },
+      ] }}><Button disabled={saving||saver.saving}>题卡操作</Button></Dropdown></Space>
+      <Space wrap><Text type="secondary">{value.questions.length} 题 · {total} 分</Text><Tag color={readOnly ? 'green' : dirty ? 'orange' : 'default'}>{readOnly ? '已发布' : saver.saving ? '正在保存…' : saver.error ? '保存失败' : dirty ? '等待自动保存' : saver.savedAt ? '已保存 '+new Date(saver.savedAt).toLocaleTimeString() : '草稿'}</Tag><Button icon={<SaveOutlined />} disabled={readOnly || saving} loading={saveAction === 'save'} onClick={() => save()}>保存草稿</Button><Button type="primary" disabled={readOnly || saving || !!official} loading={saveAction === 'publish'} onClick={() => modal.confirm({ title: '审查并发布题卡？', content: '发布后该题卡使用此正式版式。答案与评分规则可通过影响预览及复核调整。', onOk: () => save(true) })}>审查发布</Button>{readOnly&&<ScoringChanges template={value} onSaved={async()=>{const next=await request<Template[]>('/templates');const t=next.find(t=>t.id===value.id);if(t)load(t);await templates.reload();await groups.reload()}}/>}<Button icon={<DownloadOutlined />} disabled={!value.id || dirty || !readOnly} aria-label="导出打印PDF" onClick={async () => { try { await download(`/templates/${value.id}/pdf`, `${value.name}.pdf`) } catch (e) { message.error((e as Error).message) } }}>打印稿</Button></Space>
     </div></Card>
+    {saver.error&&<Alert type="error" showIcon message="草稿未保存" description={saver.error} action={<Space><Button onClick={()=>void saver.flush().catch(()=>{})}>重试保存</Button><Button onClick={()=>modal.confirm({title:"重新载入服务器草稿？",content:"当前未保存的修改将被替换。",onOk:async()=>{const rows=await request<Template[]>('/templates');const latest=rows.find(t=>t.id===value.id);if(!latest)throw new Error("服务器尚无该草稿，请重试保存");saver.load(editableCopy(latest));await templates.reload()}})}>重新载入</Button></Space>}/>}
     <div className="template-workbench">
       <Card className="template-config"><Tabs activeKey={pane} onChange={key=>{setPane(key);setForbiddenMode(false);setAnswerMode(key==='objective')}} items={[
         { key: 'setup', label: '题卡设置', children: setup },

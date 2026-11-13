@@ -3,7 +3,7 @@ import { Alert, App, Descriptions, Empty, Form, Input, Modal, Radio, Select, Spa
 import { Button } from './Button'
 import { send, useResource, type Row, type Template } from './api'
 
-export function TemplateLibrary({value,dirty,onCreated,groupId}:{value:Template;dirty:boolean;onCreated:(template:Template)=>void|Promise<void>;groupId?:string}) {
+export function TemplateLibrary({value,dirty,onCreated,groupId,disabled=false}:{value:Template;dirty:boolean;onCreated:(template:Template)=>void|Promise<void>;groupId?:string;disabled?:boolean}) {
   const library=useResource<Row[]>('/template-library',[]),groups=useResource<Row[]>('/groups',[]),subjects=useResource<Row[]>('/subjects',[]),projects=useResource<Row[]>('/projects',[])
   const [saveOpen,setSaveOpen]=useState(false),[useOpen,setUseOpen]=useState(false),[pending,setPending]=useState(''),[selected,setSelected]=useState(''),[target,setTarget]=useState('group'),[saveForm]=Form.useForm(),[useForm]=Form.useForm()
   const busy=!!pending
@@ -11,8 +11,8 @@ export function TemplateLibrary({value,dirty,onCreated,groupId}:{value:Template;
   async function save(values:Record<string,string>){if(busy)return;setPending('save');try{await send(`/templates/${value.id}/save-to-library`,values);await library.reload();setSaveOpen(false);message.success('版式快照已保存到题卡库')}catch(e){message.error((e as Error).message)}finally{setPending('')}}
   async function create(values:Record<string,string>){if(busy)return;setPending('create');try{const created=await send<Template>(`/template-library/${values.entry_id}/instantiate`,{...(groupId?{group_id:groupId}:target==='group'?{group_id:values.group_id}:{subject_id:values.subject_id}),...(values.name?.trim()?{name:values.name.trim()}:{})});setUseOpen(false);await onCreated(created);message.success('已从题卡库建立新草稿')}catch(e){message.error((e as Error).message)}finally{setPending('')}}
   return <>
-    <Button disabled={!!groupId&&!!groups.data.find(g=>g.id===groupId)?.template_id} onClick={()=>{setUseOpen(true);void library.reload();void groups.reload();void subjects.reload();void projects.reload()}}>从题卡库创建</Button>
-    <Button disabled={!value.id||dirty} onClick={()=>{saveForm.setFieldsValue({name:value.name,description:''});setSaveOpen(true)}}>存入题卡库</Button>
+    <Button disabled={disabled||!!groupId&&!!groups.data.find(g=>g.id===groupId)?.template_id} onClick={()=>{setUseOpen(true);void library.reload();void groups.reload();void subjects.reload();void projects.reload()}}>从题卡库创建</Button>
+    <Button disabled={disabled||!value.id||dirty} onClick={()=>{saveForm.setFieldsValue({name:value.name,description:''});setSaveOpen(true)}}>存入题卡库</Button>
     <Modal title="存入题卡库" open={saveOpen} onCancel={()=>!busy&&setSaveOpen(false)} onOk={()=>saveForm.submit()} confirmLoading={pending==='save'}>
       <Alert type="info" message="保存当前已同步的版式快照，之后可用于其他考试。" style={{marginBottom:16}}/>
       <Form form={saveForm} layout="vertical" onFinish={save}><Form.Item name="name" label="库内名称" rules={[{required:true,whitespace:true}]}><Input maxLength={100}/></Form.Item><Form.Item name="description" label="适用说明"><Input.TextArea rows={3} maxLength={2000}/></Form.Item></Form>

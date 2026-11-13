@@ -278,7 +278,9 @@ def edit_template(identifier:str,body:dict,current=Depends(admin)):
         db.execute('BEGIN IMMEDIATE')
         old=require(db,identifier,'templates')
         if old['status']=='published': raise HTTPException(409,'已发布版式不能直接编辑，请复制新题卡')
-        body={**old,**body,'id':identifier,'group_id':old['group_id'],'status':'draft','revision':old['revision'],'layout_version':3}
+        if body.get('draft_version',0)!=old.get('draft_version',0):raise HTTPException(409,'草稿已更新，请重新载入后编辑')
+        body={**old,**body,'id':identifier,'group_id':old['group_id'],'status':'draft','revision':old['revision'],'layout_version':3,'draft_version':old.get('draft_version',0)+1}
+        body.pop('draft_request_id',None);body.pop('draft_signature',None)
         body.setdefault('notice_template','standard-v1')
         from .sheet_style import defaults
         defaults(body)

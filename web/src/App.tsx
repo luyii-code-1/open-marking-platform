@@ -68,7 +68,7 @@ export function App() {
     { key: 'account', icon: <SettingOutlined />, label: '个人账号' },
   ]
   const title = items.flatMap(i => 'children' in i ? i.children || [] : [i]).find(i => i.key === page)?.label || '工作概览'
-  return <><SessionActivity token={authToken}/><ReviewWorkspace key={`${user.id}:${authToken}`} user={user} offline={offlineAccess} onVerified={acceptUser} onLoginRequired={endSession}>{page === 'marking' && location.templateId && location.questionId ? <main className="review-fullscreen"><Marking key={`${location.templateId}:${location.questionId}`} admin={false} initialTemplateId={location.templateId} initialQuestionId={location.questionId} onExit={() => navigate('#/marking')} /></main> : <Layout className="app-shell">
+  return <><SessionActivity token={authToken}/><ReviewWorkspace key={`${user.id}:${authToken}`} user={user} offline={offlineAccess} onVerified={acceptUser} onLoginRequired={endSession}>{page === 'marking' && location.templateId && location.questionId ? <main className="review-fullscreen"><Marking key={`${location.templateId}:${location.questionId}`} admin={false} initialTemplateId={location.templateId} initialQuestionId={location.questionId} onExit={() => navigate('#/marking')} /></main> : page==='exams'&&location.groupId&&location.section==='template' ? <main className="template-fullscreen"><Exams location={location} navigate={navigate}/></main> : <Layout className="app-shell">
     <Layout.Sider width={200} collapsedWidth={64} collapsed={collapsed} className="sidebar" breakpoint="lg" onBreakpoint={broken => setCollapsed(broken)}>
       <Brand compact={collapsed} />
       <Menu theme="light" mode="inline" items={items} selectedKeys={[page]} onClick={({ key }) => setPage(key)} />

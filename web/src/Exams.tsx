@@ -22,7 +22,9 @@ export function Exams({location,navigate}:{location:ExamLocation;navigate:(path:
   const projects=useResource<Row[]>('/projects',[]),subjects=useResource<Row[]>('/subjects',[]),groups=useResource<Row[]>('/groups',[]),grades=useResource<Row[]>('/grades',[])
   const ready=projects.loaded&&subjects.loaded&&groups.loaded&&grades.loaded
   const {project,subject,group,invalid}=resolveExam(location,projects.data,subjects.data,groups.data)
-  const go=(value:ExamLocation)=>navigate(examPath(value))
+  const returnKey='omp-designer-return:'+location.groupId
+  const go=(value:ExamLocation)=>{if(value.section==='template'&&location.section!=='template')sessionStorage.setItem(returnKey,JSON.stringify({location,scrollY:window.scrollY}));navigate(examPath(value))}
+  useEffect(()=>{if(!ready||location.section==='template')return;try{const stored=JSON.parse(sessionStorage.getItem(returnKey)||'null');if(stored&&examPath(stored.location)===examPath(location)){requestAnimationFrame(()=>window.scrollTo(0,stored.scrollY));sessionStorage.removeItem(returnKey)}}catch{}},[ready,location])
   const gradeId=location.gradeId,grade=subject?subjectGrades(subject,groups.data,grades.data).find(g=>g.id===gradeId):undefined
   const base={projectId:project?.id,subjectId:subject?.id,gradeId,groupId:group?.id}
   const error=projects.error||subjects.error||groups.error||grades.error
@@ -38,6 +40,7 @@ export function Exams({location,navigate}:{location:ExamLocation;navigate:(path:
     ...subject?[{title:<a href={examPath({projectId:project!.id,subjectId:subject.id})}>{subject.name}</a>}]:[],
     ...grade?[{title:<a href={examPath({projectId:project!.id,subjectId:subject!.id,gradeId})}>{grade.name}</a>}]:[],
     ...group?[{title:cardName(group,subject)}]:[]]
+  if(group&&location.section==='template')return <div className="template-design-page"><header className="template-context"><Button icon={<ArrowLeftOutlined/>} onClick={()=>{let target:ExamLocation={...base,section:'overview'};try{const saved=JSON.parse(sessionStorage.getItem(returnKey)||'null');if(saved?.location?.groupId===group.id&&saved.location.section!=='template')target=saved.location}catch{}go(target)}}>返回工作台</Button><Breadcrumb items={[...crumbs,{title:'题卡设计'}]}/></header><TemplateEditor key={group.id} groupId={group.id}/></div>
   const children=groups.data.filter(g=>g.subject_id===subject?.id&&(g.grade_id||unassignedGrade)===gradeId)
   const enterCard=(row:Row)=>go({...base,groupId:row.id})
   const cardColumns=[
@@ -92,7 +95,7 @@ function SubjectGrades({subject,groups,grades,onEnter,refresh}:{subject:Row;grou
   </Card>
 }
 function GroupWorkspace({group,project,section,onSection,onRooms}:{group:Row;project:Row;section:string;onSection:(section:string)=>void;onRooms:()=>void}){
-  return <Tabs activeKey={section} onChange={onSection} items={groupSections.map(([key,label])=>({key,label,children:
+  return <Tabs activeKey={section} onChange={onSection} tabBarExtraContent={<Button onClick={()=>onSection('template')}>题卡设计</Button>} items={groupSections.filter(([key])=>key!=='template').map(([key,label])=>({key,label,children:
     key==='overview'?<GroupOverview group={group} onSection={onSection}/>:
     (key==='scans'||key==='marking')&&!group.template_id?<Card><Empty description={key==='scans'?'发布题卡后即可建立扫描批次':'发布题卡后即可分配教师与阅卷'}><Button type="primary" onClick={()=>onSection('template')}>设计题卡</Button></Empty></Card>:
     key==='template'?<TemplateEditor groupId={group.id}/>:key==='roster'?<Roster groupId={group.id}/>:
