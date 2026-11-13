@@ -33,10 +33,10 @@ export function Marking({ admin, groupId, initialTemplateId, initialQuestionId, 
   function refocusScore(){requestAnimationFrame(()=>{if(!overlayOpen)focusScoreInput(scoreRef.current)})}
   useLayoutEffect(()=>{
     const page=pageRef.current;if(!page)return
-    const resize=()=>page.style.setProperty('--marking-height',`${Math.max(360,window.innerHeight-page.getBoundingClientRect().top-12)}px`)
-    resize();window.addEventListener('resize',resize)
+    const resize=()=>page.style.setProperty('--marking-height',`${Math.max(240,(window.visualViewport?.height??window.innerHeight)-page.getBoundingClientRect().top-12)}px`)
+    resize();window.addEventListener('resize',resize);window.visualViewport?.addEventListener('resize',resize)
     const observer=new ResizeObserver(resize);if(page.parentElement)observer.observe(page.parentElement)
-    return()=>{window.removeEventListener('resize',resize);observer.disconnect()}
+    return()=>{window.removeEventListener('resize',resize);window.visualViewport?.removeEventListener('resize',resize);observer.disconnect()}
   },[])
   useEffect(()=>{if(!editable||overlayOpen)return;const frame=requestAnimationFrame(()=>focusScoreInput(scoreRef.current));return()=>cancelAnimationFrame(frame)},[task?.id,editable,overlayOpen])
   useUnsavedChanges(saveState==='正在保存本地草稿'||saveState==='本地保存失败')
@@ -168,7 +168,7 @@ export function Marking({ admin, groupId, initialTemplateId, initialQuestionId, 
             <Button icon={<ArrowLeftOutlined/>} disabled={locked||workspace.offline||record?.status==='queued'||record?.status==='conflict'} loading={action.pending==='previous'} onClick={previous}>上一份</Button>
             <Button icon={<ArrowRightOutlined/>} disabled={locked||workspace.offline||record?.status==='queued'||record?.status==='conflict'} loading={action.pending==='skip'} onClick={()=>record?.status==='confirmed'?next():skip()}>下一份</Button>
           </div>
-          <div className="marking-report-actions">{(['exception','excellent'] as const).map(kind=><Button size="small" type="text" key={kind} disabled={workspace.offline||locked} onClick={()=>Modal.confirm({title:kind==='exception'?'报告异常卷':'标记优秀卷',content:'将当前作答交由管理员查看。',afterClose:refocusScore,onOk:async()=>{await send(`/tasks/${task.id}/report`,{kind,reason:''});message.success('已报告')}})}>{kind==='exception'?'报告异常卷':'标记优秀卷'}</Button>)}</div>
+
         </div>
       </aside>
     </main>:<div className="marking-empty"><Empty description={onExit?(busy||templateResource.loading?"正在加载作答":"当前没有可领取的作答"):"选择题目，进入阅卷"}>{onExit&&<Space><Button disabled={!question||locked||workspace.offline} onClick={next}>重新领取</Button><Button onClick={onExit}>返回任务列表</Button></Space>}</Empty></div>}
@@ -188,6 +188,7 @@ export function Marking({ admin, groupId, initialTemplateId, initialQuestionId, 
     </Drawer>
     <Drawer title="阅卷设置" width={360} open={settingsOpen} onClose={()=>setSettingsOpen(false)}>
       <Space direction="vertical" size={20} style={{width:'100%'}}><label>评分步进 <InputNumber aria-label="评分步进" min={.01} max={10} value={step} onChange={n=>setStep(n||.5)}/></label><Typography.Text type="secondary">预设分值只填入给分框，按 Enter 或“评分”后提交。</Typography.Text>
+      {task&&question&&<div className="marking-report-actions">{(['exception','excellent'] as const).map(kind=><Button size="small" type="text" key={kind} disabled={workspace.offline||locked} onClick={()=>Modal.confirm({title:kind==='exception'?'报告异常卷':'标记优秀卷',content:'将当前作答交由管理员查看。',afterClose:refocusScore,onOk:async()=>{await send(`/tasks/${task.id}/report`,{kind,reason:''});message.success('已报告')}})}>{kind==='exception'?'报告异常卷':'标记优秀卷'}</Button>)}</div>}
       {admin&&<Button disabled={!question||workspace.offline||locked} onClick={()=>{const existing=assignments.data.find(a=>a.question_id===questionId);assignForm.setFieldsValue({user_ids:existing?.user_ids||[],weights:existing?.weights||{},arbitration_mode:existing?.arbitration_mode||(existing?.arbitrator_ids?.length?'designated_random':'random'),arbitrator_ids:existing?.arbitrator_ids||[]});setSettingsOpen(false);setAssignOpen(true)}}>分配本题教师</Button>}</Space>
     </Drawer>
     <Modal title="分配本题教师" open={assignOpen} onCancel={() => setAssignOpen(false)} onOk={() => assignForm.submit()}><Form form={assignForm} layout="vertical" onFinish={async values => { try { await send('/assignments', { ...values,weights:Object.fromEntries((values.user_ids as string[]).map(id=>[id,values.weights?.[id]??1])),arbitrator_ids:values.arbitration_mode==='random'?[]:values.arbitrator_ids||[], template_id: templateId, question_id: questionId }); setAssignOpen(false); await assignments.reload(); await progress.reload(); message.success('任务分配已保存') } catch (e) { message.error((e as Error).message) } }}><Form.Item name="user_ids" label="阅卷教师" rules={[{ required: true }]}><Select mode="multiple" options={users.data.map(u => ({ label: u.name, value: u.id }))} /></Form.Item>{selectedTeachers.map(id=><Form.Item key={id} name={['weights',id]} label={`${users.data.find(u=>u.id===id)?.name||id} · 分配权重`}><InputNumber min={0} max={255} placeholder="1" /></Form.Item>)}{question?.review_mode==='double'&&<><Form.Item name="arbitration_mode" label="仲裁方式"><Select options={[{label:'从阅卷教师中随机选取',value:'random'},{label:'从指定教师中随机选取',value:'designated_random'},{label:'固定仲裁教师',value:'fixed'}]}/></Form.Item>{arbitrationMode!=='random'&&<Form.Item name="arbitrator_ids" label="仲裁教师" rules={[{required:true,message:'请选择仲裁教师'}]}><Select mode="multiple" maxCount={arbitrationMode==='fixed'?1:undefined} options={users.data.map(u=>({label:u.name,value:u.id}))}/></Form.Item>}</>}</Form><Alert type="info" message="权重默认1，0表示暂停普通评阅。任务按比例分配；同一作答的双评与仲裁由不同教师完成。" /></Modal>
