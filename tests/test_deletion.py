@@ -1,3 +1,4 @@
+from workflow_helpers import close_scanning
 import hashlib
 import io
 import json
@@ -68,6 +69,7 @@ def populated(tmp_path, monkeypatch):
         post(client, f"scan-batches/{batch['id']}/pair", None, headers)
         task = post(client, 'tasks/claim', {'template_id': template['id'], 'question_id': question['id']}, teacher_headers)
         post(client, f"tasks/{task['id']}/score", {'score': 8, 'idempotency_key': 'initial-score'}, teacher_headers)
+        close_scanning(client,group['id'],headers)
         post(client, 'results/publish', {'group_id': group['id']}, headers)
         archive = post(client, f"projects/{project['id']}/archive", None, headers)
         release = post(client, f"projects/{project['id']}/release-preview", {'archive_id': archive['id'], 'mode': 'local'}, headers)

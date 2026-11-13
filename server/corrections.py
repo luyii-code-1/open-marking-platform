@@ -132,6 +132,7 @@ def reopen(identifier:str,body:dict,current=Depends(admin)):
         subject=database.get(db,group.get('subject_id'),'subjects')
         project=database.get(db,(subject or {}).get('project_id'),'projects')
         if (project or {}).get('storage_operation',{}).get('until',0)>time.time():raise HTTPException(409,'项目正在处理扫描文件，请完成后再复核')
+        group.pop('scan_close',None)
         group.update(frozen=False,reopen_reason=body['reason'],reopened_at=time.time())
         return put(db,'groups',group,current['id'])
 
@@ -178,7 +179,7 @@ def mark_absent(identifier:str,body:dict,current=Depends(admin)):
         student=snapshot(db,student)
         template=require(db,group.get('template_id'),'templates')
         if any(s['group_id']==identifier and s['student_id']==student['id'] for s in objects(db,'submissions')): raise HTTPException(409,'该考生已有答卷记录')
-        return put(db,'submissions',{'group_id':identifier,'template_id':template['id'],'student_id':student['id'],'candidate_number':student['candidate_number'],'student_snapshot':student,'pages':[],'status':'absent','reason':body['reason']},current['id'])
+        raise HTTPException(409,'未扫描学生保留未扫描状态，请扫描已填涂缺考标记的题卡')
 
 
 @router.post('/submissions/{identifier}/attach-pages')
@@ -216,6 +217,7 @@ def correct_attendance(identifier:str,body:dict,current=Depends(admin)):
         if group.get('frozen'):raise HTTPException(409,'成绩已冻结，请先发起复核')
         template=require(db,submission['template_id'],'templates')
         status='absent' if body['absent'] else 'ready'
+        if body['absent'] and not submission.get('pages'):raise HTTPException(409,'请先扫描题卡后核对缺考标记')
         if not body['absent']:
             if len(submission['pages'])!=template['sides'] or any(require(db,p,'pages')['status']!='recognized' for p in submission['pages']):raise HTTPException(409,'恢复实考需先补齐可识读的完整答卷')
         if submission['status']==status:return submission

@@ -45,20 +45,20 @@ export function Exams({location,navigate}:{location:ExamLocation;navigate:(path:
     {title:'版式',render:(_:unknown,row:Row)=>row.template_id?'已发布':'待设计'},
     {title:'应考名单',render:(_:unknown,row:Row)=>row.roster_mode==='selected'?'指定名单':row.grade_id?'年级全体':'待设置'},
     {title:'成绩',render:(_:unknown,row:Row)=><Tag color={row.frozen?'green':'default'}>{row.frozen?'已发布':'未发布'}</Tag>},
-    {title:'操作',className:'row-actions',render:(_:unknown,row:Row)=><Space><CardGrade group={row} grades={grades.data} onSaved={async()=>{await refresh();go({projectId:project!.id,subjectId:subject!.id})}}/><HierarchyDelete kind="groups" target={row} onDeleted={refresh}/></Space>},
+    {title:'操作',className:'row-actions',render:(_:unknown,row:Row)=><Space><Rename kind="groups" row={row} refresh={refresh}/><CardGrade group={row} grades={grades.data} onSaved={async()=>{await refresh();go({projectId:project!.id,subjectId:subject!.id})}}/><HierarchyDelete kind="groups" target={row} onDeleted={refresh}/></Space>},
   ]
   return <div className="exam-workspace"><ErrorNotice error={error} retry={refresh}/><Breadcrumb items={crumbs}/>
     {project&&<div className="workspace-heading"><Space align="start"><Button icon={<ArrowLeftOutlined/>} aria-label={group?'返回题卡列表':grade?'返回年级列表':subject?'返回科目列表':'返回考试项目'} onClick={()=>go(back)}/><div><Title level={3}>{group?cardName(group,subject):grade?.name||subject?.name||project.name}</Title><Text type="secondary">{group?`${subject!.name} · ${grade?.name} · ${group.frozen?'成绩已发布':'成绩未发布'}`:grade?`${children.length} 份题卡`:subject?`${subjectGrades(subject,groups.data).length} 个年级`:`${subjects.data.filter(s=>s.project_id===project.id).length} 门科目`}</Text></div></Space>{!grade||group?<HierarchyDelete kind={group?'groups':subject?'subjects':'projects'} target={group||subject||project} onDeleted={async()=>{navigate(examPath(back),true);await refresh()}}/>:null}</div>}
     {!project?<EntityTable path="/projects" title="考试项目" fields={[{name:'name',label:'考试名称'}]} resource={projects} onEnter={row=>go({projectId:row.id})} onCreated={async row=>{await refresh();if(row)go({projectId:row.id})}} columns={[
       {title:'考试名称',dataIndex:'name',render:(name:string,row:Row)=><a href={examPath({projectId:row.id})}>{name}</a>},
       {title:'科目',render:(_:unknown,row:Row)=>`${subjects.data.filter(s=>s.project_id===row.id).length} 门`},
-      {title:'操作',className:'row-actions',render:(_:unknown,row:Row)=><HierarchyDelete kind="projects" target={row} onDeleted={refresh}/>},
+      {title:'操作',className:'row-actions',render:(_:unknown,row:Row)=><Space><Rename kind="projects" row={row} refresh={refresh}/><HierarchyDelete kind="projects" target={row} onDeleted={refresh}/></Space>},
     ]}/>:group?<GroupWorkspace key={group.id} group={group} project={project} section={location.section||'overview'} onSection={section=>go({...base,section})} onRooms={()=>go({projectId:project.id,section:'rooms'})}/>:grade?grade.id===unassignedGrade?<Card title="待设置年级的题卡"><Table rowKey="id" dataSource={children} columns={cardColumns} onRow={row=>rowNavigation(()=>enterCard(row),cardName(row,subject))}/></Card>:<EntityTable key={subject!.id+grade.id} path="/groups" title="题卡" resource={groups} allowImport={false} scope={{subject_id:subject!.id,grade_id:grade.id}} fields={[{name:'name',label:'题卡名称'}]} onEnter={enterCard} onCreated={async row=>{await refresh();if(row)enterCard(row)}} columns={cardColumns}/>:subject?<SubjectGrades subject={subject} groups={groups.data} grades={grades.data} onEnter={id=>go({...base,gradeId:id})} refresh={refresh}/>:<Tabs activeKey={location.section||'subjects'} onChange={section=>go({projectId:project.id,section})} items={[
       {key:'subjects',label:'科目',children:<EntityTable key={project.id} path="/subjects" title="科目" resource={subjects} scope={{project_id:project.id}} fields={[{name:'name',label:'科目名称'}]} onEnter={row=>go({projectId:project.id,subjectId:row.id})} onCreated={async row=>{await refresh();if(row)go({projectId:project.id,subjectId:row.id})}} columns={[
         {title:'科目名称',dataIndex:'name',render:(name:string,row:Row)=><a href={examPath({projectId:project.id,subjectId:row.id})}>{name}</a>},
         {title:'年级',render:(_:unknown,row:Row)=>`${subjectGrades(row,groups.data).length} 个`},
         {title:'题卡',render:(_:unknown,row:Row)=>`${groups.data.filter(g=>g.subject_id===row.id).length} 份`},
-        {title:'操作',className:'row-actions',render:(_:unknown,row:Row)=><HierarchyDelete kind="subjects" target={row} onDeleted={refresh}/>},
+        {title:'操作',className:'row-actions',render:(_:unknown,row:Row)=><Space><Rename kind="subjects" row={row} refresh={refresh}/><HierarchyDelete kind="subjects" target={row} onDeleted={refresh}/></Space>},
       ]}/>},
       {key:'rooms',label:'考场设置',children:<RoomTagManager projectId={project.id}/>},
       {key:'summary',label:'跨科成绩',children:<Results admin projectId={project.id} projectOnly/>},
@@ -66,6 +66,10 @@ export function Exams({location,navigate}:{location:ExamLocation;navigate:(path:
       {key:'archives',label:'归档与释放',children:<ArchiveManager projectId={project.id}/>},
     ]}/>}
   </div>
+}
+function Rename({kind,row,refresh}:{kind:string;row:Row;refresh:()=>Promise<void>}){
+  const [open,setOpen]=useState(false),[name,setName]=useState(''),[busy,setBusy]=useState(false),{message}=App.useApp()
+  return <><Button type="link" onClick={()=>{setName(row.name);setOpen(true)}}>编辑</Button><Modal title="编辑名称" open={open} onCancel={()=>!busy&&setOpen(false)} confirmLoading={busy} okButtonProps={{disabled:!name.trim()}} onOk={async()=>{setBusy(true);try{await send(`/${kind}/${row.id}/name`,{name},'PUT');setOpen(false);await refresh()}catch(e){message.error((e as Error).message)}finally{setBusy(false)}}}><Input value={name} onChange={e=>setName(e.target.value)} maxLength={100}/></Modal></>
 }
 function CardGrade({group,grades,onSaved}:{group:Row;grades:Row[];onSaved:()=>Promise<void>}){
   const [open,setOpen]=useState(false),[busy,setBusy]=useState(false),[form]=Form.useForm(),{message}=App.useApp()
@@ -97,15 +101,17 @@ function GroupWorkspace({group,project,section,onSection,onRooms}:{group:Row;pro
   }))}/>
 }
 function GroupOverview({group,onSection}:{group:Row;onSection:(section:string)=>void}){
+  const workflow=useResource<Row>(`/groups/${group.id}/workflow`,{} as Row)
   const templates=useResource<Template[]>('/templates',[]),roster=useResource<any>(`/groups/${group.id}/roster`,null)
   const template=templates.data.find(t=>t.id===group.template_id),drafts=templates.data.filter(t=>t.group_id===group.id&&t.status==='draft')
   const entries=[
     {key:'template',label:'题卡设计',detail:template?`${template.name} · 已发布`:drafts.length?`${drafts.length} 份草稿待发布`:'创建或从题卡库选用版式'},
     {key:'roster',label:'应考名单',detail:roster.data?.configured?`${roster.data.students.length} 名学生 · ${roster.data.mode==='selected'?'指定名单':'年级全体'}`:'设置年级或导入名单'},
-    {key:'scans',label:'扫描与补扫',detail:'按考场查看批次、页面与配对情况'},
-    {key:'marking',label:'阅卷',detail:'分配教师、评阅作答与查看进度'},
-    {key:'exceptions',label:'异常核查',detail:'核查识别与评阅中的待处理事项'},
+    {key:'scans',label:'扫描与补扫',detail:workflow.data.group_id?`考场预期 ${workflow.data.room_expected} 人 · 已入库实考 ${workflow.data.scanned} 人 · ${workflow.data.open_batches} 个批次待完成`:'按考场查看批次、页面与配对情况'},
+    {key:'marking',label:'阅卷',detail:workflow.data.results?`${workflow.data.results.pending} 份答卷待结分`:'分配教师、评阅作答与查看进度'},
+    {key:'exceptions',label:'异常核查',detail:workflow.data.group_id?`${workflow.data.open_exceptions} 项待核查`:'核查识别与评阅中的待处理事项'},
     {key:'results',label:'成绩',detail:group.frozen?'成绩已发布':'检查统计并确认发布'},
   ]
-  return <><ErrorNotice error={templates.error||roster.error}/><div className="group-work-grid">{entries.map(item=><button type="button" className="workspace-entry" key={item.key} onClick={()=>onSection(item.key)}><span className="workspace-entry-title">{item.label}<RightOutlined/></span><span className="workspace-entry-detail">{item.detail}</span></button>)}</div></>
+  const w=workflow.data,next=!group.template_id?'template':w.roster_needs_review?'roster':w.open_exceptions?'exceptions':(w.open_batches||!w.scan_closed)?'scans':w.results?.pending?'marking':'results'
+  return <><ErrorNotice error={templates.error||roster.error||workflow.error}/>{w.group_id&&!group.frozen&&<Card title="当前待办" style={{marginBottom:24}}><Space><Text>{entries.find(e=>e.key===next)?.detail}</Text><Button type="primary" onClick={()=>onSection(next)}>{next==='roster'?'核对应考名单':entries.find(e=>e.key===next)?.label}</Button></Space></Card>}<div className="group-work-grid">{entries.map(item=><button type="button" className="workspace-entry" key={item.key} onClick={()=>onSection(item.key)}><span className="workspace-entry-title">{item.label}<RightOutlined/></span><span className="workspace-entry-detail">{item.detail}</span></button>)}</div></>
 }

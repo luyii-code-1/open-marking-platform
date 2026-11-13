@@ -20,7 +20,9 @@ def test_empty_absence_can_attach_complete_rescan_without_duplicate_pairing(tmp_
             front=db.put(connection,'pages',{'batch_id':batch['id'],'side':'front','sequence':1,'status':'recognized','candidate_number':'001','selections':{q['id']:['A']}})
             back=db.put(connection,'pages',{'batch_id':batch['id'],'side':'back','sequence':1,'status':'recognized'})
             wrong=db.put(connection,'pages',{'batch_id':batch['id'],'side':'front','sequence':2,'status':'recognized','candidate_number':'002','excluded':True})
-        absent=client.post(f"/api/v1/groups/{group['id']}/absent",json={'student_id':student['id'],'reason':'先前登记缺考'},headers=headers).json()
+        # Historical manual absences remain recoverable by attaching scanned pages.
+        with db.connect() as connection:
+            absent=db.put(connection,'submissions',{'group_id':group['id'],'template_id':template['id'],'student_id':student['id'],'candidate_number':student['candidate_number'],'student_snapshot':student,'pages':[],'status':'absent'})
         path=f"/api/v1/submissions/{absent['id']}"
         assert client.put(path+'/attendance',json={'absent':False,'reason':'学生实际到场'},headers=headers).status_code==409
         assert client.post(path+'/attach-pages',json={'page_ids':[front['id']],'reason':'补扫'},headers=headers).status_code==422

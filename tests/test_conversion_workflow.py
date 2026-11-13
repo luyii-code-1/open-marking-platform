@@ -1,3 +1,4 @@
+from workflow_helpers import close_scanning
 import json
 import zipfile
 from uuid import uuid4
@@ -64,6 +65,7 @@ def test_conversion_import_edit_coverage_publish_snapshot_and_revision_guard(tmp
         assert client.put(f"/api/v1/score-conversions/{saved['id']}",json=edit,headers=headers).status_code==409
         rows=client.get('/api/v1/results',params={'group_id':group['id']},headers=headers).json()
         assert [r.get('converted_score') for r in rows]==[75,0,None]
+        close_scanning(client,group['id'],headers)
         published=client.post('/api/v1/results/publish',json={'group_id':group['id'],'force_unscanned':True,'reason':'先发布已完成成绩'},headers=headers)
         assert published.status_code==200,published.text
         assert published.json()['conversion_snapshot']['revision']==2

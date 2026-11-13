@@ -1,3 +1,4 @@
+from workflow_helpers import close_scanning
 from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
@@ -112,7 +113,10 @@ def test_live_teacher_scope_and_unscanned_force_publication(school):
     account={'username':'teacher','password':'teacher-password-long','name':'教师','role':'teacher'}
     teacher=f['post']('users',account);auth={'Authorization':'Bearer '+f['client'].post('/api/v1/auth/login',json=account).json()['token']}
     r('PUT','classes/'+f['cls']['id'],{'teacher_ids':[teacher['id']]})
+    r('GET','groups/'+group['id']+'/workflow',status=403,auth=auth)
+    r('POST','groups/'+group['id']+'/scan-close',{'confirm':True},403,auth=auth)
     r('POST','results/publish',{'group_id':group['id']},409)
+    close_scanning(f['client'],group['id'],f['headers'])
     r('POST','results/publish',{'group_id':group['id'],'force_unscanned':True,'reason':'选科未参加'})
     rows=r('GET','results?group_id='+group['id'],auth=auth)
     assert sum(v['status']=='unscanned' and v['total'] is None for v in rows)==2
@@ -142,3 +146,66 @@ def test_existing_group_can_explicitly_adopt_grade_membership(school):
     changed=r('PUT','groups/'+group['id']+'/grade',{'grade_id':f['grade']['id']})
     assert changed['grade_id']==f['grade']['id']
     assert len(r('GET','groups/'+group['id']+'/roster')['students'])==3
+
+def test_workflow_membership_changes_and_capture_progress(school):
+    f=school;r=f['request'];group=f['groups'][0];base='groups/'+group['id']
+    first=r('GET',base+'/workflow')
+    assert first['roster_count']==3 and first['room_expected']==2 and first['roster_needs_review']
+    r('POST',base+'/roster/review',{'student_ids':[]},409)
+    r('POST',base+'/roster/review',{'student_ids':[s['id'] for s in f['students']]})
+    assert not r('GET',base+'/workflow')['roster_needs_review']
+    batch,page,_=f['pair'](f['students'][0])
+    r('PUT','students/'+f['students'][0]['id'],{'class_id':f['other_cls']['id']})
+    changes=r('GET',base+'/roster/changes')
+    assert len(changes['removed'])==1 and len(changes['retained'])==1 and changes['needs_review']
+    newcomer=f['post']('students',{'name':'新生','candidate_number':'000000004','class_id':f['cls']['id']})
+    assert r('GET',base+'/roster/changes')['added'][0]['id']==newcomer['id']
+    state=r('GET',base+'/workflow')
+    assert state['batches'][0]['received_pages']==1 and state['batches'][0]['linked_pages']==1
+    assert next(b for b in r('GET','scan-batches') if b['id']==batch['id'])['linked_pages']==1
+    assert state['results']['completed']==1 and state['scanned']==1
+    with db.connect() as connection:
+        db.put(connection,'submissions',{'group_id':group['id'],'student_id':f['students'][1]['id'],'status':'absent','pages':[],'room_tags':[f['rooms'][0]],'template_id':f['templates'][0]['id'],'candidate_number':f['students'][1]['candidate_number']})
+    room=r('GET','room-tags?group_id='+group['id'])[0]
+    assert room['scanned_students']==1 and room['confirmed_absent']==1 and room['remaining_students']==0
+
+def test_scan_close_publication_and_absent_mark_remain_distinct(school):
+    f=school;r=f['request'];g=f['groups'][0];base='groups/'+g['id'];t=f['templates'][0]
+    batch,page,_=f['pair'](f['students'][0])
+    # A scanned attendance mark, rather than the expected headcount, establishes absence.
+    second=f['post']('scan-batches',{'group_id':g['id'],'room_tag_ids':[f['rooms'][0]['id']]})
+    with db.connect() as c:
+        db.put(c,'pages',{'batch_id':second['id'],'side':'front','sequence':1,'status':'recognized','candidate_number':f['students'][1]['candidate_number'],'absent_mark':True,'selections':{}})
+    f['post']('scan-batches/'+second['id']+'/pair')
+    state=r('GET',base+'/workflow');assert state['results']['absent']==1 and state['results']['unscanned']==1
+    r('POST',base+'/scan-close',{'confirm':True,'signature':state['scan_signature']},409)
+    r('POST',base+'/roster/review',{'student_ids':[s['id'] for s in f['students']]})
+    state=r('GET',base+'/workflow');r('POST',base+'/scan-close',{'confirm':True,'signature':state['scan_signature']})
+    r('POST','results/publish',{'group_id':g['id']},409)
+    r('POST','results/publish',{'group_id':g['id'],'force_unscanned':True,'reason':'缺页已登记'})
+    rows=r('GET','results?group_id='+g['id']);assert sorted(x['status'] for x in rows)==['absent','completed','unscanned']
+    assert next(x for x in rows if x['status']=='unscanned')['total'] is None
+    r('POST',base+'/reopen',{'reason':'补扫核查'})
+    assert not r('GET',base+'/workflow')['scan_closed']
+    state=r('GET',base+'/workflow')
+    f['post']('students',{'name':'新生','candidate_number':'000000005','class_id':f['cls']['id']})
+    r('POST',base+'/scan-close',{'confirm':True,'signature':state['scan_signature']},409)
+
+
+def test_official_layout_and_scoring_impact(school):
+    f=school;r=f['request'];g=f['groups'][0];t=f['templates'][0];base='groups/'+g['id']
+    r('POST','templates',{'group_id':g['id'],'name':'第二版式','paper':'A4','sides':1},409)
+    f['pair'](f['students'][0])
+    close_scanning(f['client'],g['id'],f['headers'])
+    r('POST','results/publish',{'group_id':g['id'],'force_unscanned':True,'reason':'核对后发布'})
+    q=t['questions'][0];body={'questions':[{'id':q['id'],'answer':['B'],'rule':{'mode':'exact'}}]}
+    preview=r('POST','templates/'+t['id']+'/scoring-preview',body)
+    assert preview['published'] and preview['changed_scores']==1 and preview['rows'][0]['before']==2 and preview['rows'][0]['after']==0
+    r('PUT','templates/'+t['id']+'/scoring',{**body,'confirm':True,'reason':'修订答案','preview_sha':'stale'},409)
+    applied=r('PUT','templates/'+t['id']+'/scoring',{**body,'confirm':True,'reason':'修订答案','preview_sha':preview['preview_sha']})
+    assert applied['scoring_revision']==2 and not r('GET',base+'/workflow')['published']
+    assert r('GET','results?group_id='+g['id'])[0]['total']==0
+    r('POST','templates/'+t['id']+'/scoring-preview',{'questions':[{'id':q['id'],'points':100}]},422)
+    empty=f['post']('scan-batches',{'group_id':g['id'],'room_tag_ids':[f['rooms'][0]['id']]})
+    r('POST','scan-batches/'+empty['id']+'/finish-empty',{'confirm':True})
+    assert next(b for b in r('GET','scan-batches') if b['id']==empty['id'])['completed_empty']

@@ -1,3 +1,4 @@
+import {CardWorkflow} from './CardWorkflow'
 import {useEffect,useState} from 'react'
 import {App,Card,Empty,Form,Input,InputNumber,Modal,Popconfirm,Select,Space,Statistic,Table,Tag,Typography,Upload} from 'antd'
 import {ArrowLeftOutlined,PlusOutlined,ReloadOutlined,UploadOutlined} from '@ant-design/icons'
@@ -17,14 +18,15 @@ export function ScanCapture({groupId}:{groupId?:string}){
   const selected=batches.data.find(b=>b.id===selectedId),pages=useResource<Row[]>(selectedId?`/scan-batches/${selectedId}/pages`:null,[])
   const [side,setSide]=useState('front'),[sequence,setSequence]=useState(1),[preview,setPreview]=useState<Row|null>(null),[form]=Form.useForm()
   const formGroup=Form.useWatch('group_id',form),currentGroup=groups.data.find(g=>g.id===group),createGroup=groups.data.find(g=>g.id===(groupId||formGroup))
+  const workflow=useResource<Row>(group?`/groups/${group}/workflow`:null,{} as Row),templates=useResource<Row[]>('/templates',[])
   const rooms=useResource<Row[]>(group?`/room-tags?group_id=${group}`:null,[])
   const pageRows=pages.data.filter(p=>p.batch_id===selectedId)
   const selectedGroup=groups.data.find(g=>g.id===selected?.group_id),readOnly=!!selectedGroup?.frozen||selected?.status==='paired'||selected?.status==='frozen'
-  const rows=batches.data.filter(b=>(!group||b.group_id===group)&&(!roomTag||b.room_tags?.some((t:Row)=>t.id===roomTag))&&(!status||b.status===status))
+  const rows=batches.data.map(b=>({...b,...workflow.data.batches?.find((v:Row)=>v.id===b.id)})).filter(b=>(!group||b.group_id===group)&&(!roomTag||b.room_tags?.some((t:Row)=>t.id===roomTag))&&(!status||b.status===status))
   const label=(id:string)=>{const g=groups.data.find(g=>g.id===id),s=subjects.data.find(s=>s.id===g?.subject_id);return g?[s?.name,g.grade_name,cardName(g,s)].filter(Boolean).join(' / '):'题卡不可用'}
   useEffect(()=>{if(!pages.loading)setSequence(Math.max(0,...pageRows.filter(p=>p.side===side).map(p=>p.sequence))+1)},[selectedId,side,pages.data,pages.loading])
   async function create(value:object){setSaving(true);try{const batch=await send<Row>('/scan-batches',{...value,...groupId?{group_id:groupId}:{}});await batches.reload();setSelected(batch.id);setCreating(false)}catch(e){message.error((e as Error).message)}finally{setSaving(false)}}
-  async function pair(){setSaving(true);try{await send(`/scan-batches/${selectedId}/pair`);await Promise.all([pages.reload(),batches.reload(),rooms.reload()]);message.success('配对已确认，答卷已入库')}catch(e){message.error((e as Error).message)}finally{setSaving(false)}}
+  async function pair(){setSaving(true);try{await send(`/scan-batches/${selectedId}/pair`);await Promise.all([pages.reload(),batches.reload(),rooms.reload(),workflow.reload()]);message.success('配对已确认，答卷已入库')}catch(e){message.error((e as Error).message)}finally{setSaving(false)}}
   async function upload(file:File){
     const body=new FormData();body.append('file',file);body.append('capture_id',crypto.randomUUID());body.append('side',side);body.append('sequence',String(sequence));setSaving(true)
     try{await request(`/scan-batches/${selectedId}/pages`,{method:'POST',body});await pages.reload();message.success('页面已上传')}catch(e){message.error((e as Error).message)}finally{setSaving(false)}
@@ -36,13 +38,18 @@ export function ScanCapture({groupId}:{groupId?:string}){
       <div className="scan-filters">{!groupId&&<HierarchyPicker value={chosenGroup} allowClear onChange={id=>{setGroup(id);setRoomTag(undefined)}}/>}<RoomTagPicker groupId={group} value={roomTag} onChange={setRoomTag}/><Select allowClear placeholder="全部状态" value={status} onChange={setStatus} style={{width:150}} options={['front','frozen','paired'].map(value=>({value,label:describeStatus(value)}))}/></div>
       {group&&rooms.data.length>0&&<div className="stat-grid compact"><Statistic title="考场" value={rooms.data.filter(r=>!r.archived).length}/><Statistic title="预期人数" value={rooms.data.filter(r=>!r.archived&&(!roomTag||r.id===roomTag)).reduce((n,r)=>n+(r.expected_students||0),0)}/><Statistic title="已确认实考" value={rooms.data.filter(r=>!roomTag||r.id===roomTag).reduce((n,r)=>n+(r.scanned_students||0),0)}/></div>}
       <Table rowKey="id" dataSource={rows} loading={batches.loading} onRow={row=>rowNavigation(()=>setSelected(row.id),`批次${row.id.slice(0,8)}`)} pagination={{defaultPageSize:10,showSizeChanger:true}} scroll={{x:'max-content'}} columns={[
-        {title:'批次',dataIndex:'id',render:id=><Typography.Text code>{id.slice(0,8)}</Typography.Text>},
+        {title:'批次',dataIndex:'id',render:id=><Button type="link" onClick={()=>setSelected(id)}>{id.slice(0,8)}</Button>},
         ...!groupId?[{title:'题卡',dataIndex:'group_id',render:label}]:[],
         {title:'年级－考场',render:(_:unknown,row:Row)=><RoomTagBadges tags={row.room_tags}/>},
         {title:'考场备注',dataIndex:'room',render:v=>v||'—'},
-        {title:'状态',dataIndex:'status',render:v=><Tag>{describeStatus(v)}</Tag>},
+        {title:'固定版式',render:(_:unknown,row:Row)=>{const t=templates.data.find(t=>t.id===row.template_id);return t?.name||'正式版式'}},
+        {title:'服务端已接收',dataIndex:'received_pages',render:v=>v===undefined?'—':`${v} 页`},
+        {title:'识读中 / 异常',render:(_:unknown,row:Row)=>row.processing_pages===undefined?'—':`${row.processing_pages} / ${row.exception_pages}`},
+        {title:'已入库页数',dataIndex:'linked_pages',render:v=>v??'—'},
+        {title:'批次状态',dataIndex:'status',render:v=><Tag>{v==='paired'?'已完成':v==='frozen'?'待核查':'接收与配页中'}</Tag>},
+        {title:'操作',className:'row-actions',render:(_:unknown,row:Row)=><Button onClick={()=>setSelected(row.id)}>{row.status==='paired'?'查看记录':row.status==='frozen'?'查看异常':'续扫 / 配页'}</Button>},
       ]}/>
-    </Card>:<Card title={<Space><Button icon={<ArrowLeftOutlined/>} disabled={saving} onClick={()=>setSelected('')}>批次列表</Button><span>批次 {selected.id.slice(0,8)}</span><Tag>{describeStatus(selected.status)}</Tag></Space>} extra={<Space><Button onClick={()=>{void pages.reload();void batches.reload()}}>刷新页面</Button><Popconfirm title="确认本批次页面数量与正反面顺序正确？" description="按本批次题卡和考场配对并关联考生。" onConfirm={pair}><Button type="primary" disabled={readOnly||!pageRows.length} loading={saving}>确认配对并入库</Button></Popconfirm></Space>}>
+    </Card>:<Card title={<Space><Button icon={<ArrowLeftOutlined/>} disabled={saving} onClick={()=>setSelected('')}>批次列表</Button><span>批次 {selected.id.slice(0,8)}</span><Tag>{describeStatus(selected.status)}</Tag></Space>} extra={<Space><Button onClick={()=>{void pages.reload();void batches.reload()}}>刷新页面</Button><Popconfirm title="确认本批次页面数量与正反面顺序正确？" description="按本批次题卡和考场配对并关联考生。" onConfirm={pair}><Button type="primary" disabled={readOnly||!pageRows.length} loading={saving}>确认配对并入库</Button></Popconfirm>{!readOnly&&!pageRows.length&&<Popconfirm title="结束此空批次？" description="确认本地没有待上传页面。" onConfirm={async()=>{try{await send(`/scan-batches/${selectedId}/finish-empty`,{confirm:true});await batches.reload()}catch(e){message.error((e as Error).message)}}}><Button>结束空批次</Button></Popconfirm>}</Space>}>
       <Space direction="vertical" size={24} style={{width:'100%'}}>
         <Space wrap><Typography.Text>{label(selected.group_id)}</Typography.Text><RoomTagBadges tags={selected.room_tags}/><Typography.Text type="secondary">背面{selected.back_order==='reverse'?'逆序':'同序'}</Typography.Text></Space>
         <ErrorNotice error={pages.error} retry={pages.reload}/>
@@ -51,6 +58,7 @@ export function ScanCapture({groupId}:{groupId?:string}){
         <Table rowKey="id" dataSource={pageRows} loading={pages.loading} columns={[{title:'面',dataIndex:'side',render:v=>v==='back'?'背面':'正面'},{title:'序号',dataIndex:'sequence'},{title:'准考证号',dataIndex:'candidate_number'},{title:'状态',dataIndex:'status',render:v=><Tag>{describeStatus(v)}</Tag>},{title:'原图',render:(_,row)=><Button onClick={()=>setPreview(row)}>查看原图</Button>}]}/>
       </Space>
     </Card>}
+    {group&&<CardWorkflow key={group} groupId={group} onSaved={workflow.reload}/>}
     <Modal title="新建扫描批次" open={creating} onCancel={()=>!saving&&setCreating(false)} onOk={()=>form.submit()} confirmLoading={saving} okText="创建批次"><Form form={form} layout="vertical" onFinish={create}>
       {!groupId&&<Form.Item name="group_id" label="题卡" rules={[{required:true,message:'请选择题卡'}]}><HierarchyPicker onChange={id=>{form.setFieldValue('group_id',id);form.setFieldValue('room_tag_ids',[])}}/></Form.Item>}
       <Form.Item label="年级"><Input readOnly value={createGroup?.grade_name||'待设置'}/></Form.Item>

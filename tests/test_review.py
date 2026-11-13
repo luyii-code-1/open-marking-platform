@@ -19,6 +19,7 @@ def test_double_review_arbitration_idempotency_and_freeze(tmp_path,monkeypatch):
         with db.connect() as connection:
             group=db.put(connection,'groups',{'name':'组'})
             template=db.put(connection,'templates',{'group_id':group['id'],'questions':[{'id':qid,'number':1,'type':'subjective','points':20,'review_mode':'double','threshold':2,'regions':[{'page':1,'x':10,'y':110,'width':100,'height':60}]}]})
+            group['template_id']=template['id'];db.put(connection,'groups',group)
             student=db.put(connection,'students',{'name':'学生','class_id':'class','candidate_number':'001'})
             db.put(connection,'submissions',{'group_id':group['id'],'template_id':template['id'],'student_id':student['id'],'candidate_number':'001','pages':[],'status':'ready'})
             db.put(connection,'assignments',{'template_id':template['id'],'question_id':qid,'user_ids':[t[0]['id'] for t in teachers]})

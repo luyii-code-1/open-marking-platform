@@ -1,3 +1,4 @@
+from workflow_helpers import close_scanning
 import csv
 import io
 import time
@@ -38,6 +39,7 @@ def test_roster_unscanned_force_publication_and_class_privacy(tmp_path,monkeypat
         assert [r['total'] for r in result]==[8,None,None]
         assert client.post('/api/v1/results/publish',json={'group_id':group['id']},headers=admin).status_code==409
         assert client.post('/api/v1/results/publish',json={'group_id':group['id'],'force_unscanned':True},headers=admin).status_code==422
+        close_scanning(client,group['id'],admin)
         published=client.post('/api/v1/results/publish',json={'group_id':group['id'],'force_unscanned':True,'reason':'缺页已单独登记，先发布已有成绩'},headers=admin)
         assert published.status_code==200,published.text
         assert published.json()['published_unscanned_count']==2
@@ -61,9 +63,9 @@ def test_roster_unscanned_force_publication_and_class_privacy(tmp_path,monkeypat
         roster=client.get(path,headers=admin).json()
         assert roster['students'][1]['name']=='学生1' and roster['students'][1]['class_id']==cls1['id']
         absent=client.post(f"/api/v1/groups/{group['id']}/absent",json={'student_id':students[1]['id'],'reason':'核实缺考'},headers=admin)
-        assert absent.status_code==200 and absent.json()['student_snapshot']['class_id']==cls1['id']
+        assert absent.status_code==409
         analysis=client.get('/api/v1/analysis/group',params={'group_id':group['id']},headers=admin).json()
-        assert analysis['summary']['absent']==1 and analysis['summary']['unscanned']==1
+        assert analysis['summary']['absent']==0 and analysis['summary']['unscanned']==2
         with db.connect() as connection:
             event=db.objects(connection,'publication-events')[0]
             assert event['forced_unscanned'] and len(event['unscanned_student_ids'])==2

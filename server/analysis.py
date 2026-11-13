@@ -71,7 +71,7 @@ def analyze(db,group_id,current,metric='raw',include_absent=False,pass_ratio=.6,
     buckets=max(1,(high-low+width-1)//width)
     distribution=[{'lower':(low+i*width)/100,'upper':min(high,low+(i+1)*width)/100,'upper_inclusive':i==buckets-1,'count':0} for i in range(buckets)]
     for value in values:distribution[min(buckets-1,max(0,(cents(value)-low)//width))]['count']+=1
-    return {'room_tag_id':room_tag_id,'group_id':group_id,'group_name':group['name'],'roster_configured':bool(group.get('roster_id')),'metric':metric,'full_score':maximum,'include_absent':include_absent,'pass_ratio':pass_ratio,'excellent_ratio':excellent_ratio,'rank_scope':'group' if current['role'] in ('admin','manager') else 'assigned_classes','summary':summarize(rows),'classes':by_class,'questions':questions,'distribution':distribution,'students':ranked}
+    return {'room_tag_id':room_tag_id,'group_id':group_id,'group_name':group['name'],'roster_configured':bool(group.get('roster_id') or group.get('grade_id')),'metric':metric,'full_score':maximum,'include_absent':include_absent,'pass_ratio':pass_ratio,'excellent_ratio':excellent_ratio,'rank_scope':'group' if current['role'] in ('admin','manager') else 'assigned_classes','summary':summarize(rows),'classes':by_class,'questions':questions,'distribution':distribution,'students':ranked}
 
 
 @router.get('/analysis/group')

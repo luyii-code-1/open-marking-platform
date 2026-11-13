@@ -146,7 +146,8 @@ def list_route(kind):
                 values=[{**v,'grade_name':grades.get(v.get('grade_id'),'')} for v in values]
             if kind=='scan-batches':
                 from .room_tags import view as room_view
-                values=[{**v,'room_tags':room_view(db,v.get('room_tags',[]))} for v in values]
+                from .workflow import batch_progress
+                values=[{**v,'room_tags':room_view(db,v.get('room_tags',[])),**batch_progress(db,v)} for v in values]
             if current['role'] in ('admin','manager'):
                 return values
             if current['role']=='scanner':
@@ -193,6 +194,7 @@ def create_route(kind):
                 from .school import assign_class
                 assign_class(db,value,body,current['id'])
             if kind=='templates':
+                if require(db,value['group_id'],'groups').get('template_id'):raise HTTPException(409,'该题卡已有正式版式，请新建题卡使用其他版式')
                 if value.get('paper') not in ('A3','A4') or value.get('sides') not in (1,2):
                     raise HTTPException(422,'纸型或单双面无效')
                 value.update(revision=0,status='draft',layout_version=3)
@@ -292,7 +294,7 @@ def publish(identifier:str,current=Depends(admin)):
         group=require(db,template['group_id'],'groups')
         if template['status']!='published':
             if group.get('frozen'):raise HTTPException(409,'成绩已冻结，请先发起复核或选择新的题卡组')
-            if group.get('template_id') and group['template_id']!=identifier and (database.find(db,'scan-batches',group_id=group['id']) or database.find(db,'submissions',group_id=group['id'])):raise HTTPException(409,'本组已有扫描批次或答卷，请为新题卡新建题卡组')
+            if group.get('template_id') and group['template_id']!=identifier:raise HTTPException(409,'该题卡已有正式版式，请新建题卡使用其他版式')
         from .template_checks import issues,asset_ids
         errors=issues(template,complete=True)
         if errors:raise HTTPException(422,'；'.join(errors))
@@ -485,6 +487,12 @@ app.include_router(scanner_workbench_router)
 
 from .school import router as school_router
 app.include_router(school_router)
+
+from .scoring_changes import router as scoring_changes_router
+app.include_router(scoring_changes_router)
+
+from .workflow import router as workflow_router
+app.include_router(workflow_router)
 
 web_distribution=Path(__file__).resolve().parents[1]/'web'/'dist'
 if web_distribution.exists():

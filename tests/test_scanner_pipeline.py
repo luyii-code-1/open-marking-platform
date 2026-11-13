@@ -1,3 +1,4 @@
+from workflow_helpers import close_scanning
 import copy
 import hashlib
 import json
@@ -79,6 +80,7 @@ def test_local_pipeline_grading_cuts_archive_release_and_deletion(pipeline,monke
         assert image.shape==(252,400)
     post('tasks/'+task['id']+'/score',{'score':2,'idempotency_key':'local-graded'})
     result=client.get('/api/v1/results',params={'group_id':f['group_id']},headers=headers).json();assert result[0]['total']==5
+    close_scanning(client,f['group_id'],headers)
     post('results/publish',{'group_id':f['group_id']})
     archived=post('projects/'+f['project']['id']+'/archive')
     from server.archive import verify

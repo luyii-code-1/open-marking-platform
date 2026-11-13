@@ -32,7 +32,10 @@ def test_promotion_and_transfer_preserve_exam_class_labels(tmp_path, monkeypatch
         if with_roster:
             client.put(f"/api/v1/groups/{group['id']}/roster", json={'class_ids': [cls['id']]}, headers=headers).raise_for_status()
         client.post(f"/api/v1/scan-batches/{batch['id']}/pair", headers=headers).raise_for_status()
-        client.post(f"/api/v1/groups/{group['id']}/absent", json={'student_id': students[1]['id'], 'reason': '核实缺考'}, headers=headers).raise_for_status()
+        with db.connect() as connection:
+            absent_batch=db.put(connection,'scan-batches',{'group_id':group['id'],'template_id':template['id'],'status':'front'})
+            db.put(connection,'pages',{'batch_id':absent_batch['id'],'side':'front','sequence':1,'candidate_number':'1','status':'recognized','absent_mark':True,'selections':{}})
+        client.post(f"/api/v1/scan-batches/{absent_batch['id']}/pair",headers=headers).raise_for_status()
         with db.connect() as connection:
             for submission in db.find(connection, 'submissions', group_id=group['id']):
                 assert submission['student_snapshot']['class_name'] == '高一一班'

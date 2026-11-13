@@ -22,6 +22,7 @@ def seed(count, mode='single'):
         group=db.put(connection,'groups',{'name':'组'})
         question={'id':str(uuid.uuid4()),'number':1,'type':'subjective','points':20,'review_mode':mode,'threshold':2,'regions':[{'page':1,'x':10,'y':110,'width':100,'height':60}]}
         template=db.put(connection,'templates',{'group_id':group['id'],'questions':[question]})
+        group['template_id']=template['id'];db.put(connection,'groups',group)
         for i in range(count):
             student=db.put(connection,'students',{'name':f'学生{i}','class_id':'class','candidate_number':str(i)})
             db.put(connection,'submissions',{'group_id':group['id'],'template_id':template['id'],'student_id':student['id'],'candidate_number':str(i),'pages':[],'status':'ready'})

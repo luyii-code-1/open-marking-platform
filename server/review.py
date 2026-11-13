@@ -419,6 +419,9 @@ def publish_results(body:dict,current=Depends(admin)):
         if unscanned and body.get('force_unscanned') is not True:raise HTTPException(409,f'有{len(unscanned)}名应考学生未扫描，可明确确认后强制发布')
         if unscanned and not str(body.get('reason','')).strip():raise HTTPException(422,'请填写强制发布原因')
         group=require(db,group_id,'groups')
+        from .workflow import overview,publication_blockers
+        blockers=publication_blockers(overview(db,group,current))
+        if blockers:raise HTTPException(409,'；'.join(blockers))
         submissions={s['id'] for s in objects(db,'submissions') if s['group_id']==group_id}
         batches={b['id'] for b in objects(db,'scan-batches') if b['group_id']==group_id}
         if db.execute("SELECT 1 FROM regrade_queue r JOIN objects t ON t.id=r.task_id JOIN objects s ON s.id=json_extract(t.body,'$.submission_id') WHERE s.deleted=0 AND json_extract(s.body,'$.group_id')=? LIMIT 1",(group_id,)).fetchone():raise HTTPException(409,'存在尚未完成的重阅任务')

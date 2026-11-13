@@ -1,3 +1,4 @@
+import {ScoringChanges} from './ScoringChanges'
 import { useEffect, useRef, useState } from 'react'
 import { App, Card, Dropdown, Empty, Form, Input, InputNumber, Modal, Radio, Select, Space, Table, Tabs, Tag, Typography, Upload } from 'antd'
 import { Button } from './Button'
@@ -21,6 +22,7 @@ export function TemplateEditor({ groupId }: { groupId?: string }) {
   const [answerMode,setAnswerMode]=useState(true),[forbiddenMode,setForbiddenMode]=useState(false)
   const initialized = useRef(''), { message, modal } = App.useApp()
   const saved = templates.data.filter(t => !groupId || t.group_id === groupId), readOnly = value.status === 'published'
+  const official=groups.data.find(g=>g.id===(groupId||value.group_id))?.template_id
   const saving = !!saveAction
   const question = value.questions.find(q => q.id === questionId), total = value.questions.reduce((sum, q) => sum + Number(q.points || 0), 0)
   useUnsavedChanges(dirty)
@@ -90,11 +92,11 @@ export function TemplateEditor({ groupId }: { groupId?: string }) {
   return <div className="template-workspace">
     <ErrorNotice error={templates.error || groups.error} retry={() => { void templates.reload(); void groups.reload() }} />
     <Card className="template-action-bar"><div className="template-actions">
-      <Space wrap><Select className="template-select" showSearch optionFilterProp="label" placeholder="切换题卡" value={value.id || undefined} options={saved.map(t => ({ label: `${t.name} · ${t.status === 'published' ? '已发布' : '草稿'}`, value: t.id }))} onChange={id => { const item = saved.find(t => t.id === id); if (item) load(item) }} /><Dropdown menu={{ items: [
-        { key: 'new', label: '新建题卡', icon: <PlusOutlined />, onClick: () => load(emptyTemplate(groupId)) },
-        { key: 'copy', label: '复制为新草稿', icon: <CopyOutlined />, disabled: !value.id, onClick: () => load({ ...structuredClone(value), id: '', name: `${value.name}（副本）`, status: 'draft', revision: 0, layout_version:3, sheet_columns:value.paper==='A3'?(value.sheet_columns||2):1, notice_template:value.notice_template||'standard-v1', print_style:'standard-v2', forbidden_regions:value.forbidden_regions||[], group_id: groupId || value.group_id, questions: value.questions.map(q => ({ ...q, id: crypto.randomUUID() })) }) },
+      <Space wrap><Select className="template-select" showSearch optionFilterProp="label" placeholder="选择版式草稿" value={value.id || undefined} options={saved.map(t => ({ label: `${t.name} · ${t.status === 'published' ? '已发布' : '草稿'}`, value: t.id }))} onChange={id => { const item = saved.find(t => t.id === id); if (item) load(item) }} /><Dropdown menu={{ items: [
+        { key: 'new', label: '新建版式草稿', disabled:!!official, icon: <PlusOutlined />, onClick: () => load(emptyTemplate(groupId)) },
+        { key: 'copy', label: '复制为新草稿', icon: <CopyOutlined />, disabled: !value.id||!!official, onClick: () => load({ ...structuredClone(value), id: '', name: `${value.name}（副本）`, status: 'draft', revision: 0, layout_version:3, sheet_columns:value.paper==='A3'?(value.sheet_columns||2):1, notice_template:value.notice_template||'standard-v1', print_style:'standard-v2', forbidden_regions:value.forbidden_regions||[], group_id: groupId || value.group_id, questions: value.questions.map(q => ({ ...q, id: crypto.randomUUID() })) }) },
       ] }}><Button>题卡操作</Button></Dropdown></Space>
-      <Space wrap><Text type="secondary">{value.questions.length} 题 · {total} 分</Text><Tag color={readOnly ? 'green' : dirty ? 'orange' : 'default'}>{readOnly ? '已发布' : dirty ? '未保存' : '草稿'}</Tag><Button icon={<SaveOutlined />} disabled={readOnly || saving} loading={saveAction === 'save'} onClick={() => save()}>保存草稿</Button><Button type="primary" disabled={readOnly || saving} loading={saveAction === 'publish'} onClick={() => modal.confirm({ title: '审查并发布题卡？', content: '发布后固定版式与评分定义，后续修改需复制为新草稿。', onOk: () => save(true) })}>审查发布</Button><Button icon={<DownloadOutlined />} disabled={!value.id || dirty || !readOnly} aria-label="导出打印PDF" onClick={async () => { try { await download(`/templates/${value.id}/pdf`, `${value.name}.pdf`) } catch (e) { message.error((e as Error).message) } }}>打印稿</Button></Space>
+      <Space wrap><Text type="secondary">{value.questions.length} 题 · {total} 分</Text><Tag color={readOnly ? 'green' : dirty ? 'orange' : 'default'}>{readOnly ? '已发布' : dirty ? '未保存' : '草稿'}</Tag><Button icon={<SaveOutlined />} disabled={readOnly || saving} loading={saveAction === 'save'} onClick={() => save()}>保存草稿</Button><Button type="primary" disabled={readOnly || saving || !!official} loading={saveAction === 'publish'} onClick={() => modal.confirm({ title: '审查并发布题卡？', content: '发布后该题卡使用此正式版式。答案与评分规则可通过影响预览及复核调整。', onOk: () => save(true) })}>审查发布</Button>{readOnly&&<ScoringChanges template={value} onSaved={async()=>{const next=await request<Template[]>('/templates');const t=next.find(t=>t.id===value.id);if(t)load(t);await templates.reload();await groups.reload()}}/>}<Button icon={<DownloadOutlined />} disabled={!value.id || dirty || !readOnly} aria-label="导出打印PDF" onClick={async () => { try { await download(`/templates/${value.id}/pdf`, `${value.name}.pdf`) } catch (e) { message.error((e as Error).message) } }}>打印稿</Button></Space>
     </div></Card>
     <div className="template-workbench">
       <Card className="template-config"><Tabs activeKey={pane} onChange={key=>{setPane(key);setForbiddenMode(false);setAnswerMode(key==='objective')}} items={[

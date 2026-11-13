@@ -64,6 +64,7 @@ def instantiate(identifier:str,body:dict,current=Depends(admin)):
         entry=require(db,identifier,'template-library')
         group=require(db,body['group_id'],'groups') if body.get('group_id') else default_group(db,body.get('subject_id'),current['id'])
         if group.get('frozen'):raise HTTPException(409,'成绩已冻结，请先发起复核或选择新的题卡组')
+        if group.get('template_id'):raise HTTPException(409,'该题卡已有正式版式，请选择其他题卡')
         definition=deepcopy(entry['definition'])
         name=body.get('name',entry['name'])
         if not isinstance(name,str) or not 1<=len(name.strip())<=100:raise HTTPException(422,'请填写100字以内题卡标题')
