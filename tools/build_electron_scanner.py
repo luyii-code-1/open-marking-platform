@@ -37,6 +37,7 @@ def build(args):
         native=Path(temporary)/'native'
         run([dotnet,'publish',ROOT/'scanner/OMP.Scanner.csproj','-p:ElectronHost=true','-c','Release','-r','win-x64','--self-contained','true','-o',native,'--nologo'])
         assert not any(native.glob('*WebView2*.dll'))
+        run([native/'OMP.Scanner.Host.exe','--scan-bridge-self-test'],timeout=30)
         recognition=args.recognition.resolve() if args.recognition else None
         if recognition:
             assert (recognition/'OMP.RecognitionWorker.exe').is_file()
@@ -65,7 +66,7 @@ def build(args):
         tracked=subprocess.check_output(['git','-c','core.quotepath=false','ls-files','-z'],cwd=ROOT).decode('utf-8').split('\0')
         paths={Path(name) for name in tracked if name and name.split('/')[0] in ('scanner','scanner_engine','server','web','tools')}
         paths.update(Path('scanner-electron')/name for name in ('package.json','package-lock.json','main.cjs','preload.cjs','policy.cjs','test.cjs','ScannerElectron.iss','README.md'))
-        paths.update([Path('scanner/ElectronHost.cs'),Path('tools/build_electron_scanner.py'),Path('LICENSE'),Path('NOTICE.md')])
+        paths.update([Path('scanner/ElectronHost.cs'),Path('scanner/ScannerBridgeSelfTest.cs'),Path('tools/build_electron_scanner.py'),Path('LICENSE'),Path('NOTICE.md')])
         with ZipFile(publish/'SOURCE.zip','w',ZIP_DEFLATED) as archive:
             for name in sorted(paths):
                 if (ROOT/name).is_file():archive.write(ROOT/name,name.as_posix())

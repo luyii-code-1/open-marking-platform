@@ -18,6 +18,11 @@ public static class ElectronHost
     public static int Main(string[] args)
     {
         Console.InputEncoding=new UTF8Encoding(false);Console.OutputEncoding=new UTF8Encoding(false);
+        if(args.FirstOrDefault()=="--scan-bridge-self-test")
+        {
+            try{ScannerBridgeSelfTest.Run(args.Contains("--discover")).GetAwaiter().GetResult();return 0;}
+            catch(Exception error){Console.Error.WriteLine(error.Message);return 1;}
+        }
         if(args.Length==2&&args[0]=="--parse-activation")
         {
             try{var pairing=PairingActivation.Parse(args[1]);Send(new{server=pairing.Server,code=pairing.Code});return 0;}

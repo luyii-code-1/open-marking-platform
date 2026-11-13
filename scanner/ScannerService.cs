@@ -15,20 +15,40 @@ public sealed class ScannerService : IDisposable
         _controller = new ScanController(_context);
     }
 
-    public Task<List<ScanDevice>> Devices(Driver driver) => _controller.GetDeviceList(driver);
+    private static TwainOptions Twain32Options()=>new()
+    {
+        Dsm=TwainDsm.New,
+        TransferMode=TwainTransferMode.Native,
+        ShowProgress=false,
+        IncludeWiaDevices=false,
+    };
+
+    internal static ScanOptions DiscoveryOptions(Driver driver)=>new()
+    {
+        Driver=driver,
+        TwainOptions=Twain32Options(),
+    };
+
+    public Task<List<ScanDevice>> Devices(Driver driver) => _controller.GetDeviceList(DiscoveryOptions(driver));
+
+    internal static ScanOptions CaptureOptions(ScanDevice device,string paper,bool feeder,bool duplex)=>new()
+    {
+        Device=device,
+        Driver=device.Driver,
+        Dpi=device.Driver==Driver.Twain?200:300,
+        PageSize=paper=="A3"?PageSize.A3:PageSize.A4,
+        PaperSource=duplex?PaperSource.Duplex:feeder?PaperSource.Feeder:PaperSource.Flatbed,
+        BitDepth=BitDepth.Grayscale,
+        UseNativeUI=false,
+        TwainOptions=Twain32Options(),
+        ExcludeBlankPages=false,
+        AutoDeskew=false,
+        MaxQuality=true,
+    };
 
     public async Task Acquire(ScanDevice device, string paper, bool feeder, Func<System.Drawing.Image, Task> receive, CancellationToken cancel, bool duplex = false)
     {
-        var options = new ScanOptions
-        {
-            Device = device, Dpi = 300,
-            PageSize = paper == "A3" ? PageSize.A3 : PageSize.A4,
-            PaperSource = duplex ? PaperSource.Duplex : feeder ? PaperSource.Feeder : PaperSource.Flatbed,
-            BitDepth = BitDepth.Grayscale,
-            ExcludeBlankPages = false,
-            AutoDeskew = false,
-            MaxQuality = true,
-        };
+        var options = CaptureOptions(device,paper,feeder,duplex);
         await foreach (var scanned in _controller.Scan(options, cancel))
         {
             using (scanned)
