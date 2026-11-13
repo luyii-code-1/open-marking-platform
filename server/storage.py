@@ -1,6 +1,8 @@
 import os
 import hashlib
 import json
+import time
+import threading
 from uuid import uuid4
 import posixpath
 from pathlib import PurePosixPath
@@ -137,7 +139,7 @@ class Storage:
                     chunks.append(chunk)
         data=b''.join(chunks)
         with Image.open(io.BytesIO(data)) as image:
-            if image.size!=(w,h):raise ValueError('媒体裁切未生效')
+            if image.size!=(w,h):raise ValueError(f'媒体裁切未生效：预期 {w}×{h}，返回 {image.width}×{image.height}')
             image.load()
         return data
     def delete(self,key):
@@ -164,16 +166,43 @@ def for_reference(reference):
     return provider
 
 
+_media_cooldowns={}
+_media_lock=threading.Lock()
+
+
+def media_cooldown_key(provider):
+    return (provider.connection_id,provider.location(),provider.settings.get('media_url'),provider.settings.get('revision',0))
+
+
+def media_available(provider):
+    now=time.monotonic()
+    with _media_lock:
+        for key,until in list(_media_cooldowns.items()):
+            if until<=now:del _media_cooldowns[key]
+        return media_cooldown_key(provider) not in _media_cooldowns
+
+
+def media_failed(provider):
+    with _media_lock:
+        if len(_media_cooldowns)>=128:_media_cooldowns.pop(next(iter(_media_cooldowns)))
+        _media_cooldowns[media_cooldown_key(provider)]=time.monotonic()+60
+
+
 def remote_piece(relative,region):
+    # Reuse a locally available corrected page before contacting a beta service.
+    if local_path(relative).is_file():return None
     with connect() as db:
         expected=expected_hash(db,relative)
         references=[r for r in find(db,'storage-assets',relative=relative) if r['status']=='stored' and r.get('sha256')==expected and expected]
     for reference in references:
         try:
             provider=for_reference(reference)
-            if not provider.settings.get('media_enabled'):continue
+            if not provider.settings.get('media_enabled') or not media_available(provider):continue
             x,y,w,h=(region[k]*4 for k in ('x','y','width','height'))
-            return provider.fetch_crop(reference['key'],(int(x),int(y),int(x+w)-int(x),int(y+h)-int(y)))
+            try:return provider.fetch_crop(reference['key'],(int(x),int(y),int(x+w)-int(x),int(y+h)-int(y)))
+            except Exception:
+                media_failed(provider)
+                continue
         except Exception:continue
     return None
 

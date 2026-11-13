@@ -151,3 +151,31 @@ def test_signed_media_request_binds_rect_and_rejects_ignored_transform(tmp_path,
     with Image.open(io.BytesIO(result)) as image:assert image.size==(30,20)
     query=parse_qs(requests[0].url.query.decode())
     assert query['rect']==['10,20,30,20'] and query['fmt']==['png'] and 'X-Amz-Signature' in query
+
+
+def test_media_local_priority_failure_cooldown_and_config_refresh(configured,monkeypatch):
+    client,headers,project,page,task,template,content,*_=configured
+    value=connection();value['media_enabled']=True;saved=add(client,headers,value)
+    client.put(f"/api/v1/projects/{project['id']}/storage",headers=headers,json={'connection_id':saved['id']})
+    relative='pages/'+page['id']+'.png'
+    with db.connect() as c:
+        row=db.get(c,page['id']);row['normalized_sha256']=hashlib.sha256(content).hexdigest();db.put(c,'pages',row)
+    storage.mirror(relative,project['id'])
+    called=[]
+    def failure(self,*args,**kwargs):called.append(1);raise ValueError('Media failed')
+    monkeypatch.setattr(storage.Storage,'fetch_crop',failure)
+    region=template['questions'][0]['regions'][0]
+    assert storage.remote_piece(relative,region) is None and not called
+    storage.local_path(relative).unlink()
+    clock=[100.0];monkeypatch.setattr(storage.time,'monotonic',lambda:clock[0])
+    assert storage.remote_piece(relative,region) is None and len(called)==1
+    assert storage.remote_piece(relative,region) is None and len(called)==1
+    with db.connect() as c:
+        row=db.get(c,saved['id']);row['revision']+=1;db.put(c,'storage-connections',row)
+    assert storage.remote_piece(relative,region) is None and len(called)==2
+    clock[0]+=61
+    assert storage.remote_piece(relative,region) is None and len(called)==3
+    # The authenticated endpoint still recovers the original and returns a usable crop.
+    response=client.get(f"/api/v1/tasks/{task['id']}/image",headers=headers)
+    assert response.status_code==200 and len(called)==3
+    with Image.open(io.BytesIO(response.content)) as image:assert image.size==(400,120)

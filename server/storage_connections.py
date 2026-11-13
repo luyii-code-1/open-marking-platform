@@ -142,7 +142,7 @@ def probe(value,media=False):
     key='_connection-tests/'+str(uuid4())+'.png'
     image=Image.new('RGB',(80,60),'white');image.paste((17,97,183),(10,20,40,40))
     buffer=io.BytesIO();image.save(buffer,'PNG');content=buffer.getvalue()
-    client=provider.s3();written=False;phase='write'
+    client=provider.s3();written=False;phase='write';started=time.monotonic()
     result={'checked_at':time.time(),'object_io':'failed','media':'not_tested'}
     try:
         client.put_object(Bucket=provider.bucket,Key=provider.key(key),Body=content,ContentType='image/png');written=True
@@ -152,13 +152,21 @@ def probe(value,media=False):
         finally:response['Body'].close()
         if hashlib.sha256(data).digest()!=hashlib.sha256(content).digest():raise ValueError('Readback mismatch')
         result['object_io']='passed'
+        result['object_io_ms']=round((time.monotonic()-started)*1000)
         if media:
+            media_started=time.monotonic()
             try:
                 data=provider.fetch_crop(key,(10,20,30,20),force=True)
                 with Image.open(io.BytesIO(data)) as cropped:
                     if cropped.size!=(30,20) or cropped.convert('RGB').getpixel((0,0))!=(17,97,183):raise ValueError('Media result mismatch')
                 result['media']='passed'
-            except Exception:result.update(media='unavailable',media_message='媒体处理未返回预期裁切图，将使用服务器裁切')
+            except Exception as error:
+                import httpx
+                detail='媒体处理未返回预期裁切图，将使用服务器裁切'
+                if isinstance(error,ValueError) and str(error).startswith('媒体裁切未生效'):detail=str(error)+'；将使用服务器裁切'
+                result.update(media='unavailable',media_message=detail,media_error_type=type(error).__name__)
+                if isinstance(error,httpx.HTTPStatusError):result['media_http_status']=error.response.status_code
+            finally:result['media_ms']=round((time.monotonic()-media_started)*1000)
     except Exception as error:
         result.update(object_io='failed',stage=phase,error_type=type(error).__name__)
     finally:
