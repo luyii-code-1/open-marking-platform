@@ -1,0 +1,9 @@
+{
+  "name": "omp-scanner-electron",
+  "version": "0.1.0",
+  "private": true,
+  "license": "GPL-3.0-only",
+  "main": "main.cjs",
+  "scripts": { "start": "electron .", "test": "node --test test.cjs" },
+  "devDependencies": { "electron": "45.3.1" }
+}

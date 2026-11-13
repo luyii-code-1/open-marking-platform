@@ -5,6 +5,7 @@ import os
 import secrets
 import time
 from pathlib import Path
+from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 from cryptography.hazmat.primitives import serialization
@@ -23,8 +24,10 @@ def own_devices(current=Depends(admin)):
     with connect() as db:return [public(v) for v in find(db,'scanner-devices',owner_id=current['id'])]
 
 
-def distribution():
+def distribution(variant='webview2'):
+    if variant not in ('webview2','electron'):raise HTTPException(422,'扫描端版本无效')
     root=Path(os.getenv('OMP_SCANNER_DISTRIBUTION',database.ROOT/'scanner-distribution')).resolve()
+    if variant=='electron':root=root/'electron'
     try:
         value=json.loads((root/'release.json').read_text(encoding='utf-8'))
         name=value['file']
@@ -37,16 +40,17 @@ def distribution():
 
 
 @router.get('/distribution')
-def package_info(current=Depends(admin)):
-    try:value,_=distribution()
+def package_info(variant:Literal['webview2','electron']='webview2',current=Depends(admin)):
+    try:value,_=distribution(variant)
     except HTTPException:return {'available':False}
     return {**{k:value[k] for k in ('file','size','sha256','version')},'available':True}
 
 
 @router.post('/download-link')
-def download_link(current=Depends(admin)):
-    value,_=distribution();token=secrets.token_urlsafe(32)
-    with connect() as db:put(db,'scanner-downloads',{'token_hash':hashlib.sha256(token.encode()).hexdigest(),'owner_id':current['id'],'sha256':value['sha256'],'expires_at':time.time()+120},current['id'])
+def download_link(body:dict|None=None,current=Depends(admin)):
+    variant=(body or {}).get('variant','webview2')
+    value,_=distribution(variant);token=secrets.token_urlsafe(32)
+    with connect() as db:put(db,'scanner-downloads',{'token_hash':hashlib.sha256(token.encode()).hexdigest(),'owner_id':current['id'],'variant':variant,'sha256':value['sha256'],'expires_at':time.time()+120},current['id'])
     return {'url':'/api/v1/scanner/download/'+token}
 
 
@@ -56,7 +60,7 @@ def download_package(token:str):
         ticket=next(iter(find(db,'scanner-downloads',token_hash=hashlib.sha256(token.encode()).hexdigest())),None)
         owner=db.execute('SELECT role FROM users WHERE id=?',((ticket or {}).get('owner_id'),)).fetchone()
         if not ticket or ticket['expires_at']<time.time() or not owner or not is_manager(owner):raise HTTPException(403,'下载链接已过期，请重新下载')
-    value,path=distribution()
+    value,path=distribution(ticket.get('variant','webview2'))
     if ticket['sha256']!=value['sha256']:raise HTTPException(409,'安装包版本已更新，请重新下载')
     return FileResponse(path,filename=value['file'],media_type='application/octet-stream',headers={'Cache-Control':'private, no-store','Referrer-Policy':'no-referrer'})
 

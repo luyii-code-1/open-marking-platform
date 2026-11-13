@@ -7,7 +7,7 @@ import { ErrorNotice } from './EntityTable'
 import { Scans } from './Management'
 
 export function ScannerDesk() {
-  const release=useResource<any>('/scanner/distribution',null),devices=useResource<Row[]>('/scanner/my-devices',[]),[pair,setPair]=useState<any>(null),[paired,setPaired]=useState<any>(null),{message}=App.useApp()
+  const release=useResource<any>('/scanner/distribution',null),electron=useResource<any>('/scanner/distribution?variant=electron',null),devices=useResource<Row[]>('/scanner/my-devices',[]),[pair,setPair]=useState<any>(null),[paired,setPaired]=useState<any>(null),{message}=App.useApp()
   const action=useAction()
   useEffect(()=>{
     if(!pair||paired)return
@@ -15,11 +15,11 @@ export function ScannerDesk() {
     return()=>clearInterval(timer)
   },[pair,paired])
   async function create(){await action.run('pair',async()=>{try{setPaired(null);setPair(await send('/scanner/pairings'))}catch(e){message.error((e as Error).message)}})}
-  async function getPackage(){await action.run('download',async()=>{try{const value=await send<{url:string}>('/scanner/download-link');const a=document.createElement('a');a.href=value.url;a.rel='noreferrer';a.click()}catch(e){message.error((e as Error).message)}})}
+  async function getPackage(variant:'webview2'|'electron'='webview2'){await action.run('download:'+variant,async()=>{try{const value=await send<{url:string}>('/scanner/download-link',{variant});const a=document.createElement('a');a.href=value.url;a.rel='noreferrer';a.click()}catch(e){message.error((e as Error).message)}})}
   const uri=pair?'omp-scanner://connect?'+new URLSearchParams({server:window.location.origin,code:pair.code}):''
   return <Space direction="vertical" size={16} style={{width:'100%'}}>
-    <ErrorNotice error={release.error||devices.error} retry={()=>{void release.reload();void devices.reload()}}/>
-    <Card title="扫描客户端"><Space direction="vertical" size={24} style={{width:'100%',maxWidth:680}}><Typography.Text>安装Windows扫描客户端后，将本机连接到当前服务器。</Typography.Text><Space wrap size={16}><Button type="primary" disabled={!release.data?.available||action.busy} loading={action.pending==='download'} onClick={getPackage}>下载Windows安装包{release.data?.available?` · ${Math.round(release.data.size/1024/1024)} MB`:''}</Button><Button onClick={create} disabled={action.busy} loading={action.pending==='pair'}>连接本机扫描端</Button></Space>{release.data&&!release.data.available&&<Typography.Text type="secondary">安装包尚未发布，请联系系统管理员。</Typography.Text>}</Space></Card>
+    <ErrorNotice error={release.error||electron.error||devices.error} retry={()=>{void release.reload();void electron.reload();void devices.reload()}}/>
+    <Card title="扫描客户端"><Space direction="vertical" size={24} style={{width:'100%',maxWidth:680}}><Typography.Text>安装Windows扫描客户端后，将本机连接到当前服务器。</Typography.Text><Space wrap size={16}><Button type="primary" disabled={!release.data?.available||action.busy} loading={action.pending==='download:webview2'} onClick={()=>getPackage()}>下载Windows安装包{release.data?.available?` · ${Math.round(release.data.size/1024/1024)} MB`:''}</Button><Button disabled={!electron.data?.available||action.busy} loading={action.pending==='download:electron'} onClick={()=>getPackage('electron')}>下载Electron兼容版{electron.data?.available?` · ${Math.round(electron.data.size/1024/1024)} MB`:''}</Button><Button onClick={create} disabled={action.busy} loading={action.pending==='pair'}>连接本机扫描端</Button></Space><Typography.Text type="secondary">Electron兼容版自带浏览器内核，可用于未安装WebView2的电脑。两种客户端使用相同的扫描与配对流程。</Typography.Text>{release.data&&!release.data.available&&<Typography.Text type="secondary">安装包尚未发布，请联系系统管理员。</Typography.Text>}</Space></Card>
     <Card title="已授权设备"><Table rowKey="id" dataSource={devices.data} pagination={{defaultPageSize:10}} columns={[{title:'设备',dataIndex:'label'},{title:'授权',render:(_,row)=><Tag color={row.revoked?'default':'green'}>{row.revoked?'已停用':'已授权'}</Tag>},{title:'最近连接',render:(_,row)=>row.last_authenticated_at?new Date(row.last_authenticated_at*1000).toLocaleString():'—'}]}/></Card>
     <Scans/>
     <Modal title="连接扫描客户端" open={!!pair} onCancel={()=>{setPair(null);setPaired(null)}} footer={paired?<Button type="primary" onClick={()=>setPair(null)}>完成</Button>:null}>

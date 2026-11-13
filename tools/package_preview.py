@@ -32,7 +32,8 @@ def source_files():
     for name in ['LICENSE', 'LICENSE.md', 'NOTICE', 'NOTICE.md']:
         if (ROOT / name).is_file():
             yield ROOT / name
-    for folder in ['server', 'web', 'scanner', 'scanner_engine', 'deploy', 'tools', 'tests']:
+    for folder in ['server', 'web', 'scanner', 'scanner-electron', 'scanner_engine', 'deploy', 'tools', 'tests']:
+        if not (ROOT / folder).exists():continue
         for path in sorted((ROOT / folder).rglob('*')):
             relative = path.relative_to(ROOT)
             if any(part in EXCLUDED for part in relative.parts):
