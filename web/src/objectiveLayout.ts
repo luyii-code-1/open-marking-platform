@@ -67,7 +67,7 @@ export function arrangeObjective(template: Template, ids: string[], { columns, s
   const panelWidth = (paperWidth-24-(panels-1)*8)/panels
   const width = Math.floor(((panelWidth - (columns - 1) * gap) / columns) * 10) / 10
   if (target.some(q => width < 12 + (q.options - 1) * 5)) throw new Error('当前题卡栏内放不下选项，请减少客观题列数')
-  const occupied = template.questions.filter(q => !selected.has(q.id)).flatMap(q => q.regions)
+  const occupied = [...template.questions.filter(q => !selected.has(q.id)).flatMap(q => q.regions),...(template.forbidden_regions||[])]
   const slots: Region[] = []
   for (let page = startPage; page <= template.sides && slots.length < target.length; page++) {
     for(let panel=0;panel<panels&&slots.length<target.length;panel++) {

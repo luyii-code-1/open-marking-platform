@@ -30,9 +30,10 @@ def wrap(text, width, size):
 
 def geometry(template):
     from .omr import dimensions,panels
+    from . import sheet_style
     width,_=dimensions(template);count=panels(template)
     panel_width=(width-24-(count-1)*8)/count
-    left=max(70,22+(template.get('candidate_length',8)-1)*6)
+    left=sheet_style.header_geometry(template)['notice_left'] if sheet_style.enabled(template) else max(70,22+(template.get('candidate_length',8)-1)*6)
     return left,12+panel_width-left
 
 
@@ -46,16 +47,18 @@ def fitted_notices(width):
 
 def draw(c,template):
     from .omr import dimensions,absent_position
+    from . import sheet_style
     _,height=dimensions(template);left,width=geometry(template)
     if width<54:raise ValueError('当前考号位数与须知区域冲突，请选择较宽的分栏、减少考号位数或关闭内置须知')
     size,leading,lines=fitted_notices(width)
     ax,ay=absent_position(template)
-    right=left+width;absence_left=72
+    current=sheet_style.enabled(template)
+    right=left+width;absence_left=left if current else 72
     def text(x,y,value,font_size):
         c.setFont(FONT,font_size);c.drawString(x*mm,(height-y)*mm,value)
     def box(x,y,w,h,fill=0):c.rect(x*mm,(height-y-h)*mm,w*mm,h*mm,fill=fill,stroke=1)
     c.saveState();c.setFillGray(0);c.setStrokeGray(0);c.setLineWidth(.18*mm)
-    box(absence_left,35,right-absence_left,14.5)
+    box(absence_left,35,right-absence_left,19 if current else 14.5)
     text(absence_left+2,38.5,'考生禁填',7.5)
     for index,line in enumerate(wrap(ABSENCE,ax-absence_left-8,6)):
         text(absence_left+2,42+index*2.4,line,6)

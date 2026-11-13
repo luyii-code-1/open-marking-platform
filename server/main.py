@@ -185,6 +185,8 @@ def create_route(kind):
                     raise HTTPException(422,'纸型或单双面无效')
                 value.update(revision=0,status='draft',layout_version=3)
                 value.setdefault('notice_template','standard-v1')
+                from .sheet_style import defaults
+                defaults(value)
                 prepare_questions(value)
             if kind=='assignments':
                 template=require(db,value['template_id'],'templates')
@@ -263,6 +265,8 @@ def edit_template(identifier:str,body:dict,current=Depends(admin)):
         if old['status']=='published': raise HTTPException(409,'已发布版式不能直接编辑，请复制新题卡')
         body={**old,**body,'id':identifier,'group_id':old['group_id'],'status':'draft','revision':old['revision'],'layout_version':3}
         body.setdefault('notice_template','standard-v1')
+        from .sheet_style import defaults
+        defaults(body)
         prepare_questions(body)
         return put(db,'templates',body,current['id'])
 

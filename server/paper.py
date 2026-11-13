@@ -11,7 +11,7 @@ from .paper_fonts import FONT
 from reportlab.lib.utils import ImageReader
 from . import db as database
 from .richtext import layout as rich_layout
-from . import sheet_notices
+from . import sheet_notices, sheet_style
 
 from .omr import ABSENT_X, ABSENT_Y, dimensions, code, bubbles, decode, align, manual_align, absent_mark, recognize, manual_binding, panels, absent_position
 
@@ -27,7 +27,8 @@ def validate(template):
     if type(columns) is not int or columns not in ((2,3) if template['paper']=='A3' and manual_binding(template) else (1,)):raise ValueError('A3请选择每面2栏或3栏，A4使用单栏模板')
     panel_width=(w-24-(columns-1)*8)/columns
     if manual_binding(template) and 18+(template.get('candidate_length',8)-1)*6+2>12+panel_width:raise ValueError('准考证号超出首栏，请减少位数或选择较宽的模板')
-    if not isinstance(template.get('candidate_length',8),int) or not 1<=template.get('candidate_length',8)<=20: raise ValueError('准考证号长度应为1至20位')
+    maximum=11 if sheet_style.enabled(template) else 20
+    if type(template.get('candidate_length',8)) is not int or not 1<=template.get('candidate_length',8)<=maximum: raise ValueError(f'准考证号长度应为1至{maximum}位')
     if sheet_notices.enabled(template):
         _,notice_width=sheet_notices.geometry(template)
         if notice_width<54:raise ValueError('当前考号位数与须知区域冲突，请选择较宽的分栏、减少考号位数或关闭内置须知')
@@ -38,7 +39,7 @@ def validate(template):
             if not all(isinstance(region[k],(int,float)) and math.isfinite(region[k]) for k in ('x','y','width','height')): raise ValueError('答题区坐标无效')
             if not 1<=int(region['page'])<=template['sides']:
                 raise ValueError('答题区页码超出题卡范围')
-            if min(region['x'],region['y'])<0 or min(region['width'],region['height'])<=0 or region['x']+region['width']>w-8 or region['y']+region['height']>h-8:
+            if min(region['x'],region['y'])<0 or min(region['width'],region['height'])<=0 or region['x']+region['width']>w-8 or region['y']+region['height']>(270 if sheet_style.enabled(template) else h-8):
                 raise ValueError('答题区超出纸张有效范围')
             reserved=100 if not manual_binding(template) or (region['page']==1 and region['x']<12+panel_width) else 35
             if region['y']<reserved:raise ValueError(f'本栏答题区需从{reserved}毫米开始，保留标题及考号区域')
@@ -62,11 +63,23 @@ def validate(template):
             count=int(question.get('options',4))
             if count not in (3,4,5) or not set(question.get('answer',[]))<=set('ABCDE'[:count]):
                 raise ValueError('选项或标准答案无效')
-
+    areas=template.get('forbidden_regions',[])
+    if not isinstance(areas,list) or len(areas)>100:raise ValueError('禁答区应为不超过100项的区域列表')
+    for area in areas:
+        if not isinstance(area,dict) or not all(type(area.get(k)) in (int,float) and math.isfinite(area[k]) for k in ('x','y','width','height')):raise ValueError('禁答区坐标无效')
+        if type(area.get('page')) is not int or not 1<=area['page']<=template['sides']:raise ValueError('禁答区页码超出题卡范围')
+        if area['width']<10 or area['height']<8 or area['x']<12 or area['x']+area['width']>w-12 or area['y']+area['height']>270:raise ValueError('禁答区超出有效范围或尺寸过小')
+        panel=max(0,min(columns-1,int((area['x']-12+.01)/(panel_width+8))))
+        left=12+panel*(panel_width+8);top=100 if area['page']==1 and panel==0 else 35
+        if area['y']<top or area['x']<left-.01 or area['x']+area['width']>left+panel_width+.01:raise ValueError('禁答区不能覆盖页首或跨越题卡分栏')
+        for other in occupied:
+            if other['page']==area['page'] and area['x']<other['x']+other['width'] and other['x']<area['x']+area['width'] and area['y']<other['y']+other['height'] and other['y']<area['y']+area['height']:raise ValueError('禁答区与已有区域重叠')
+        occupied.append(area)
 
 
 
 def forbidden_regions(template,page):
+    if sheet_style.enabled(template):return [r for r in template.get('forbidden_regions',[]) if r['page']==page]
     if not manual_binding(template):return []
     width,_=dimensions(template);count=panels(template);pw=(width-24-(count-1)*8)/count
     occupied=[r for q in template.get('questions',[]) for r in q.get('regions',[]) if r['page']==page]
@@ -138,7 +151,13 @@ def pdf(template):
             c.setFont(FONT,8 if standard_notices else 9)
             c.drawString(15*mm,(h-(33 if standard_notices else 39))*mm,'姓名：____________  班级：____________  考场：____________')
             if template.get('layout_version',1)>=2:
-                c.drawString(15*mm,(h-46)*mm,'准考证号：')
+                if sheet_style.enabled(template):
+                    header=sheet_style.header_geometry(template)
+                    c.saveState();c.setLineWidth(.18*mm)
+                    c.rect(header['left']*mm,(h-header['bottom'])*mm,(header['right']-header['left'])*mm,(header['bottom']-header['top'])*mm)
+                    c.setFont(FONT,8);c.drawCentredString((header['left']+header['right'])*mm/2,(h-41)*mm,'准考证号')
+                    c.restoreState()
+                else:c.drawString(15*mm,(h-46)*mm,'准考证号：')
                 ax,ay=absent_position(template)
                 if not standard_notices:
                     c.drawString((ax-23)*mm,(h-46)*mm,'缺考标记：')
@@ -147,7 +166,7 @@ def pdf(template):
             else:c.drawString(15*mm,(h-46)*mm,'准考证号：                       缺考标记：□（由监考教师填写）')
             for column in range(int(template.get('candidate_length',8))):
                 x=18+column*6
-                c.rect((x-2)*mm,(h-54)*mm,4*mm,5*mm)
+                c.rect((x-2)*mm,(h-54)*mm,4*mm,(4 if sheet_style.enabled(template) else 5)*mm)
                 for digit in range(10):
                     y=57+digit*3.5
                     c.rect((x-1.6)*mm,(h-y-1.2)*mm,3.2*mm,2.4*mm)
@@ -204,6 +223,17 @@ def pdf(template):
                         try:asset=materialize('assets/'+question['image_asset_id']+'.png')
                         except FileNotFoundError:raise ValueError('题卡插图不存在')
                         c.drawImage(str(asset),(x+3)*mm,(h-y-rh+3)*mm,width=(rw-6)*mm,height=min(rh-12,question.get('image_height',25))*mm,preserveAspectRatio=True,anchor='c',mask='auto')
+        if sheet_style.enabled(template):
+            c.saveState();c.setStrokeGray(.45);c.setLineWidth(.25*mm)
+            for q in template.get('questions',[]):
+                if q['type']!='subjective':continue
+                for r in q['regions']:
+                    if r['page']==page:c.roundRect((r['x']-1)*mm,(h-r['y']-r['height']-1)*mm,(r['width']+2)*mm,(r['height']+2)*mm,2*mm)
+            count=panels(template);pw=(w-24-(count-1)*8)/count
+            size=min(9,(pw-4)*mm/pdfmetrics.stringWidth(sheet_style.FOOTER,FONT,1))
+            c.setFillGray(.25);c.setFont(FONT,size)
+            for panel in range(count):c.drawCentredString((12+panel*(pw+8)+pw/2)*mm,19*mm,sheet_style.FOOTER)
+            c.restoreState()
         for area in forbidden_regions(template,page):
             x,y,rw,rh=(area[k] for k in ('x','y','width','height'))
             c.saveState();c.setStrokeGray(.7);c.setLineWidth(.15*mm);c.setDash(2,2)
