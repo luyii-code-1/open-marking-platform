@@ -62,6 +62,17 @@ def add_subject_grade(identifier:str,body:dict,current=Depends(admin)):
         return put(db,'subjects',subject,current['id'])
 
 
+@router.delete('/subjects/{identifier}/grades/{grade_id}')
+def remove_subject_grade(identifier:str,grade_id:str,current=Depends(admin)):
+    with connect() as db:
+        db.execute('BEGIN IMMEDIATE')
+        subject=require(db,identifier,'subjects');require(db,grade_id,'grades')
+        if find(db,'groups',subject_id=identifier,grade_id=grade_id):
+            raise HTTPException(409,'该年级下仍有题卡，请先调整题卡年级或删除题卡')
+        subject['grade_ids']=[value for value in subject.get('grade_ids',[]) if value!=grade_id]
+        return put(db,'subjects',subject,current['id'])
+
+
 def bind_group(db,group,grade_id,actor):
     grade=require(db,grade_id,'grades')
     if grade.get('archived') and group.get('grade_id')!=grade_id:raise HTTPException(422,'年级已停用')

@@ -115,3 +115,21 @@ def test_subject_grade_links_and_import_permissions(roster_school):
     c.headers.pop('Authorization')
     assert c.get(f['path']+'/template').status_code==401
     assert f['preview'](b'candidate_number\n000000001\n').status_code==401
+
+def test_subject_grade_removal_preserves_global_data_and_guards_cards(roster_school):
+    f=roster_school;c=f['client'];base='/api/v1/subjects/'+f['subject']['id']+'/grades'
+    grade=f['grade']['id'];other=f['other']['id']
+    assert c.delete(base+'/'+grade).status_code==409
+    assert c.post(base,json={'grade_id':other}).status_code==200
+    assert c.delete(base+'/'+other).status_code==200
+    assert other not in next(s for s in c.get('/api/v1/subjects').json() if s['id']==f['subject']['id']).get('grade_ids',[])
+    assert any(g['id']==other for g in c.get('/api/v1/grades').json())
+    assert len(c.get('/api/v1/students').json())==3
+    with db.connect() as connection:
+        group=db.get(connection,f['group']['id'],'groups');group.pop('grade_id');db.put(connection,'groups',group)
+    assert c.put('/api/v1/groups/'+group['id']+'/grade',json={'grade_id':other}).status_code==200
+    assert c.delete(base+'/'+other).status_code==409
+    assert c.put('/api/v1/grades/'+other,json={'name':'高二新名称'}).status_code==200
+    assert next(g for g in c.get('/api/v1/groups').json() if g['id']==group['id'])['grade_name']=='高二新名称'
+    c.headers.pop('Authorization')
+    assert c.delete(base+'/'+other).status_code==401

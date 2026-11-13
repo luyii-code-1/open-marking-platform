@@ -60,12 +60,14 @@ const rowSource=ts.transpileModule(await readFile(new URL('../src/rowNavigation.
 const {rowNavigation}=await import(`data:text/javascript;base64,${Buffer.from(rowSource).toString('base64')}`)
 globalThis.window={getSelection:()=>({toString:()=>''})}
 let entered=0;const row=rowNavigation(()=>entered++,'高一物理题卡')
-row.onClick({target:{closest:()=>null}});assert.equal(entered,1)
-row.onClick({target:{closest:()=>({tagName:'BUTTON'})}});assert.equal(entered,1,'Row actions must not trigger navigation')
+row.onClick({currentTarget:{contains:()=>true},target:{closest:()=>null}});assert.equal(entered,1)
+row.onClick({currentTarget:{contains:()=>true},target:{closest:()=>({tagName:'BUTTON'})}});assert.equal(entered,1,'Row actions must not trigger navigation')
+row.onClick({currentTarget:{contains:()=>false},target:{closest:()=>null}});assert.equal(entered,1,'Portal menu and dialog clicks must not open the row')
+row.onClick({defaultPrevented:true,currentTarget:{contains:()=>true},target:{closest:()=>null}});assert.equal(entered,1,'Cancelled actions must not open the row')
 let prevented=false;const element={}
 row.onKeyDown({target:element,currentTarget:element,key:'Enter',preventDefault:()=>prevented=true})
 assert.equal(entered,2);assert.equal(prevented,true)
 row.onKeyDown({target:{},currentTarget:element,key:'Enter',preventDefault(){}});assert.equal(entered,2,'Nested controls retain their own keyboard behavior')
 window.getSelection=()=>({toString:()=> 'copied text'})
-row.onClick({target:{closest:()=>null}});assert.equal(entered,2,'Copying a field must not open the row')
+row.onClick({currentTarget:{contains:()=>true},target:{closest:()=>null}});assert.equal(entered,2,'Copying a field must not open the row')
 console.log('Exam navigation passed: four-level paths and choices, grade ownership, legacy links, empty grades and scoped creation')
