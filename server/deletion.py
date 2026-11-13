@@ -25,8 +25,8 @@ LABELS = {
 # Follow ownership only. Shared students, accounts, assets, libraries and archives
 # must not be pulled into the hierarchy just because a record references them.
 CHILDREN = (
-    ('room-tags', ('project_id',)),
     ('subjects', ('project_id',)), ('groups', ('subject_id',)),
+    ('room-tags', ('project_id','group_id')),
     ('templates', ('group_id',)), ('scan-batches', ('group_id',)), ('rosters', ('group_id',)),
     ('pages', ('batch_id',)), ('submissions', ('group_id',)),
     ('assignments', ('template_id',)), ('tasks', ('template_id', 'submission_id')),

@@ -31,8 +31,15 @@ def own_task(db,identifier,current):
     return task
 
 
-def public_task(task):
-    return {k:v for k,v in task.items() if k not in ('student_id','candidate_number')}
+def public_task(task,db=None):
+    value={k:v for k,v in task.items() if k not in ('student_id','candidate_number')}
+    if db is not None:
+        submission=get(db,task.get('submission_id'),'submissions') or {}
+        group=get(db,submission.get('group_id'),'groups') or {}
+        if group.get('grade_id'):
+            from .room_tags import view
+            value.update(grade_id=group['grade_id'],grade_name=(get(db,group['grade_id'],'grades') or {}).get('name',''),room_tags=view(db,submission.get('room_tags',[])))
+    return value
 
 
 def completed(db,submission_id,question_id):
@@ -54,7 +61,7 @@ def result_for(db,submission,question):
 @router.get('/tasks')
 def tasks(current=Depends(user)):
     with connect() as db:
-        return [public_task(t) for t in find(db,'tasks',user_id=current['id'],status='claimed')]
+        return [public_task(t,db) for t in find(db,'tasks',user_id=current['id'],status='claimed')]
 
 
 @router.get('/tasks/history')
@@ -67,7 +74,7 @@ def history(template_id:str|None=None,question_id:str|None=None,current=Depends(
         for task in find(db,'tasks',**filters):
             final=db.execute('SELECT final_cents FROM review_results WHERE submission_id=? AND question_id=?',(task['submission_id'],task['question_id'])).fetchone()
             if final:task['final_score']=final[0]/100 if final[0] is not None else None
-            output.append(public_task(task))
+            output.append(public_task(task,db))
         return sorted(output,key=lambda t:(t['created_at'],t['id']))
 
 
@@ -93,7 +100,7 @@ def progress(template_id:str,question_id:str,current=Depends(user)):
 
 @router.get('/tasks/{identifier}')
 def details(identifier:str,current=Depends(user)):
-    with connect() as db: return public_task(own_task(db,identifier,current))
+    with connect() as db: return public_task(own_task(db,identifier,current),db)
 
 
 @router.post('/tasks/claim')
@@ -113,14 +120,14 @@ def claim(body:dict,current=Depends(user)):
         queued=db.execute('SELECT task_id FROM regrade_queue WHERE user_id=? AND template_id=? AND question_id=? ORDER BY position,task_id',(current['id'],template['id'],question['id'])).fetchall()
         for row in queued:
             task=require(db,row[0],'tasks')
-            if task['status']=='completed':return public_task({**task,'regrading':True})
+            if task['status']=='completed':return public_task({**task,'regrading':True},db)
             db.execute('DELETE FROM regrade_queue WHERE task_id=?',(row[0],))
         existing=find(db,'tasks',user_id=current['id'],question_id=question['id'],status='claimed')
         for task in existing:
             if task['user_id']==current['id'] and task['question_id']==question['id'] and task['status']=='claimed':
                 if task['expires_at']>time.time():
                     task['expires_at']=time.time()+900
-                    return public_task(put(db,'tasks',task,current['id']))
+                    return public_task(put(db,'tasks',task,current['id']),db)
                 task['status']='expired';put(db,'tasks',task,current['id'])
         import json
         # Remove TEXT column affinity on the correlated UUID so SQLite can
@@ -158,7 +165,7 @@ def claim(body:dict,current=Depends(user)):
             task=put(db,'tasks',{'template_id':template['id'],'question_id':question['id'],'submission_id':submission['id'],'student_id':submission['student_id'],'student_name':'匿名作答','user_id':current['id'],'status':'claimed','created_at':time.time(),'expires_at':time.time()+900,'score':None,'final_score':None,'regions':question['regions']},current['id'])
             task['answer_slice_id']=submission.get('answer_slice_ids',{}).get(question['id'])
             task['image_url']=f"/api/v1/tasks/{task['id']}/image"
-            return public_task(put(db,'tasks',task,current['id']))
+            return public_task(put(db,'tasks',task,current['id']),db)
         return None
 
 
@@ -175,7 +182,7 @@ def score(identifier:str,body:dict,current=Depends(user)):
         prior=db.execute('SELECT * FROM scores WHERE user_id=? AND idempotency_key=?',(current['id'],key)).fetchone()
         if prior:
             if prior['task_id']!=identifier or prior['score']!=amount: raise HTTPException(409,'提交编号已用于其他评分')
-            return {**public_task(task),'accepted_operation':{'id':key,'score':amount/100}}
+            return {**public_task(task,db),'accepted_operation':{'id':key,'score':amount/100}}
         template,question=question_for(db,task['template_id'],task['question_id'])
         group=require(db,template['group_id'],'groups')
         if group.get('frozen'): raise HTTPException(409,'成绩已冻结，请联系管理员复核')
@@ -197,7 +204,7 @@ def score(identifier:str,body:dict,current=Depends(user)):
         put(db,'tasks',task,current['id'])
         db.execute('INSERT INTO scores VALUES(?,?,?,?,?)',(str(uuid4()),identifier,current['id'],amount,key))
         db.execute('DELETE FROM regrade_queue WHERE task_id=?',(identifier,))
-        return {**public_task(task),'accepted_operation':{'id':key,'score':amount/100}}
+        return {**public_task(task,db),'accepted_operation':{'id':key,'score':amount/100}}
 
 
 @router.get('/review/offline-capabilities')
@@ -231,10 +238,10 @@ def skip(identifier:str,current=Depends(user)):
         queued=db.execute('SELECT 1 FROM regrade_queue WHERE task_id=? AND user_id=?',(identifier,current['id'])).fetchone()
         if task['status']=='completed' and queued:
             db.execute('UPDATE regrade_queue SET position=? WHERE task_id=?',(time.time_ns(),identifier))
-            return public_task(task)
+            return public_task(task,db)
         if task['status']!='claimed': raise HTTPException(409,'只能跳过待评分任务')
         task['status']='skipped';task['skipped_at']=time.time()
-        return public_task(put(db,'tasks',task,current['id']))
+        return public_task(put(db,'tasks',task,current['id']),db)
 
 
 @router.post('/tasks/{identifier}/report')
@@ -321,7 +328,10 @@ def exception_details(identifier:str,current=Depends(admin)):
         pages=[get(db,p,'pages') for p in submission['pages']] if submission else [page] if page else []
         template=get(db,(submission or {}).get('template_id') or (batch or {}).get('template_id'),'templates')
         student=(submission or {}).get('student_snapshot') or get(db,(submission or {}).get('student_id'),'students')
-        return {'exception':item,'context':{'project':(project or {}).get('name'),'subject':(subject or {}).get('name'),'group':(group or {}).get('name'),'room':(batch or {}).get('room'),'room_tags':(submission or batch or {}).get('room_tags',[]),'candidate_number':(submission or page or {}).get('candidate_number'),'student_name':(student or {}).get('name')},'pages':[{'id':p['id'],'side':p['side'],'sequence':p['sequence'],'status':p['status'],'image_url':f"/api/v1/pages/{p['id']}/image",'selections':{str(q['number']):p.get('selections',{}).get(q['id'],[]) for q in (template or {}).get('questions',[]) if q['type']!='subjective' and q['id'] in p.get('selections',{})}} for p in pages if p],'answer_image_url':f"/api/v1/tasks/{task['id']}/image" if task else None}
+        from .school import student_view
+        from .room_tags import view as room_view
+        if student and (group or {}).get('grade_id'):student=student_view(db,student)
+        return {'exception':item,'context':{'project':(project or {}).get('name'),'subject':(subject or {}).get('name'),'group':(group or {}).get('name'),'room':(batch or {}).get('room'),'room_tags':room_view(db,(submission or batch or {}).get('room_tags',[])), 'grade':(get(db,(group or {}).get('grade_id'),'grades') or {}).get('name'),'candidate_number':(submission or page or {}).get('candidate_number'),'student_name':(student or {}).get('name')},'pages':[{'id':p['id'],'side':p['side'],'sequence':p['sequence'],'status':p['status'],'image_url':f"/api/v1/pages/{p['id']}/image",'selections':{str(q['number']):p.get('selections',{}).get(q['id'],[]) for q in (template or {}).get('questions',[]) if q['type']!='subjective' and q['id'] in p.get('selections',{})}} for p in pages if p],'answer_image_url':f"/api/v1/tasks/{task['id']}/image" if task else None}
 
 
 @router.post('/exceptions/resolve')
@@ -355,9 +365,16 @@ def results(group_id:str,room_tag_id:str|None=None,current=Depends(user)):
 def results_for(db,group_id,current,convert_scores=True):
     group=require(db,group_id,'groups')
     roster=require(db,group['roster_id'],'rosters') if group.get('roster_id') else None
-    roster_students={s['id']:s for s in (roster or {}).get('students',[])}
+    from .school import group_students,student_view
+    from .room_tags import view as room_view
+    live=bool(group.get('grade_id'))
+    members=group_students(db,group)
+    roster_students={s['id']:s for s in members or []}
     classes={c['id']:c for c in objects(db,'classes')}
     def identity(student):
+        if live:
+            value=student_view(db,student)
+            return {**{k:value.get(k) for k in ('name','class_id','class_name','grade','grade_id')},'student_id':student['id'],'group_grade_id':group['grade_id']}
         saved=roster_students.get(student['id'],{})
         label=saved if saved.get('class_id')==student['class_id'] else {}
         cls=classes.get(student['class_id'],{})
@@ -376,11 +393,11 @@ def results_for(db,group_id,current,convert_scores=True):
         template=require(db,submission['template_id'],'templates')
         scores={str(q['number']):result_for(db,submission,q) for q in template['questions']}
         ready=all(v is not None for v in scores.values())
-        output.append({**identity(student),'candidate_number':submission['candidate_number'],'room_tags':submission.get('room_tags',[]),'scores':{k:v/100 if v is not None else None for k,v in scores.items()},'total':sum(scores.values())/100 if ready else None,'status':'absent' if submission['status']=='absent' else 'completed' if ready else 'pending'})
-    if roster:
+        output.append({**identity(student),'candidate_number':student_view(db,student)['candidate_number'] if live else submission['candidate_number'],'scanned_candidate_number':submission['candidate_number'],'room_tags':room_view(db,submission.get('room_tags',[])) if live else submission.get('room_tags',[]),'scores':{k:v/100 if v is not None else None for k,v in scores.items()},'total':sum(scores.values())/100 if ready else None,'status':'absent' if submission['status']=='absent' else 'completed' if ready else 'pending'})
+    if members is not None:
         seen={r['student_id'] for r in output}
         template=require(db,group['template_id'],'templates')
-        for student in roster['students']:
+        for student in members:
             if student['id'] not in seen:
                 output.append({**identity(student),'candidate_number':student['candidate_number'],'scores':{str(q['number']):None for q in template['questions']},'total':None,'status':'unscanned'})
     if group.get('conversion_id') and convert_scores:

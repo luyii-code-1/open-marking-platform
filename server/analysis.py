@@ -99,7 +99,7 @@ def project_rows(db,identifier,current):
         columns.append({'id':group['id'],'subject_id':group['subject_id'],'subject':subjects[group['subject_id']]['name'],'group':group['name'],'published':bool(group.get('frozen'))})
         for row in rows:
             student=students.setdefault(row['student_id'],{k:row[k] for k in ('student_id','candidate_number','name','class_id','class_name','grade')})
-            student.setdefault('scores',{})[group['id']]={'raw':row['total'],'converted':row.get('converted_score'),'status':row['status']}
+            student.setdefault('scores',{})[group['id']]={'raw':row['total'],'converted':row.get('converted_score'),'status':row['status'],'room_tags':row.get('room_tags',[]),'grade_id':row.get('group_grade_id')}
     for student in students.values():
         scores=student['scores'].values()
         known=[s for s in scores if s['raw'] is not None]
@@ -125,7 +125,7 @@ def csv_response(headers,rows,filename):
 def export_group(group_id:str,view:str='classes',metric:str='raw',include_absent:bool=False,pass_ratio:float=.6,excellent_ratio:float=.85,current=Depends(user),room_tag_id:str|None=None):
     data=group_analysis(group_id,metric,include_absent,pass_ratio,excellent_ratio,current,room_tag_id)
     if view=='students':
-        return csv_response(['考号','姓名','班级','状态','原始分','赋分','当前可见范围排名','班级排名','考场标签'],[[STATUS_NAMES.get(r.get(k),r.get(k)) if k=='status' else r.get(k) for k in ('candidate_number','name','class_name','status','total','converted_score','scope_rank','class_rank')]+['、'.join(t['name'] for t in r.get('room_tags',[]))] for r in data['students']],'student-analysis')
+        return csv_response(['考号','姓名','班级','状态','原始分','赋分','当前可见范围排名','班级排名','考场','年级'],[[STATUS_NAMES.get(r.get(k),r.get(k)) if k=='status' else r.get(k) for k in ('candidate_number','name','class_name','status','total','converted_score','scope_rank','class_rank')]+['、'.join(t.get('label',t['name']) for t in r.get('room_tags',[])),r.get('grade')] for r in data['students']],'student-analysis')
     if view=='distribution':
         return csv_response(['下界（含）','上界','上界包含','人数'],[[r['lower'],r['upper'],r['upper_inclusive'],r['count']] for r in data['distribution']],'score-distribution')
     if view not in ('classes','questions'):raise HTTPException(422,'导出类型无效')
@@ -138,12 +138,13 @@ def export_project(project_id:str,current=Depends(user)):
     data=project_analysis(project_id,current)
     columns=data['columns']
     headers=['考号','姓名','班级','已完成记录','缺考记录','待结分记录','未扫描记录','已记录原始分合计','已记录采用分合计']
-    for col in columns:headers.extend(f"{col['subject']}/{col['group']} {name}" for name in ('原始分','赋分','状态'))
+    for col in columns:headers.extend(f"{col['subject']}/{col['group']} {name}" for name in ('原始分','赋分','状态','考场'))
     rows=[]
     for student in data['students']:
         row=[student[k] for k in ('candidate_number','name','class_name','completed_records','absent_records','pending_records','unscanned_records','recorded_raw_sum','recorded_effective_sum')]
         for col in columns:
             score=student['scores'].get(col['id'],{})
             row.extend(STATUS_NAMES.get(score.get(k),score.get(k)) if k=='status' else score.get(k) for k in ('raw','converted','status'))
-        rows.append(row)
-    return csv_response(headers,rows,'project-results')
+            row.append('、'.join(t.get('label',t['name']) for t in score.get('room_tags',[])))
+        rows.append(row+[student.get('grade')])
+    return csv_response(headers+['学生年级'],rows,'project-results')

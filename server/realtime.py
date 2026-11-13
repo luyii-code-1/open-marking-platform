@@ -14,6 +14,10 @@ router=APIRouter(prefix='/api/v1')
 logger=logging.getLogger(__name__)
 POLL_SECONDS=1
 ADMIN_ROOTS={
+    'grades':{'grades','classes','students','groups','room-tags','tasks','results','analysis'},
+    'classes':{'classes','students','groups','results','analysis','room-tags'},
+    'students':{'students','groups','results','analysis','room-tags'},
+    'room-tags':{'room-tags','groups','scan-batches','submissions','exceptions','tasks','results','analysis'},
     'tasks':{'tasks','review-progress','dashboard','results','analysis'},
     'assignments':{'assignments','templates','groups','subjects','projects','review-progress','dashboard'},
     'groups':{'groups','results','analysis','review-progress','dashboard'},
@@ -58,6 +62,7 @@ def topics(person,scope,previous,kind,body):
     if kind=='groups' and (body.get('id') in merged['groups'] or scope['classes']):return {'groups','subjects','projects','review-progress','results','analysis'}
     if kind in ('subjects','projects') and body.get('id') in merged[kind]:return {kind}
     if kind=='classes' and (body.get('id') in merged['classes'] or uid in body.get('teacher_ids',[])):return {'classes','groups','subjects','projects','results','analysis'}
+    if kind in ('students','grades','room-tags') and (scope['classes'] or scope['templates']):return {'groups','subjects','projects','tasks','results','analysis','room-tags'}
     if kind=='score-conversions' and scope['classes']:return {'results','analysis'}
     return set()
 

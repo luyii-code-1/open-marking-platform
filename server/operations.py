@@ -62,8 +62,10 @@ def bind_conversion(identifier:str,body:dict,current=Depends(admin)):
 def edit_class(identifier:str,body:dict,current=Depends(admin)):
     with connect() as db:
         item=require(db,identifier,'classes')
-        for key in ('name','grade','teacher_ids'):
+        for key in ('name','teacher_ids'):
             if key in body: item[key]=body[key]
+        from .school import assign_class
+        assign_class(db,item,body,current['id'])
         if not str(item.get('name','')).strip(): raise HTTPException(422,'班级名称不能为空')
         for teacher in item.get('teacher_ids',[]):
             if not db.execute('SELECT 1 FROM users WHERE id=?',(teacher,)).fetchone(): raise HTTPException(422,'教师不存在')
@@ -90,7 +92,8 @@ def promote(body:dict,current=Depends(admin)):
         if not classes: raise HTTPException(422,'请选择班级')
         try: grades=[int(c['grade'])+1 for c in classes]
         except (ValueError,TypeError,KeyError): raise HTTPException(422,'年级应为数字；文字年级请单独修改')
-        for item,grade in zip(classes,grades): item['grade']=grade; put(db,'classes',item,current['id'])
+        from .school import assign_class
+        for item,grade in zip(classes,grades):assign_class(db,item,{'grade':grade},current['id']);put(db,'classes',item,current['id'])
         return {'updated':len(classes)}
 
 
@@ -136,9 +139,9 @@ def export_results(group_id:str,room_tag_id:str|None=None,current=Depends(user))
     rows=results(group_id,room_tag_id,current)
     numbers=sorted({n for row in rows for n in row['scores']},key=lambda n:(len(n),n))
     output=io.StringIO(newline=''); writer=csv.writer(output)
-    writer.writerow(['准考证号','姓名','班级','状态','总分','赋分']+[f'第{n}题' for n in numbers]+['考场标签'])
+    writer.writerow(['准考证号','姓名','班级','状态','总分','赋分']+[f'第{n}题' for n in numbers]+['年级','考场'])
     from .analysis import STATUS_NAMES
-    for row in rows: writer.writerow([csv_cell(STATUS_NAMES.get(row.get(key),row.get(key)) if key=='status' else row.get(key)) for key in ('candidate_number','name','class_id','status','total','converted_score')]+[row['scores'].get(n) for n in numbers]+[csv_cell('、'.join(t['name'] for t in row.get('room_tags',[])))])
+    for row in rows: writer.writerow([csv_cell(STATUS_NAMES.get(row.get(key),row.get(key)) if key=='status' else row.get(key)) for key in ('candidate_number','name','class_id','status','total','converted_score')]+[row['scores'].get(n) for n in numbers]+[csv_cell(row.get('grade')),csv_cell('、'.join(t.get('label',t['name']) for t in row.get('room_tags',[])))])
     return Response(('\ufeff'+output.getvalue()).encode('utf-8'),media_type='text/csv; charset=utf-8',headers={'Content-Disposition':'attachment; filename=results.csv'})
 
 

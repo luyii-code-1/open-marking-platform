@@ -10,6 +10,11 @@ def roster(identifier:str,current=Depends(admin)):
     with connect() as db:
         group=require(db,identifier,'groups')
         saved=require(db,group['roster_id'],'rosters') if group.get('roster_id') else None
+        if group.get('grade_id'):
+            from .school import group_students
+            students=group_students(db,group);submissions={s['student_id']:s for s in find(db,'submissions',group_id=identifier)}
+            return {'group_id':identifier,'configured':True,'dynamic':True,'grade_id':group['grade_id'],'class_ids':[],'student_ids':[],
+                    'students':[{**s,'status':'unscanned' if s['id'] not in submissions else 'absent' if submissions[s['id']]['status']=='absent' else 'scanned'} for s in students]}
         submissions={s['student_id']:s for s in find(db,'submissions',group_id=identifier)}
         return {'group_id':identifier,'configured':bool(saved),'class_ids':(saved or {}).get('class_ids',[]),'student_ids':(saved or {}).get('student_ids',[]),'students':[{**s,'status':'unscanned' if s['id'] not in submissions else 'absent' if submissions[s['id']]['status']=='absent' else 'scanned'} for s in (saved or {}).get('students',[])]}
 
@@ -21,6 +26,7 @@ def set_roster(identifier:str,body:dict,current=Depends(admin)):
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
         group=require(db,identifier,'groups')
+        if group.get('grade_id'):raise HTTPException(409,'本组按年级实时生成名单，请在全局学生资料中维护')
         if group.get('frozen'):raise HTTPException(409,'成绩已冻结，请先发起复核')
         classes={c:require(db,c,'classes') for c in set(class_ids)}
         for sid in set(student_ids):require(db,sid,'students')

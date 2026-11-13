@@ -138,7 +138,7 @@ export function Marking({ admin, groupId, initialTemplateId, initialQuestionId, 
       <ErrorNotice error={error||workspace.storageError||(workspace.offline?'':templates.error||assignments.error)} />
       {workspace.offline&&<Alert type="info" showIcon message="离线评阅：评分保存在本机，恢复连接后上传。"/>}
     </div>
-    <div className="marking-context"><span title={origin}>{origin||'请选择阅卷任务'}{question&&` / 第 ${question.number} 题`}</span>{record&&<Tag color={record.status==='conflict'?'orange':record.status==='confirmed'?'green':'blue'} role="status">{record.status==='queued'?'已暂存 · 等待上传':record.status==='confirmed'?'服务器已确认':record.status==='conflict'?'评分待核对':saveState}</Tag>}</div>
+    <div className="marking-context"><span title={origin}>{origin||'请选择阅卷任务'}{question&&` / 第 ${question.number} 题`}{task?.grade_name&&` · ${task.grade_name}`}{task?.room_tags?.length?` · ${task.room_tags.map((t:Row)=>t.label||t.name).join('、')}`:''}</span>{record&&<Tag color={record.status==='conflict'?'orange':record.status==='confirmed'?'green':'blue'} role="status">{record.status==='queued'?'已暂存 · 等待上传':record.status==='confirmed'?'服务器已确认':record.status==='conflict'?'评分待核对':saveState}</Tag>}</div>
     {record?.error&&<Alert type="warning" message={record.error} showIcon/>}
     {task&&question?<main className="marking-layout">
       <section className="marking-image-panel" aria-label="作答图像区">

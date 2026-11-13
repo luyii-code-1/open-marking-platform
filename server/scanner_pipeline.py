@@ -36,7 +36,7 @@ def catalog(current=Depends(scan_admin)):
     with connect() as db:
         return {kind: [{k: value[k] for k in fields if k in value} for value in objects(db, kind)] for kind, fields in (
             ('projects', ('id', 'name', 'status')), ('subjects', ('id', 'name', 'project_id', 'default_group_id')),
-            ('groups', ('id', 'name', 'subject_id', 'template_id', 'frozen')))}
+            ('groups', ('id', 'name', 'subject_id', 'template_id', 'frozen', 'grade_id')))}
 
 
 @router.get('/projects/{identifier}/package')
@@ -49,12 +49,15 @@ def project_package(identifier: str, current=Depends(scan_admin)):
         for group in groups:
             template = get(db, group.get('template_id'), 'templates')
             if not template or template['status'] != 'published': continue
-            roster = get(db, group.get('roster_id'), 'rosters')
-            packaged.append({'id': group['id'], 'name': group['name'], 'subject_id': group['subject_id'], 'frozen': bool(group.get('frozen')),
+            from .school import group_students
+            roster = group_students(db,group)
+            packaged.append({'id': group['id'], 'name': group['name'], 'subject_id': group['subject_id'], 'frozen': bool(group.get('frozen')), 'grade_id':group.get('grade_id'), 'grade_name':(get(db,group.get('grade_id'),'grades') or {}).get('name',''),
                              'template': configuration(template), 'config_sha256': config_hash(template),
-                             'roster': [{'candidate_number': s['candidate_number'], 'name': s['name']} for s in roster['students']] if roster else None})
+                             'roster': [{'id':s['id'],'candidate_number': s['candidate_number'], 'name': s['name']} for s in roster] if roster is not None else None})
+        from .room_tags import view,progress
+        rooms=[{**view(db,[t])[0],**progress(db,t)} for t in find(db,'room-tags',project_id=identifier)]
         return {'protocol': 'omp-scanner-4', 'engine_version': ENGINE_VERSION,
-                'room_tags':find(db,'room-tags',project_id=identifier),
+                'room_tags':rooms,
                 'project': {k: project[k] for k in ('id', 'name', 'status')},
                 'subjects': [{k: s[k] for k in ('id', 'name', 'default_group_id') if k in s} for s in subjects], 'groups': packaged}
 
@@ -84,11 +87,11 @@ def register_batch(identifier: str, body: dict, current=Depends(scan_admin)):
         template = require(db, group.get('template_id'), 'templates')
         if template['status'] != 'published' or template['id'] != body.get('template_id') or template['revision'] != body.get('template_revision') or config_hash(template) != body.get('config_sha256'): raise HTTPException(409, '题卡配置已变化，请重新下载项目配置')
         from .room_tags import snapshot,project_for_group
-        labels=snapshot(db,project_for_group(db,group['id']),body.get('room_tag_ids',[]))
+        labels=snapshot(db,project_for_group(db,group['id']),body.get('room_tag_ids',[]),group=group)
         mode = body.get('capture_mode', 'separate'); order = body.get('back_order', 'same'); room = body.get('room', '')
         if mode not in ('duplex', 'separate') or order not in ('same', 'reverse') or (mode == 'duplex' and (template['sides'] != 2 or order != 'same')) or not isinstance(room, str) or len(room) > 100: raise HTTPException(422, '采集方式、背面顺序或考场备注无效')
         return put(db, 'scan-batches', {'id': identifier, 'group_id': group['id'], 'template_id': template['id'], 'template_revision': template['revision'],
-                                      'config_sha256': body['config_sha256'], 'room_tags':labels, 'room': room, 'capture_mode': mode, 'back_order': order,
+                                      'config_sha256': body['config_sha256'], 'grade_id':group.get('grade_id'), 'room_tags':labels, 'room': room, 'capture_mode': mode, 'back_order': order,
                                       'status': 'front', **({'scanner_device_id': current['id']} if current['role'] == 'scanner' else {})}, current['id'])
 
 

@@ -47,7 +47,7 @@ internal static class DesktopSelfTest
                 var state=Json(await offline.Invoke("state",Json(new{}))!);Check(!state.GetProperty("online").GetBoolean(),"Restart should start with cached metadata before a connection.");
                 var group=state.GetProperty("package").GetProperty("groups")[0];
                 Check(!group.GetProperty("template").GetProperty("questions")[0].TryGetProperty("answer",out _),"Device cache contains an answer key.");
-                var tags=state.GetProperty("package").TryGetProperty("room_tags",out var tagList)?tagList.EnumerateArray().Select(t=>t.GetProperty("id").GetString()).ToArray():[];
+                var tags=state.GetProperty("package").TryGetProperty("room_tags",out var tagList)?tagList.EnumerateArray().Where(t=>!t.TryGetProperty("group_id",out var gid)||gid.GetString()==group.GetProperty("id").GetString()).Select(t=>t.GetProperty("id").GetString()).ToArray():[];
                 var created=Json(await offline.Invoke("createBatch",Json(new{group_id=group.GetProperty("id").GetString(),name="离线重启验证",capture_mode="duplex",first_side=firstSide,room_tag_ids=tags}))!);
                 batchId=created.GetProperty("id").GetString()!;var batch=queue.Batches().Single(b=>b.Id==batchId);
                 using(var savedTags=JsonDocument.Parse(batch.RoomTagsJson))Check(savedTags.RootElement.GetArrayLength()==tags.Length,"Offline batch tags were lost.");

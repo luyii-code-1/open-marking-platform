@@ -1,23 +1,22 @@
-import { useEffect, useState } from 'react'
-import { Alert, App, Card, Form, Select, Space, Table, Tag, Typography } from 'antd'
+import { useEffect,useState } from 'react'
+import { Alert,App,Card,Form,Select,Space,Table,Tag,Typography } from 'antd'
 import { Button } from './Button'
-import { send, useResource, type Row } from './api'
+import { send,useResource,type Row } from './api'
 import { HierarchyPicker } from './HierarchyPicker'
 
-export function Roster({ groupId }: { groupId?: string }) {
-  const groups=useResource<Row[]>('/groups',[]),classes=useResource<Row[]>('/classes',[]),students=useResource<Row[]>('/students',[])
-  const [selectedGroup,setGroup]=useState(groupId || ''), group=groupId || selectedGroup,[classIds,setClassIds]=useState<string[]>([]),[studentIds,setStudentIds]=useState<string[]>([]),[busy,setBusy]=useState(false),{message}=App.useApp()
-  const resource=useResource<any>(group?`/groups/${group}/roster`:null,null,{live:false})
+export function Roster({groupId}:{groupId?:string}){
+  const groups=useResource<Row[]>('/groups',[]),grades=useResource<Row[]>('/grades',[])
+  const [selectedGroup,setGroup]=useState(groupId||''),group=groupId||selectedGroup,[gradeId,setGrade]=useState<string>(),[busy,setBusy]=useState(false),{message}=App.useApp()
+  const resource=useResource<any>(group?`/groups/${group}/roster`:null,null),current=groups.data.find(g=>g.id===group)
   const data=resource.data?.group_id===group?resource.data:null
-  useEffect(()=>{setClassIds(data?.class_ids||[]);setStudentIds(data?.student_ids||[])},[data])
-  const expected=students.data.filter(s=>classIds.includes(s.class_id)||studentIds.includes(s.id)).length
-  async function save(){setBusy(true);try{await send(`/groups/${group}/roster`,{class_ids:classIds,student_ids:studentIds},'PUT');await resource.reload();await groups.reload();message.success('应考名单已保存')}catch(e){message.error((e as Error).message)}finally{setBusy(false)}}
-  return <Card title="题卡组应考名单" extra={<Button onClick={()=>{void groups.reload();void classes.reload();void students.reload();void resource.reload()}}>刷新</Button>}>
-    {(groups.error||resource.error||classes.error||students.error)&&<Alert type="error" message={groups.error||resource.error||classes.error||students.error}/>}
-    <Space direction="vertical" style={{width:'100%'}}>{!groupId && <HierarchyPicker value={group} onChange={setGroup}/>}
-      <Typography.Paragraph type="secondary">按班级加入学生，也可补充单独应考学生。保存时固定本次名单，后续学生升级或变更班级不会自动改动；需要更新时重新保存。已有答卷会继续保留。</Typography.Paragraph>
-      {group&&<><Form layout="vertical"><Form.Item label="应考班级"><Select mode="multiple" value={classIds} onChange={setClassIds} options={classes.data.map(c=>({label:`${c.grade||''} ${c.name}`,value:c.id}))}/></Form.Item><Form.Item label="额外应考学生"><Select mode="multiple" showSearch optionFilterProp="label" value={studentIds} onChange={setStudentIds} options={students.data.map(s=>({label:`${s.candidate_number} ${s.name}`,value:s.id}))}/></Form.Item></Form><Space><Button type="primary" loading={busy} disabled={resource.loading||groups.data.find(g=>g.id===group)?.frozen} onClick={save}>保存应考名单（{expected} 人）</Button><Typography.Text>已保存：{data?.configured?`${data.students.length} 人`:'尚未配置'}</Typography.Text></Space>
-        <Table rowKey="id" loading={resource.loading} dataSource={data?.students||[]} columns={[{title:'考号',dataIndex:'candidate_number'},{title:'姓名',dataIndex:'name'},{title:'班级',dataIndex:'class_name'},{title:'采集状态',dataIndex:'status',render:value=><Tag color={value==='unscanned'?'orange':value==='absent'?'default':'green'}>{value==='unscanned'?'未扫描':value==='absent'?'已确认缺考':'已扫描'}</Tag>}]}/></>}
+  useEffect(()=>setGrade(current?.grade_id),[group,current?.grade_id])
+  async function save(){if(!gradeId)return;setBusy(true);try{await send(`/groups/${group}/grade`,{grade_id:gradeId},'PUT');await Promise.all([groups.reload(),resource.reload()]);message.success('年级已关联，应考名单实时更新')}catch(e){message.error((e as Error).message)}finally{setBusy(false)}}
+  return <Card title="应考年级与名单" extra={<Button disabled={busy} onClick={()=>{void groups.reload();void grades.reload();void resource.reload()}}>刷新</Button>}>
+    {(groups.error||grades.error||resource.error)&&<Alert type="error" message={groups.error||grades.error||resource.error}/>}
+    <Space direction="vertical" size={24} style={{width:'100%'}}>{!groupId&&<HierarchyPicker value={group} onChange={setGroup}/>}
+      <Typography.Paragraph type="secondary">题卡组使用一个年级的全体学生作为默认应考对象。转班、转年级及资料修改实时生效；已有答卷和成绩保留。选科造成的未扫描可以正常保留。</Typography.Paragraph>
+      {group&&<><Form layout="vertical" style={{maxWidth:420}}><Form.Item label="所属年级"><Select value={gradeId} placeholder="选择全局年级" onChange={setGrade} options={grades.data.filter(g=>!g.archived||g.id===current?.grade_id).map(g=>({label:g.name,value:g.id}))}/></Form.Item><Button type="primary" disabled={!gradeId||resource.loading} loading={busy} onClick={save}>保存所属年级</Button></Form><Typography.Text>{data?.configured?`当前应考 ${data.students.length} 人`:'设置年级后自动生成名单'}</Typography.Text>
+        <Table rowKey="id" loading={resource.loading} dataSource={data?.students||[]} pagination={{defaultPageSize:20}} columns={[{title:'考号',dataIndex:'candidate_number'},{title:'姓名',dataIndex:'name'},{title:'年级',dataIndex:'grade'},{title:'班级',dataIndex:'class_name'},{title:'采集状态',dataIndex:'status',render:value=><Tag color={value==='scanned'?'green':undefined}>{value==='unscanned'?'未扫描':value==='absent'?'已确认缺考':'已扫描'}</Tag>}]}/></>}
     </Space>
   </Card>
 }

@@ -26,6 +26,8 @@ from . import paper
 @asynccontextmanager
 async def lifespan(app):
     initialize()
+    from .school import migrate
+    migrate()
     from .request_log import Journal
     app.state.request_journal=Journal(database.ROOT)
     from .realtime import Hub
@@ -140,12 +142,15 @@ def list_route(kind):
     def endpoint(current=Depends(scan_user if kind in ('projects','subjects','groups','templates','scan-batches') else user)):
         with connect() as db:
             values=objects(db,kind)
+            if kind=='scan-batches':
+                from .room_tags import view as room_view
+                values=[{**v,'room_tags':room_view(db,v.get('room_tags',[]))} for v in values]
             if current['role'] in ('admin','manager'):
                 return values
             if current['role']=='scanner':
                 if kind=='scan-batches':return [v for v in values if v.get('scanner_device_id')==current['id']]
                 if kind=='templates':return [{k:v[k] for k in ('id','name','group_id','paper','sides','status','revision','layout_version') if k in v} for v in values]
-                fields={'projects':('id','name','status'),'subjects':('id','name','project_id'),'groups':('id','name','subject_id','template_id','frozen')}
+                fields={'projects':('id','name','status'),'subjects':('id','name','project_id'),'groups':('id','name','subject_id','template_id','frozen','grade_id')}
                 return [{k:v[k] for k in fields[kind] if k in v} for v in values]
             assigned=[a for a in objects(db,'assignments') if current['id'] in (a.get('user_ids',[])+a.get('arbitrator_ids',[]))]
             templates={a['template_id'] for a in assigned}
@@ -179,7 +184,12 @@ def create_route(kind):
                 raise HTTPException(422,'请填写名称')
             if kind=='projects': value['status']='draft'
             if kind=='subjects' and value.get('group_mode','custom') not in ('custom','default'):raise HTTPException(422,'分组方式无效')
-            if kind=='groups': value['template_id']=None
+            if kind=='groups':
+                value['template_id']=None
+                if value.get('grade_id'):require(db,value['grade_id'],'grades')
+            if kind=='classes':
+                from .school import assign_class
+                assign_class(db,value,body,current['id'])
             if kind=='templates':
                 if value.get('paper') not in ('A3','A4') or value.get('sides') not in (1,2):
                     raise HTTPException(422,'纸型或单双面无效')
@@ -223,7 +233,8 @@ def create_route(kind):
                 from .room_tags import snapshot,project_for_group
                 tag_ids=value.pop('room_tag_ids',[])
                 if not isinstance(tag_ids,list):raise HTTPException(422,'考场标签应为编号列表')
-                value['room_tags']=snapshot(db,project_for_group(db,group['id']),tag_ids) if tag_ids else []
+                value['room_tags']=snapshot(db,project_for_group(db,group['id']),tag_ids,group=group)
+                if group.get('grade_id'):value['grade_id']=group['grade_id']
                 if group.get('frozen'):raise HTTPException(409,'成绩已冻结，请先发起复核')
                 if not group.get('template_id'):
                     raise HTTPException(422,'请先发布题卡')
@@ -408,14 +419,17 @@ def pair(identifier:str,body:dict|None=Body(default=None),current=Depends(scan_a
             if body['local_pairs']!=local:raise HTTPException(409,'本地配页清单与服务器页面记录不一致，请核查后重新确认')
         students={s['candidate_number']:s for s in objects(db,'students')}
         group=require(db,batch['group_id'],'groups')
-        if group.get('roster_id'):students.update({s['candidate_number']:s for s in require(db,group['roster_id'],'rosters')['students']})
+        from .school import group_students
+        roster_students=group_students(db,group)
+        if group.get('grade_id'):students={s['candidate_number']:s for s in roster_students}
+        elif roster_students is not None:students.update({s['candidate_number']:s for s in roster_students})
         if any(number not in students for number in numbers): raise HTTPException(409,'考号不在学生名单中')
         for index,front in enumerate(fronts):
             student=students[front['candidate_number']]
             from .student_history import snapshot
             student=snapshot(db,student)
             if any(s['group_id']==batch['group_id'] and s['student_id']==student['id'] for s in objects(db,'submissions')): raise HTTPException(409,'已有该学生答卷，请明确执行补扫替换')
-            submission=put(db,'submissions',{'group_id':batch['group_id'],'template_id':template['id'],'student_id':student['id'],'student_snapshot':student,'room_tags':batch.get('room_tags',[]),'candidate_number':front['candidate_number'],'pages':[front['id']]+([backs[index]['id']] if template['sides']==2 else []),'status':'absent' if front.get('absent_mark') else 'ready','attendance_source':'scan_mark' if front.get('absent_mark') else 'scan'},current['id'])
+            submission=put(db,'submissions',{'group_id':batch['group_id'],'template_id':template['id'],'student_id':student['id'],'student_snapshot':student,'room_tags':batch.get('room_tags',[]),'grade_id':batch.get('grade_id'),'candidate_number':front['candidate_number'],'pages':[front['id']]+([backs[index]['id']] if template['sides']==2 else []),'status':'absent' if front.get('absent_mark') else 'ready','attendance_source':'scan_mark' if front.get('absent_mark') else 'scan'},current['id'])
             from .answer_slices import sync
             submission=sync(db,submission,template,current['id'])
             from .anomalies import check_submission
@@ -466,6 +480,9 @@ from .room_tags import router as room_tags_router
 app.include_router(room_tags_router)
 from .scanner_workbench import router as scanner_workbench_router
 app.include_router(scanner_workbench_router)
+
+from .school import router as school_router
+app.include_router(school_router)
 
 web_distribution=Path(__file__).resolve().parents[1]/'web'/'dist'
 if web_distribution.exists():

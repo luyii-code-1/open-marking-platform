@@ -78,8 +78,12 @@ def collect(db,identifier):
         changed=len(selected)!=before
     students={item['student_id'] for kind,item in items if item['id'] in selected and 'student_id' in item}
     students.update(s['id'] for kind,item in items if kind=='rosters' and item['id'] in selected for s in item['students'])
+    from .school import group_students
+    for kind,item in items:
+        if kind=='groups' and item['id'] in selected and item.get('grade_id'):students.update(s['id'] for s in group_students(db,item))
     selected.update(students)
     selected.update(item.get('class_id') for kind,item in items if item['id'] in students)
+    selected.update(item.get('grade_id') for kind,item in items if item['id'] in selected and item.get('grade_id'))
     for kind,item in items:
         if item['id'] not in selected:continue
         assets=set(item.get('background_assets',{}).values())

@@ -21,7 +21,7 @@ const groupName = (group: Row) => group.is_default || group.name === 'Default' ?
 
 export function Exams({ location, navigate }: { location: ExamLocation; navigate: (path: string, replace?: boolean) => void }) {
   const { message } = App.useApp()
-  const projects = useResource<Row[]>('/projects', []), subjects = useResource<Row[]>('/subjects', []), groups = useResource<Row[]>('/groups', [])
+  const projects = useResource<Row[]>('/projects', []), subjects = useResource<Row[]>('/subjects', []), groups = useResource<Row[]>('/groups', []), grades=useResource<Row[]>('/grades',[])
   const ready = projects.loaded && subjects.loaded && groups.loaded
   const { project, subject, group, invalid } = resolveExam(location, projects.data, subjects.data, groups.data)
   const go = (value: ExamLocation) => navigate(examPath(value))
@@ -53,8 +53,9 @@ export function Exams({ location, navigate }: { location: ExamLocation; navigate
       { title: '考试名称', dataIndex: 'name', render: (name: string, row: Row) => <a href={examPath({ projectId: row.id })}>{name}</a> },
       { title: '科目', render: (_: unknown, row: Row) => `${subjects.data.filter(s => s.project_id === row.id).length} 门` },
       { title: '操作', render: (_: unknown, row: Row) => <Space><Button icon={<RightOutlined />} iconPosition="end" onClick={() => go({ projectId: row.id })}>进入考试</Button><HierarchyDelete kind="projects" target={row} onDeleted={refresh} /></Space> },
-    ]} /> : group ? <GroupWorkspace key={group.id} group={group} project={project} section={location.section || 'overview'} onSection={section => go({ ...base, section })} /> : subject ? subject.group_mode === 'default' && !groups.data.some(g=>g.subject_id===subject.id) ? <Card><Empty description="此科目尚无默认题卡组"><Button type="primary" onClick={async()=>{try{const created=await send<Row>(`/subjects/${subject.id}/default-group`);await refresh();go({...base,groupId:created.id})}catch(e){message.error((e as Error).message)}}}>创建默认题卡组</Button></Empty></Card> : <EntityTable key={subject.id} path="/groups" title="题卡组" scope={{ subject_id: subject.id }} fields={[{ name: 'name', label: '组名称（学校 / 年级 / 卷别）' }]} onCreated={async row => { await refresh(); if (row?.id) go({ ...base, groupId: row.id }) }} columns={[
+    ]} /> : group ? <GroupWorkspace key={group.id} group={group} project={project} section={location.section || 'overview'} onSection={section => go({ ...base, section })} /> : subject ? subject.group_mode === 'default' && !groups.data.some(g=>g.subject_id===subject.id) ? <Card><Empty description="此科目尚无默认题卡组"><Button type="primary" onClick={async()=>{try{const created=await send<Row>(`/subjects/${subject.id}/default-group`);await refresh();go({...base,groupId:created.id})}catch(e){message.error((e as Error).message)}}}>创建默认题卡组</Button></Empty></Card> : <EntityTable key={subject.id} path="/groups" title="题卡组" scope={{ subject_id: subject.id }} fields={[{ name: 'name', label: '组名称' },{name:'grade_id',label:'所属年级',type:'select',options:grades.data.filter(g=>!g.archived).map(g=>({label:g.name,value:g.id}))}]} onCreated={async row => { await refresh(); if (row?.id) go({ ...base, groupId: row.id }) }} columns={[
       { title: '组名称', dataIndex: 'name', render: (_: string, row: Row) => <a href={examPath({ ...base, groupId: row.id })}>{groupName(row)}</a> },
+      {title:'年级',dataIndex:'grade_id',render:id=>grades.data.find(g=>g.id===id)?.name||'待设置'},
       { title: '题卡', render: (_: unknown, row: Row) => row.template_id ? '已发布' : '待配置' },
       { title: '成绩', render: (_: unknown, row: Row) => <Tag color={row.frozen ? 'green' : 'default'}>{row.frozen ? '已发布' : '未发布'}</Tag> },
       { title: '操作', render: (_: unknown, row: Row) => <Space><Button icon={<RightOutlined />} iconPosition="end" onClick={() => go({ ...base, groupId: row.id })}>进入工作台</Button><HierarchyDelete kind="groups" target={row} onDeleted={refresh} /></Space> },
@@ -66,7 +67,7 @@ export function Exams({ location, navigate }: { location: ExamLocation; navigate
       ]} /> },
       { key: 'summary', label: '跨科成绩', children: <Results admin projectId={project.id} projectOnly /> },
       { key: 'archives', label: '归档与释放', children: <ArchiveManager projectId={project.id} /> },
-      {key:'rooms',label:'考场标签',children:<RoomTagManager projectId={project.id}/>},
+      {key:'rooms',label:'年级与考场',children:<RoomTagManager projectId={project.id}/>},
       { key: 'storage', label: '存储设置', children: <ProjectStorage project={project} onSaved={refresh} /> },
     ]} />}
   </div>
@@ -77,7 +78,7 @@ function GroupWorkspace({ group, project, section, onSection }: { group: Row; pr
     key === 'overview' ? <GroupOverview group={group} onSection={onSection} /> :
     (key === 'scans' || key === 'marking') && !group.template_id ? <Card><Empty description={key === 'scans' ? '发布题卡后即可建立扫描批次' : '发布题卡后即可分配教师与阅卷'}><Button type="primary" onClick={() => onSection('template')}>配置题卡</Button></Empty></Card> :
     key === 'template' ? <TemplateEditor groupId={group.id} /> : key === 'roster' ? <Roster groupId={group.id} /> :
-    key === 'scans' ? <Scans groupId={group.id} /> : key === 'marking' ? <Marking admin groupId={group.id} /> :
+    key === 'scans' ? <Space direction="vertical" size={24} style={{width:'100%'}}><RoomTagManager projectId={project.id} groupId={group.id}/><Scans groupId={group.id} /></Space> : key === 'marking' ? <Marking admin groupId={group.id} /> :
     key === 'exceptions' ? <Exceptions groupId={group.id} /> : <Results admin groupId={group.id} projectId={project.id} />,
   }))} />
 }
@@ -87,7 +88,7 @@ function GroupOverview({ group, onSection }: { group: Row; onSection: (section: 
   const template = templates.data.find(t => t.id === group.template_id), drafts = templates.data.filter(t => t.group_id === group.id && t.status === 'draft')
   const entries = [
     { key: 'template', label: '题卡设计', detail: template ? `${template.name} · 已发布` : drafts.length ? `${drafts.length} 份草稿待发布` : '创建或从题卡库选用版式', action: template ? '查看题卡' : '配置题卡' },
-    { key: 'roster', label: '应考名单', detail: roster.data?.configured ? `${roster.data.students.length} 名应考学生` : '选择班级或学生', action: '管理名单' },
+    { key: 'roster', label: '应考名单', detail: roster.data?.configured ? `${roster.data.students.length} 名应考学生` : '设置所属年级', action: '管理名单' },
     { key: 'scans', label: '扫描与补扫', detail: '采集批次、纠正页面与处理补扫', action: '管理扫描' },
     { key: 'marking', label: '阅卷', detail: '分配教师、评阅作答与查看进度', action: '进入阅卷' },
     { key: 'exceptions', label: '异常核查', detail: '核查识别与评阅中的待处理事项', action: '查看异常' },
