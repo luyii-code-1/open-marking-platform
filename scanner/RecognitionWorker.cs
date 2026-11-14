@@ -56,6 +56,6 @@ public sealed class RecognitionWorker : IDisposable
         finally{_gate.Release();}
     }
 
-    public Task<JsonElement> Recognize(BatchRow batch,PageRow page,CancellationToken cancel=default)=>Call("recognize",new{batch_id=batch.Id,capture_id=page.CaptureId,side=page.Side,source_sha256=page.Sha256,config_sha256=batch.ConfigSha256,template=JsonSerializer.Deserialize<JsonElement>(batch.TemplateJson)},cancel);
+    public Task<JsonElement> Recognize(BatchRow batch,PageRow page,CancellationToken cancel=default)=>Call("recognize",new{batch_id=batch.Id,capture_id=page.CaptureId,side=page.Side,source_extension=Path.GetExtension(page.Path),source_sha256=page.Sha256,config_sha256=batch.ConfigSha256,template=JsonSerializer.Deserialize<JsonElement>(batch.TemplateJson)},cancel);
     public void Dispose(){if(_disposed)return;_disposed=true;if(_process is {HasExited:false}){_process.Kill(entireProcessTree:true);_process.WaitForExit(5000);}_process?.Dispose();_process=null;_gate.Dispose();}
 }

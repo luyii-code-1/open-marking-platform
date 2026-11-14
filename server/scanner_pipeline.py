@@ -117,6 +117,7 @@ def image_bytes(file, expected_shape=None):
 
 def verified_absence(template, side, result, normalized):
     # Recheck moved marks on the corrected image supplied by existing scanner engines.
+    if side=='front' and 'operator_correction' in result:return result['absent_mark']
     from . import sheet_notices
     if template.get('notice_layout',1)==2 and sheet_notices.enabled(template):
         from .omr import absent_mark
@@ -181,6 +182,19 @@ def upload_processed(identifier: str, file: UploadFile = File(), normalized: Upl
             try: verify_result(template, side, result, original, corrected, packed)
             except (TypeError, KeyError, cv2.error): raise HTTPException(422, '本地识读清单结构无效')
             existing = get(db, capture_id, 'pages')
+            correction=result.get('operator_correction')
+            if 'operator_correction' in result:
+                if side!='front' or not isinstance(correction,dict) or not isinstance(correction.get('original_number'),str) or len(correction['original_number'])>11 or type(correction.get('original_absent')) is not bool:
+                    raise HTTPException(422,'人工更正记录无效')
+                correction={k:correction[k] for k in ('original_number','original_absent')}
+                if existing and (existing.get('candidate_number')!=result['candidate_number'] or existing.get('absent_mark')!=result['absent_mark'] or existing.get('operator_correction')!=correction):
+                    raise HTTPException(409,'页面已上传，请在管理后台核查')
+                if not existing:
+                    from .school import group_students
+                    if not any(s['candidate_number']==result['candidate_number'] for s in group_students(db,group) or []):
+                        raise HTTPException(422,'更正的准考证号不在当前题卡名单中')
+                    if any(s.get('pages') or s.get('status')=='absent' for s in find(db,'submissions',group_id=group['id'],candidate_number=result['candidate_number'])):
+                        raise HTTPException(409,'此考生已有答卷')
             if existing:
                 if any(existing.get(k) != value for k, value in (('batch_id', identifier), ('side', side), ('sequence', sequence), ('sha256', result['source_sha256']), ('normalized_sha256', result['normalized_sha256']), ('local_cuts_sha256', result['local_cuts_sha256']))): raise HTTPException(409, '捕获编号已用于其他页面内容')
                 return existing
@@ -193,6 +207,7 @@ def upload_processed(identifier: str, file: UploadFile = File(), normalized: Upl
             page = put(db, 'pages', {'id': capture_id, 'batch_id': identifier, 'side': side, 'sequence': sequence, 'status': 'recognized',
                                    'sha256': result['source_sha256'], 'normalized_sha256': result['normalized_sha256'],
                                    'local_cuts_sha256': result['local_cuts_sha256'], 'local_cuts_normalized_sha256': result['normalized_sha256'],
+                                   **({'operator_correction':correction,'corrected_by':current['id']} if correction else {}),
                                    'local_cuts': result['cuts'], 'candidate_number': result['candidate_number'], 'selections': result['selections'],
                                    'absent_mark': verified_absence(template,side,result,corrected), 'recognition_engine': result['engine_version'], 'recognition_source': 'device',
                                    'image_url': f'/api/v1/pages/{capture_id}/image'}, current['id'])

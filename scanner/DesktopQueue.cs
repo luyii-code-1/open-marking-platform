@@ -23,6 +23,11 @@ public sealed partial class LocalQueue
     public string PairLocally(BatchRow batch)
     {
         var pages=Pages(batch.Id).Where(p=>p.Status!="excluded").ToList();
+        batch.LocalPairsJson=BuildPairs(batch,pages);SaveDesktopBatch(batch);BatchStatus(batch.Id,"local_paired");return batch.LocalPairsJson;
+    }
+
+    private static string BuildPairs(BatchRow batch,List<PageRow> pages)
+    {
         if(pages.Count==0||pages.Any(p=>p.Status=="blocked"||p.RecognitionJson=="{}"))throw new InvalidOperationException("请先完成本地识读并处理异常页面。");
         var fronts=pages.Where(p=>p.Side=="front").OrderBy(p=>p.Sequence).ToArray();
         var backs=pages.Where(p=>p.Side=="back").OrderBy(p=>p.Sequence).ToArray();
@@ -39,6 +44,23 @@ public sealed partial class LocalQueue
             if(known is not null&&!known.Contains(candidate))throw new InvalidOperationException("考号不在下载的应考名单中，请核查项目配置。");
             pairs.Add(new {candidate_number=candidate,pages=batch.Sides==2?new[]{fronts[i].CaptureId,backs[i].CaptureId}:new[]{fronts[i].CaptureId}});
         }
-        batch.LocalPairsJson=JsonSerializer.Serialize(pairs);SaveDesktopBatch(batch);BatchStatus(batch.Id,"local_paired");return batch.LocalPairsJson;
+        return JsonSerializer.Serialize(pairs);
     }
+    public void SaveCorrection(BatchRow batch,PageRow page,string recognition)
+    {
+        var pages=Pages(batch.Id).Where(p=>p.Status!="excluded").ToList();
+        var front=pages.Single(p=>p.CaptureId==page.CaptureId);
+        front.RecognitionJson=recognition;front.Status="pending";
+        string pairs="[]",status="local_paired",error="";
+        try{pairs=BuildPairs(batch,pages);}
+        catch(InvalidOperationException issue){status="frozen";error=issue.Message;}
+        using var db=Open();using var tx=db.BeginTransaction();using var cmd=db.CreateCommand();
+        cmd.Transaction=tx;cmd.CommandText="""
+            UPDATE pages SET recognition_json=$recognition,status='pending',error='' WHERE capture_id=$page;
+            UPDATE batches SET local_pairs_json=$pairs,status=$status,error=$error WHERE id=$batch;
+            """;
+        foreach(var (key,value) in new[]{("$recognition",recognition),("$page",page.CaptureId),("$pairs",pairs),("$status",status),("$error",error),("$batch",batch.Id)})cmd.Parameters.AddWithValue(key,value);
+        cmd.ExecuteNonQuery();tx.Commit();
+    }
+
 }

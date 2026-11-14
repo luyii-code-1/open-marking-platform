@@ -66,6 +66,10 @@ internal static class DesktopSelfTest
                     var original=Json(await offline.Invoke("originalPage",Json(new{batch_id=batchId,page_id=id})));
                     Check(Convert.FromBase64String(original.GetProperty("url").GetString()!.Split(',')[1]).SequenceEqual(File.ReadAllBytes(queue.Pages(batchId).Single(p=>p.CaptureId==id).Path)),"Original scan differs from saved file.");
                 }
+                var frontId=review[0].GetProperty("id").GetString();
+                var corrected=Json(await offline.Invoke("correctAnswer",Json(new{batch_id=batchId,page_id=frontId,candidate_number="023",absent=true})));
+                Check(corrected[0].GetProperty("candidate").GetString()=="023"&&corrected[0].GetProperty("absent").GetBoolean(),"Offline correction failed.");
+                await offline.Invoke("correctAnswer",Json(new{batch_id=batchId,page_id=frontId,candidate_number="023",absent=false}));
                 var firstQuestion=JsonDocument.Parse(batch.TemplateJson).RootElement.GetProperty("questions")[0];
                 var preview=Json(await offline.Invoke("preview",Json(new{batch_id=batchId,page_id=queue.Pages(batchId).First(p=>p.Side=="front").CaptureId,question_id=firstQuestion.GetProperty("id").GetString()})));
                 using(var imageStream=new MemoryStream(Convert.FromBase64String(preview.GetProperty("url").GetString()!.Split(',')[1])))

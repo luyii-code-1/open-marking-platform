@@ -2,7 +2,7 @@ import type { Row } from './api'
 
 export const groupSections = [
   ['overview', '工作台'], ['template', '题卡设计'], ['roster', '应考名单'],
-  ['scans', '扫描与补扫'], ['marking', '阅卷'], ['exceptions', '异常核查'], ['results', '成绩'],
+  ['scans', '扫描与补扫'], ['marking', '阅卷分配'], ['exceptions', '异常核查'], ['results', '成绩'],
 ] as const
 export type GroupSection = typeof groupSections[number][0]
 export type ExamLocation = { projectId?: string; subjectId?: string; gradeId?:string; groupId?: string; section?: string }
@@ -14,7 +14,7 @@ export function subjectGrades(subject:Row,groups:Row[],grades:Row[]=[]):Row[]{
   return ids.map(id=>({id,name:id===unassignedGrade?'待设置年级':grades.find(g=>g.id===id)?.name||children.find(g=>g.grade_id===id)?.grade_name||'年级',count:children.filter(g=>(g.grade_id||unassignedGrade)===id).length}))
 }
 export type Location = ExamLocation & { page: string; templateId?: string; questionId?: string }
-const pages = new Set(['dashboard', 'scanner', 'exams', 'marking', 'exceptions', 'results', 'people', 'conversions', 'settings', 'account', 'login', 'archives'])
+const pages = new Set(['dashboard', 'scanner', 'subject-catalog', 'exams', 'marking', 'exceptions', 'results', 'people', 'conversions', 'settings', 'account', 'login', 'archives'])
 
 export function examPath(location: ExamLocation = {}) {
   const { projectId, subjectId, gradeId,groupId, section } = location

@@ -151,14 +151,14 @@ def test_existing_group_can_explicitly_adopt_grade_membership(school):
 def test_workflow_membership_changes_and_capture_progress(school):
     f=school;r=f['request'];group=f['groups'][0];base='groups/'+group['id']
     first=r('GET',base+'/workflow')
-    assert first['roster_count']==3 and first['room_expected']==2 and first['roster_needs_review']
+    assert first['roster_count']==3 and first['room_expected']==2 and not first['roster_needs_review']
     r('POST',base+'/roster/review',{'student_ids':[]},409)
     r('POST',base+'/roster/review',{'student_ids':[s['id'] for s in f['students']]})
     assert not r('GET',base+'/workflow')['roster_needs_review']
     batch,page,_=f['pair'](f['students'][0])
     r('PUT','students/'+f['students'][0]['id'],{'class_id':f['other_cls']['id']})
     changes=r('GET',base+'/roster/changes')
-    assert len(changes['removed'])==1 and len(changes['retained'])==1 and changes['needs_review']
+    assert len(changes['removed'])==1 and len(changes['retained'])==1 and not changes['needs_review']
     newcomer=f['post']('students',{'name':'新生','candidate_number':'000000004','class_id':f['cls']['id']})
     assert r('GET',base+'/roster/changes')['added'][0]['id']==newcomer['id']
     state=r('GET',base+'/workflow')
@@ -179,7 +179,7 @@ def test_scan_close_publication_and_absent_mark_remain_distinct(school):
         db.put(c,'pages',{'batch_id':second['id'],'side':'front','sequence':1,'status':'recognized','candidate_number':f['students'][1]['candidate_number'],'absent_mark':True,'selections':{}})
     f['post']('scan-batches/'+second['id']+'/pair')
     state=r('GET',base+'/workflow');assert state['results']['absent']==1 and state['results']['unscanned']==1
-    r('POST',base+'/scan-close',{'confirm':True,'signature':state['scan_signature']},409)
+    r('POST',base+'/scan-close',{'confirm':True,'signature':state['scan_signature']})
     r('POST',base+'/roster/review',{'student_ids':[s['id'] for s in f['students']]})
     state=r('GET',base+'/workflow');r('POST',base+'/scan-close',{'confirm':True,'signature':state['scan_signature']})
     r('POST','results/publish',{'group_id':g['id']},409)
@@ -247,3 +247,25 @@ def test_batch_rooms_and_delete_unused_records(school):
         request('DELETE',f"records/{kind}/{row['id']}")
     teacher=post('users',{'username':'unused-teacher','name':'测试教师','role':'teacher','password':'teacher-password'})
     request('DELETE','records/users/'+teacher['id'])
+
+
+def test_catalog_exam_creation_and_roster_snapshot(school):
+    f=school;r=f['request'];grade=f['grade']['id'];students=[s['id'] for s in f['students']]
+    body={'grade_id':grade,'subject':'物理','kind':'elective','student_ids':students[:1]}
+    item=r('PUT','electives',body)
+    other=r('PUT','electives',{**body,'grade_id':f['other_grade']['id'],'kind':'required','student_ids':[]})
+    tags=[t for t in r('GET','subject-tags') if t['name']=='物理']
+    assert len(tags)==1
+    project=r('POST','projects',{'name':'期中','catalog_ids':[tags[0]['id']]})
+    subjects=[s for s in r('GET','subjects') if s['project_id']==project['id']]
+    assert len(subjects)==1 and not subjects[0].get('grade_ids') and subjects[0]['subject_tag_id']==tags[0]['id']
+    assert not any(g['subject_id']==subjects[0]['id'] for g in r('GET','groups'))
+    card=r('POST','groups',{'name':'物理题卡','subject_id':subjects[0]['id'],'grade_id':grade})
+    base='groups/'+card['id']+'/roster'
+    def roster():return {s['id'] for s in r('GET',base)['students']}
+    assert roster()==set(students[:1])
+    r('POST',base+'/add-students',{'student_ids':[students[2]]})
+    r('PUT','electives',{**body,'student_ids':students[1:2]})
+    assert roster()=={students[0],students[2]}
+    r('POST',base+'/elective')
+    assert roster()==set(students[1:])

@@ -220,6 +220,9 @@ def create_route(kind):
                 if not isinstance(weights,dict) or any(k not in ids or not isinstance(w,(int,float)) or not 0<=w<=255 for k,w in weights.items()): raise HTTPException(422,'教师权重应在0至255之间')
                 arbitrators=value.get('arbitrator_ids',[])
                 if not isinstance(arbitrators,list) or any(not db.execute('SELECT 1 FROM users WHERE id=?',(identifier,)).fetchone() for identifier in arbitrators):raise HTTPException(422,'仲裁教师无效')
+                arb_weights=value.get('arbitrator_weights',{})
+                if not isinstance(arb_weights,dict) or any(k not in arbitrators or type(w) not in (int,float) or not 0<=w<=255 for k,w in arb_weights.items()):
+                    raise HTTPException(422,'仲裁权重应在0至255之间')
                 from .allocation import validate as validate_assignment
                 question=next(q for q in template['questions'] if q['id']==value['question_id'])
                 if question['type']!='subjective':raise HTTPException(422,'客观题无需分配教师')
@@ -251,7 +254,21 @@ def create_route(kind):
                     raise HTTPException(422,'请先发布题卡')
                 template=require(db,group['template_id'],'templates')
                 value.update(status='front',template_id=template['id'],template_revision=template['revision'])
+            if kind=='subjects':
+                from .electives import subject_tag
+                tag=subject_tag(db,value['name'],current['id'])
+                value.update(name=tag['name'],subject_tag_id=tag['id'])
+            catalog_ids=value.pop('catalog_ids',[]) if kind=='projects' else []
             result=put(db,kind,value,current['id'])
+            if kind=='projects' and catalog_ids:
+                from .electives import create_exam_subjects
+                create_exam_subjects(db,result,catalog_ids,current['id'])
+            if kind=='groups' and result.get('grade_id'):
+                from .electives import card_catalog,members,save_members
+                entry=card_catalog(db,result)
+                if entry and entry.get('kind_of_subject','elective')=='elective':
+                    save_members(db,result,members(db,result['grade_id'],set(entry['student_ids'])),'elective',set(),current['id'])
+                    result=require(db,result['id'],'groups')
             if kind=='subjects' and value.get('group_mode')=='default':
                 from .templates import default_group
                 group=default_group(db,result['id'],current['id']);result['default_group_id']=group['id']

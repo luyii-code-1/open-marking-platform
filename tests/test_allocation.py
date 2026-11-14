@@ -37,7 +37,7 @@ def test_weighted_quotas_skip_and_reallocation(tmp_path,monkeypatch):
         assignment={**scope,'user_ids':[u for u,_ in teachers],'weights':{teachers[0][0]:3,teachers[1][0]:1,teachers[2][0]:0}}
         response=client.post('/api/v1/assignments',json=assignment,headers=admin)
         assert response.status_code==200,response.text
-        for teacher,expected in zip(teachers,(9,3,0)):
+        for teacher,expected in zip(teachers,(6,6,0)):
             progress=client.get('/api/v1/review-progress',params=scope,headers=teacher[1]).json()
             assert progress['my_total']==expected
         completed=[]
@@ -69,7 +69,7 @@ def test_weighted_quotas_skip_and_reallocation(tmp_path,monkeypatch):
         scored=client.post('/api/v1/tasks/'+second['id']+'/score',json={'score':10,'idempotency_key':str(uuid.uuid4())},headers=teachers[0][1])
         assert scored.status_code==200
         progress=client.get('/api/v1/review-progress',params=scope,headers=teachers[0][1]).json()
-        assert progress['my_total']==3 and progress['my_completed']==1 and progress['my_progress']==33.3
+        assert progress['my_total']==6 and progress['my_completed']==1 and progress['my_progress']==16.7
         assert client.post('/api/v1/tasks/claim',json=scope,headers=teachers[2][1]).json() is None
 
 
@@ -106,3 +106,22 @@ def test_fixed_arbiter_has_access_and_cannot_mark_first(tmp_path,monkeypatch):
         assert client.post('/api/v1/tasks/'+first['id']+'/regrade-from',json={'reason':'再次检查'},headers=teachers[0][1]).status_code==409
         invalid={**assignment,'arbitrator_ids':[teachers[0][0]]}
         assert client.post('/api/v1/assignments',json=invalid,headers=admin).status_code==422
+
+def test_weighted_arbitration_pool(tmp_path,monkeypatch):
+    monkeypatch.setattr(db,'ROOT',tmp_path)
+    with TestClient(app) as client:
+        admin,teachers=setup(client,4)
+        scope=seed(8,'double')
+        ids=[u for u,_ in teachers]
+        assignment={**scope,'user_ids':ids[:2],'arbitration_mode':'weighted',
+                    'arbitrator_ids':ids,'arbitrator_weights':dict(zip(ids,[10,10,3,1]))}
+        response=client.post('/api/v1/assignments',json=assignment,headers=admin)
+        assert response.status_code==200,response.text
+        for teacher,score in zip(teachers[:2],[5,15]):
+            for _ in range(8):
+                task=client.post('/api/v1/tasks/claim',json=scope,headers=teacher[1]).json()
+                result=client.post('/api/v1/tasks/'+task['id']+'/score',json={'score':score,'idempotency_key':str(uuid.uuid4())},headers=teacher[1])
+                assert result.status_code==200,result.text
+        for teacher,expected in zip(teachers[2:],[4,4]):
+            progress=client.get('/api/v1/review-progress',params=scope,headers=teacher[1]).json()
+            assert progress['my_total']==expected

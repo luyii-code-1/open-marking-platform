@@ -33,8 +33,8 @@ public static class ElectronHost
         try
         {
             var testRoot=args.Length==2&&args[0]=="--transport-self-test"?Path.GetFullPath(args[1]):null;
-            using var instance=new DesktopInstance();
-            if(!instance.Primary)throw new InvalidOperationException("扫描客户端已经运行，请先关闭现有扫描窗口。");
+            using var instance=testRoot is null ? new DesktopInstance() : null;
+            if(instance is {Primary:false})throw new InvalidOperationException("扫描客户端已经运行，请先关闭现有扫描窗口。");
             var closed=false;
             using var controller=new DesktopController(testRoot is null?null:new LocalQueue(testRoot));
             controller.Changed=()=>Send(new{ @event="changed",protocol=DesktopController.Protocol });

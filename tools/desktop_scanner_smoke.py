@@ -53,6 +53,7 @@ def run(scanner_dll=None,bundled=False,back_first=False):
                 project=post('projects',{'name':'离线工作区验证'});subject=post('subjects',{'project_id':project['id'],'name':'语文','group_mode':'default'});group_id=subject['default_group_id']
                 grade=post('grades',{'name':'高一'});api.put('groups/'+group_id+'/grade',json={'grade_id':grade['id']}).raise_for_status()
                 cls=post('classes',{'name':'一班','grade_id':grade['id']});post('students',{'class_id':cls['id'],'name':'学生','candidate_number':'123'})
+                post('students',{'class_id':cls['id'],'name':'更正考生','candidate_number':'023'})
                 post('projects/'+project['id']+'/room-tags',{'name':'第一考场','group_id':group_id,'expected_students':1})
                 pairing=post('scanner/pairings',None)
                 template=post('templates',{'group_id':group_id,'name':'本机双面卷','paper':'A4','sides':2,'candidate_length':3,'questions':[
@@ -92,10 +93,10 @@ def run(scanner_dll=None,bundled=False,back_first=False):
                     elif checkpoint=='passed':break
                 else:raise TimeoutError('本地识读验证未能完成')
                 assert native.wait(timeout=10)==0,native.stderr.read()[-2000:]
-                response=api.get('results',params={'group_id':group_id});response.raise_for_status();rows=response.json();assert len(rows)==1 and rows[0]['candidate_number']=='123' and rows[0]['total']==5
+                response=api.get('results',params={'group_id':group_id});response.raise_for_status();rows=[r for r in response.json() if r['candidate_number']=='023'];assert len(rows)==1 and rows[0]['total']==5
                 assert {t['name'] for t in rows[0]['room_tags']}=={'第一考场'}
                 status=api.get('scanner/pairings/'+pairing['id']);status.raise_for_status();assert status.json()['status']=='paired'
-                result={'status':'passed','scope':'headless desktop controller','manager_pairing':True,'uri_and_single_instance':True,'offline_room_tags':True,'offline_server_outage_and_restart':True,'bundled_engine':bundled,'first_side':'back' if back_first else 'front','pages':2,'candidate_number':'123','final_score':5,'batch_id':batch}
+                result={'status':'passed','scope':'headless desktop controller','manager_pairing':True,'uri_and_single_instance':True,'offline_room_tags':True,'offline_server_outage_and_restart':True,'bundled_engine':bundled,'first_side':'back' if back_first else 'front','pages':2,'candidate_number':'023','final_score':5,'batch_id':batch}
                 print(json.dumps(result,ensure_ascii=False),flush=True);return result
         finally:
             if native and native.poll() is None:stop(native)
