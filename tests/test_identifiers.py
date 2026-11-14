@@ -30,17 +30,20 @@ def test_question_ids_global_retired_and_transactional_through_api(tmp_path,monk
         assert create({**body,'questions':[question,question]}).status_code==409
         assert create({**body,'questions':[None]}).status_code==422
         assert create({**body,'questions':[{**question,'id':'invalid'}]}).status_code==422
-        assert client.put(url,json={'questions':[question],'name':'编辑原题'},headers=headers).status_code==200
+        edited=client.put(url,json={'questions':[question],'name':'编辑原题'},headers=headers)
+        assert edited.status_code==200
+        version=edited.json()['draft_version']
         unused=str(uuid4())
-        failed=client.put(url,json={'questions':[{**question,'id':unused},{**question,'id':project['id']}]},headers=headers)
+        failed=client.put(url,json={'draft_version':version,'questions':[{**question,'id':unused},{**question,'id':project['id']}]},headers=headers)
         assert failed.status_code==409
         with db.connect() as connection:
             assert not connection.execute('SELECT 1 FROM identifiers WHERE id=?',(unused,)).fetchone()
             assert db.get(connection,tid)['questions']==[question]
         copied=create({**body,'name':'副本','questions':[{**question,'id':str(uuid4())}]})
         assert copied.status_code==200
-        assert client.put(url,json={'questions':[]},headers=headers).status_code==200
-        assert client.put(url,json={'questions':[question]},headers=headers).status_code==409
+        removed=client.put(url,json={'draft_version':version,'questions':[]},headers=headers)
+        assert removed.status_code==200
+        assert client.put(url,json={'draft_version':removed.json()['draft_version'],'questions':[question]},headers=headers).status_code==409
         assert create(body).status_code==409
     # A restart cannot make a removed question available again.
     db.initialize()
