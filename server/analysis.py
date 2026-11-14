@@ -1,15 +1,16 @@
 from .merged_questions import label as question_label
-import csv
-import io
 import math
+import re
 from decimal import Decimal, ROUND_HALF_UP
 from statistics import median, pstdev
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import Response
 from .db import connect, find, get, objects
 from .dependencies import user, require
+from .export_tables import ExportTable, FileFormat, table_response, workbook_response
 from .review import results_for
+from .room_tags import includes
 
 router=APIRouter(prefix='/api/v1')
 STATUS_NAMES={'completed':'已完成','pending':'待结分','absent':'缺考','unscanned':'未扫描'}
@@ -30,7 +31,6 @@ def analyze(db,group_id,current,metric='raw',include_absent=False,pass_ratio=.6,
     if metric not in ('raw','converted') or not math.isfinite(pass_ratio) or not math.isfinite(excellent_ratio) or not 0<=pass_ratio<=excellent_ratio<=1:raise HTTPException(422,'统计口径或比例无效')
     group=require(db,group_id,'groups')
     template=require(db,group.get('template_id'),'templates')
-    from .room_tags import includes
     rows=[r for r in results_for(db,group_id,current) if includes(r,room_tag_id)]
     maximum=sum(q['points'] for q in template['questions'])
     if metric=='converted':
@@ -82,7 +82,7 @@ def group_analysis(group_id:str,metric:str='raw',include_absent:bool=False,pass_
         return analyze(db,group_id,current,metric,include_absent,pass_ratio,excellent_ratio,room_tag_id)
 
 
-def project_rows(db,identifier,current):
+def project_result_groups(db,identifier,current):
     project=require(db,identifier,'projects')
     subjects={s['id']:s for s in find(db,'subjects',project_id=identifier)}
     groups=[g for g in objects(db,'groups') if g.get('subject_id') in subjects and g.get('template_id')]
@@ -92,9 +92,13 @@ def project_rows(db,identifier,current):
         visible=result_groups(db,current['id'])
         groups=[g for g in groups if g['id'] in visible]
         if not groups:raise HTTPException(403,'本考试暂无任教班级已发布成绩')
+    return project, subjects, groups
+
+
+def project_rows(db,identifier,current):
+    project,subjects,groups=project_result_groups(db,identifier,current)
     columns=[];students={}
     for group in groups:
-        if current['role'] not in ('admin','manager') and not group.get('frozen'):continue
         rows=results_for(db,group['id'],current)
         if not rows and current['role'] not in ('admin','manager'):continue
         grade=(get(db,group.get('grade_id'),'grades') or {}).get('name','')
@@ -116,27 +120,77 @@ def project_analysis(project_id:str,current=Depends(user)):
         return project_rows(db,project_id,current)
 
 
-def csv_response(headers,rows,filename):
-    from .operations import csv_cell
-    output=io.StringIO(newline='');writer=csv.writer(output);writer.writerow([csv_cell(v) for v in headers])
-    for row in rows:writer.writerow([csv_cell(v) for v in row])
-    return Response(('\ufeff'+output.getvalue()).encode('utf-8'),media_type='text/csv; charset=utf-8',headers={'Content-Disposition':f'attachment; filename={filename}.csv'})
+def question_score_table(db, group, students, title):
+    template = get(db, group.get('template_id'), 'templates') or {}
+    labels = {question_label(q) for q in template.get('questions', [])}
+    for row in students:
+        labels.update(row['scores'])
+    # Older submissions can refer to a previous template with different printed numbers.
+    labels = sorted(labels, key=lambda label: tuple(map(int, re.findall(r'\d+', label))))
+    headings = ['准考证号', '姓名', '班级', '状态', '总分', '赋分']
+    for label in labels:
+        combined = '～' in label or '、' in label
+        headings.append(f'第{label}题' + ('（合计）' if combined else ''))
+    headings.extend(['年级', '考场'])
+
+    def student_rows():
+        for row in students:
+            yield [
+                str(row['candidate_number']), row['name'], row['class_name'], STATUS_NAMES[row['status']],
+                row['total'], row.get('converted_score'), *(row['scores'].get(label) for label in labels),
+                row.get('grade'), '、'.join(tag.get('label') or tag['name'] for tag in row.get('room_tags', [])),
+            ]
+
+    return ExportTable(title, headings, student_rows(), 'C2')
+
+
+@router.get('/results/export')
+def export_results(group_id: str, room_tag_id: str | None = None, current=Depends(user), format: FileFormat = 'csv'):
+    with connect() as db:
+        db.execute('BEGIN')
+        group = require(db, group_id, 'groups')
+        students = [r for r in results_for(db, group_id, current) if includes(r, room_tag_id)]
+        table = question_score_table(db, group, students, '小题分')
+    return table_response(table, 'results', format)
 
 
 @router.get('/analysis/group/export')
-def export_group(group_id:str,view:str='classes',metric:str='raw',include_absent:bool=False,pass_ratio:float=.6,excellent_ratio:float=.85,current=Depends(user),room_tag_id:str|None=None):
+def export_group(group_id:str,view:str='classes',metric:str='raw',include_absent:bool=False,pass_ratio:float=.6,excellent_ratio:float=.85,current=Depends(user),room_tag_id:str|None=None,format:FileFormat='csv'):
     data=group_analysis(group_id,metric,include_absent,pass_ratio,excellent_ratio,current,room_tag_id)
     if view=='students':
-        return csv_response(['考号','姓名','班级','状态','原始分','赋分','当前可见范围排名','班级排名','考场','年级'],[[STATUS_NAMES.get(r.get(k),r.get(k)) if k=='status' else r.get(k) for k in ('candidate_number','name','class_name','status','total','converted_score','scope_rank','class_rank')]+['、'.join(t.get('label',t['name']) for t in r.get('room_tags',[])),r.get('grade')] for r in data['students']],'student-analysis')
+        headers=['考号','姓名','班级','状态','原始分','赋分','当前可见范围排名','班级排名','考场','年级']
+        rows=([STATUS_NAMES.get(r.get(k),r.get(k)) if k=='status' else r.get(k) for k in ('candidate_number','name','class_name','status','total','converted_score','scope_rank','class_rank')]+['、'.join(t.get('label',t['name']) for t in r.get('room_tags',[])),r.get('grade')] for r in data['students'])
+        return table_response(ExportTable('考生成绩与排名',headers,rows,'C2'),'student-analysis',format)
     if view=='distribution':
-        return csv_response(['下界（含）','上界','上界包含','人数'],[[r['lower'],r['upper'],r['upper_inclusive'],r['count']] for r in data['distribution']],'score-distribution')
+        rows=([r['lower'],r['upper'],r['upper_inclusive'],r['count']] for r in data['distribution'])
+        return table_response(ExportTable('分数分布',['下界（含）','上界','上界包含','人数'],rows),'score-distribution',format)
     if view not in ('classes','questions'):raise HTTPException(422,'导出类型无效')
     fields=('analyzed','average','median','minimum','maximum','standard_deviation','score_rate','pass_count','pass_rate','excellent_count','excellent_rate')
-    return csv_response(['班级' if view=='classes' else '题号','统计口径','满分','缺考参与统计','及格比例','优秀比例','统计人数','平均分','中位数','最低分','最高分','标准差','得分率%','及格人数','及格率%','优秀人数','优秀率%'],[[r['name'] if view=='classes' else r['number'],'原始分' if view=='questions' or metric=='raw' else '赋分',r['points'] if view=='questions' else data['full_score'],include_absent,pass_ratio,excellent_ratio]+[r[k] for k in fields] for r in data[view]],view+'-analysis')
+    headers=['班级' if view=='classes' else '题号','统计口径','满分','缺考参与统计','及格比例','优秀比例','统计人数','平均分','中位数','最低分','最高分','标准差','得分率%','及格人数','及格率%','优秀人数','优秀率%']
+    rows=([r['name'] if view=='classes' else r['number'],'原始分' if view=='questions' or metric=='raw' else '赋分',r['points'] if view=='questions' else data['full_score'],include_absent,pass_ratio,excellent_ratio]+[r[k] for k in fields] for r in data[view])
+    return table_response(ExportTable('班级统计' if view=='classes' else '单题分析',headers,rows),view+'-analysis',format)
 
 
 @router.get('/analysis/project/export')
-def export_project(project_id:str,current=Depends(user)):
+def export_project(project_id:str,current=Depends(user),view:Literal['summary','items']='summary',format:FileFormat|None=None):
+    if view == 'items':
+        if format == 'csv':
+            raise HTTPException(422, '多题卡小题分请使用 Excel 工作簿')
+        with connect() as db:
+            db.execute('BEGIN')
+            _, subjects, groups = project_result_groups(db, project_id, current)
+            grades = {g['id']: g['name'] for g in objects(db, 'grades')}
+            def sheets():
+                for group in groups:
+                    students = results_for(db, group['id'], current)
+                    if not students and current['role'] not in ('admin', 'manager'):
+                        continue
+                    subject = subjects[group['subject_id']]['name']
+                    grade = grades.get(group.get('grade_id'), '')
+                    card = subject + '题卡' if group.get('is_default') or group['name'] == 'Default' else group['name']
+                    title = '·'.join(part for part in (subject, grade, card) if part)
+                    yield question_score_table(db, group, students, title)
+            return workbook_response(sheets(), 'project-question-scores')
     data=project_analysis(project_id,current)
     columns=data['columns']
     headers=['考号','姓名','班级','已完成记录','缺考记录','待结分记录','未扫描记录','已记录原始分合计','已记录采用分合计']
@@ -149,4 +203,4 @@ def export_project(project_id:str,current=Depends(user)):
             row.extend(STATUS_NAMES.get(score.get(k),score.get(k)) if k=='status' else score.get(k) for k in ('raw','converted','status'))
             row.append('、'.join(t.get('label',t['name']) for t in score.get('room_tags',[])))
         rows.append(row+[student.get('grade')])
-    return csv_response(headers+['学生年级'],rows,'project-results')
+    return table_response(ExportTable('跨科成绩汇总',headers+['学生年级'],rows,'C2'),'project-results',format or 'csv')

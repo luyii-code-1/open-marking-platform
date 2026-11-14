@@ -7,13 +7,15 @@ import { ErrorNotice } from './EntityTable'
 
 export function RoomTagBadges({tags}:{tags?:Row[]}){return <Space size={[0,4]} wrap>{(tags||[]).map(t=><Tag key={t.id}>{t.label||[t.grade_name,t.name].filter(Boolean).join('－')}</Tag>)}</Space>}
 
-export function RoomTagPicker({projectId,groupId,value,onChange,multiple=false}:{projectId?:string;groupId?:string;value?:any;onChange?:(value:any)=>void;multiple?:boolean}){
+export function RoomTagPicker({projectId,groupId,value,onChange,multiple=false}:{projectId?:string;groupId?:string;value?:any;onChange?:(value:any,label?:string)=>void;multiple?:boolean}){
   const groups=useResource<Row[]>(groupId?'/groups':null,[]),subjects=useResource<Row[]>(groupId?'/subjects':null,[])
   const group=groups.data.find(g=>g.id===groupId),subject=subjects.data.find(s=>s.id===group?.subject_id),scope=projectId||subject?.project_id
   const projects=useResource<Row[]>(!scope&&!groupId?'/projects':null,[])
   const params=new URLSearchParams({...scope?{project_id:scope}:{},...group?.grade_id?{group_id:group.id}:{}})
   const tags=useResource<Row[]>(groupId&&!scope?null:`/room-tags?${params}`,[]),single=multiple&&!!group?.grade_id
-  return <Select mode={multiple&&!single?'multiple':undefined} allowClear showSearch optionFilterProp="label" style={{minWidth:200,maxWidth:'100%'}} placeholder={multiple?'选择年级－考场':'全部考场'} value={single?value?.[0]:value||undefined} loading={tags.loading} onChange={v=>onChange?.(single?(v?[v]:[]):v)} options={tags.data.filter(t=>!multiple||!t.archived).map(t=>({value:t.id,label:(scope?'':`${projects.data.find(p=>p.id===t.project_id)?.name||''} / `)+(t.label||t.name)}))}/>
+  return <Select mode={multiple&&!single?'multiple':undefined} allowClear showSearch optionFilterProp="label" style={{minWidth:200,maxWidth:'100%'}} placeholder={multiple?'选择年级－考场':'全部考场'} value={single?value?.[0]:value||undefined} loading={tags.loading} onChange={(v,option)=>{
+    onChange?.(single?(v?[v]:[]):v,Array.isArray(option)?undefined:option?.label)
+  }} options={tags.data.filter(t=>!multiple||!t.archived).map(t=>({value:t.id,label:(scope?'':`${projects.data.find(p=>p.id===t.project_id)?.name||''} / `)+(t.label||t.name)}))}/>
 }
 
 export function RoomTagManager({projectId,groupId}:{projectId:string;groupId?:string}){
