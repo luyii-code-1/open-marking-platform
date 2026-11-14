@@ -120,6 +120,33 @@ def absent_mark(normalized,side,template=None):
     return bool(crop.size and np.mean(crop<135)>.45)
 
 
+def orient_scan(image, template, side):
+    """Use printed fiducials and the calibration strip before interpreting answers."""
+    if not manual_binding(template):
+        return image
+    width, height = dimensions(template)
+    if (image.shape[1] > image.shape[0]) != (width > height):
+        image = cv2.rotate(image, cv2.ROTATE_90_CLOCKWISE)
+    aligned = align(image, template)
+    def has_strip(page):
+        levels = [float(np.median(page[25:29, (width-43+i*5)*4:(width-41+i*5)*4])) for i in range(5)]
+        return levels[0]-levels[-1] > 60 and all(a >= b-12 for a,b in zip(levels, levels[1:]))
+    reverse = cv2.rotate(aligned, cv2.ROTATE_180)
+    upright, inverted = has_strip(aligned), has_strip(reverse)
+    if upright != inverted:
+        return image if upright else cv2.rotate(image, cv2.ROTATE_180)
+    if side == 'front':
+        # The ten preprinted digit boxes are present even on an unfilled card.
+        def grid_score(page):
+            return sum(np.count_nonzero(page[round((57+d*3.5)*4)-4:round((57+d*3.5)*4)+5,
+                       (18+c*6)*4-8:(18+c*6)*4+9] < 150)
+                       for c in range(template.get('candidate_length',8)) for d in range(10))
+        a,b = grid_score(aligned),grid_score(reverse)
+        if max(a,b)>100 and max(a,b)>2*min(a,b):
+            return image if a>b else cv2.rotate(image,cv2.ROTATE_180)
+    raise ValueError('无法可靠确定纸面方向，请核对原图')
+
+
 def recognize(image,template,side,corners=None):
     normalized=manual_align(image,template,corners) if corners is not None else align(image,template)
     calibrated=135

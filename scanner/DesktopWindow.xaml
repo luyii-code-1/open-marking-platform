@@ -1,6 +1,21 @@
 <Window x:Class="OMP.Scanner.DesktopWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:wv="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf" Title="扫描工作台" Width="1280" Height="850" MinWidth="960" MinHeight="640" Loaded="LoadedWindow" Closing="ClosingWindow" Background="#F3F5F4">
   <Grid>
-    <wv:WebView2 x:Name="Browser" />
-    <TextBlock x:Name="LoadingText" Text="正在打开扫描工作台…" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="16" TextWrapping="Wrap" MaxWidth="600" />
+    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+    <Border Background="White" BorderBrush="#DCE1E7" BorderThickness="0,0,0,1" Padding="16,10">
+      <StackPanel Orientation="Horizontal">
+        <TextBlock Text="扫描参数" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,20,0"/>
+        <TextBlock Text="分辨率" VerticalAlignment="Center" Margin="0,0,8,0"/>
+        <ComboBox x:Name="DpiChoice" Width="110" SelectedValuePath="Tag" SelectionChanged="ScanSettingsChanged">
+          <ComboBoxItem Tag="150">150 DPI</ComboBoxItem><ComboBoxItem Tag="200">200 DPI</ComboBoxItem><ComboBoxItem Tag="300">300 DPI</ComboBoxItem><ComboBoxItem Tag="600">600 DPI</ComboBoxItem>
+        </ComboBox>
+        <TextBlock Text="色彩模式" VerticalAlignment="Center" Margin="20,0,8,0"/>
+        <ComboBox x:Name="ColorChoice" Width="100" SelectedValuePath="Tag" SelectionChanged="ScanSettingsChanged">
+          <ComboBoxItem Tag="bw">黑白</ComboBoxItem><ComboBoxItem Tag="gray">灰度</ComboBoxItem><ComboBoxItem Tag="color">彩色</ComboBoxItem>
+        </ComboBox>
+        <TextBlock Text="自动保存 · 下一次扫描生效" Foreground="#6B7280" VerticalAlignment="Center" Margin="20,0,0,0"/>
+      </StackPanel>
+    </Border>
+    <wv:WebView2 x:Name="Browser" Grid.Row="1" />
+    <TextBlock x:Name="LoadingText" Grid.Row="1" Text="正在打开扫描工作台…" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="16" TextWrapping="Wrap" MaxWidth="600" />
   </Grid>
 </Window>

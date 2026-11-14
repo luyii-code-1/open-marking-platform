@@ -59,7 +59,8 @@ def test_room_scope_expected_count_and_duplicate_guard(school):
     f=school;r=f['request'];group=f['groups'][0];room=f['rooms'][0]
     # Same physical room number is valid for a different grade/card group.
     assert f['rooms'][1]['name']==room['name'] and f['rooms'][1]['group_id']!=room['group_id']
-    for tags in ([],[f['rooms'][1]['id']],[room['id'],f['rooms'][1]['id']]):
+    assert f['post']('scan-batches',{'group_id':group['id']})['room_tags']==[]
+    for tags in ([f['rooms'][1]['id']],[room['id'],f['rooms'][1]['id']]):
         r('POST','scan-batches',{'group_id':group['id'],'room_tag_ids':tags},422)
     r('POST','projects/'+f['project']['id']+'/room-tags',{'name':'01','group_id':group['id'],'expected_students':3},409)
     r('POST','projects/'+f['project']['id']+'/room-tags',{'name':'02','group_id':group['id'],'expected_students':-1},422)
@@ -209,3 +210,15 @@ def test_official_layout_and_scoring_impact(school):
     empty=f['post']('scan-batches',{'group_id':g['id'],'room_tag_ids':[f['rooms'][0]['id']]})
     r('POST','scan-batches/'+empty['id']+'/finish-empty',{'confirm':True})
     assert next(b for b in r('GET','scan-batches') if b['id']==empty['id'])['completed_empty']
+
+def test_optional_room_can_be_assigned_after_scan(school):
+    f=school
+    batch,page,result=f['pair'](f['students'][0])
+    group=f['groups'][0]
+    answer=f['request']('GET','submissions?group_id='+group['id'])[0]
+    with db.connect() as connection:
+        db.put(connection,'submissions',{**answer,'room_tags':[]})
+    route='scanner/submissions/'+answer['id']+'/room'
+    f['request']('POST',route,{'room_id':f['rooms'][1]['id']},422)
+    f['post'](route,{'room_id':f['rooms'][0]['id']})
+    assert f['request']('GET','room-tags?group_id='+group['id'])[0]['scanned_students']==1

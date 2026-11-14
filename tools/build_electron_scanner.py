@@ -18,11 +18,18 @@ def transport_check(host):
         requests=[{'id':'state','protocol':'omp-scanner-4','method':'state','args':{}},
                   {'id':'invalid','protocol':'invalid','method':'state','args':{}},
                   {'id':'pair','protocol':'omp-scanner-4','method':'parseActivation','args':{'uri':'omp-scanner://connect?server=https%3A%2F%2Fschool.example&code=ABCDEFGHJKLM'}},
+                  {'id':'settings','protocol':'omp-scanner-4','method':'scanSettings','args':{'dpi':600,'color':'color'}},
+                  {'id':'bad-settings','protocol':'omp-scanner-4','method':'scanSettings','args':{'dpi':72,'color':'gray'}},
                   {'id':'close','protocol':'omp-scanner-4','method':'close','args':{}}]
         result=run([host,'--transport-self-test',temporary],input=''.join(json.dumps(value)+'\n' for value in requests),capture_output=True,text=True,encoding='utf-8',timeout=40)
         rows=[json.loads(line) for line in result.stdout.splitlines()];by_id={value.get('id'):value for value in rows}
         assert rows[0]['event']=='ready' and by_id['state']['result']['protocol']=='omp-scanner-4'
         assert not by_id['invalid']['ok'] and by_id['pair']['result']['server']=='https://school.example/api/v1/' and by_id['close']['ok']
+        assert by_id['settings']['result']=={'dpi':600,'color':'color'} and not by_id['bad-settings']['ok']
+        requests=[{'id':'read','protocol':'omp-scanner-4','method':'scanSettings','args':{}},{'id':'close','protocol':'omp-scanner-4','method':'close','args':{}}]
+        result=run([host,'--transport-self-test',temporary],input=''.join(json.dumps(value)+'\n' for value in requests),capture_output=True,text=True,encoding='utf-8',timeout=40)
+        by_id={value.get('id'):value for value in map(json.loads,result.stdout.splitlines())}
+        assert by_id['read']['result']=={'dpi':600,'color':'color'}
 
 def build(args):
     output=args.output.resolve();output.mkdir(parents=True,exist_ok=True)
@@ -48,6 +55,8 @@ def build(args):
             from tools.build_recognition import build as build_recognition
             build_recognition(native/'recognition')
         transport_check(native/'OMP.Scanner.Host.exe')
+        test_env={key:value for key,value in os.environ.items() if key!='ELECTRON_RUN_AS_NODE'}
+        run([electron/'dist/electron.exe',ROOT/'scanner-electron/test-runtime.cjs','--native='+str(native/'OMP.Scanner.Host.exe')],env=test_env,capture_output=True,text=True,encoding='utf-8',timeout=40)
         shutil.copytree(electron/'dist',publish)
         (publish/'electron.exe').rename(publish/'OMP.Scanner.Electron.exe')
         resource=publish/'resources';app=resource/'app';app.mkdir(parents=True)
@@ -65,8 +74,8 @@ def build(args):
         shutil.copy2(ROOT/'scanner-electron/README.md',publish/'README.md')
         tracked=subprocess.check_output(['git','-c','core.quotepath=false','ls-files','-z'],cwd=ROOT).decode('utf-8').split('\0')
         paths={Path(name) for name in tracked if name and name.split('/')[0] in ('scanner','scanner_engine','server','web','tools')}
-        paths.update(Path('scanner-electron')/name for name in ('package.json','package-lock.json','main.cjs','preload.cjs','policy.cjs','test.cjs','ScannerElectron.iss','README.md'))
-        paths.update([Path('scanner/ElectronHost.cs'),Path('scanner/ScannerBridgeSelfTest.cs'),Path('tools/build_electron_scanner.py'),Path('LICENSE'),Path('NOTICE.md')])
+        paths.update(Path('scanner-electron')/name for name in ('package.json','package-lock.json','main.cjs','preload.cjs','policy.cjs','test.cjs','test-runtime.cjs','ScannerElectron.iss','README.md'))
+        paths.update([Path('scanner/ElectronHost.cs'),Path('scanner/ScannerBridgeSelfTest.cs'),Path('scanner/ScanCaptureSettings.cs'),Path('tools/build_electron_scanner.py'),Path('LICENSE'),Path('NOTICE.md')])
         with ZipFile(publish/'SOURCE.zip','w',ZIP_DEFLATED) as archive:
             for name in sorted(paths):
                 if (ROOT/name).is_file():archive.write(ROOT/name,name.as_posix())

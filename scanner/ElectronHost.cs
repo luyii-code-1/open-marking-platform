@@ -17,6 +17,7 @@ public static class ElectronHost
     [STAThread]
     public static int Main(string[] args)
     {
+        if(args.FirstOrDefault()=="--device-plugin")return DevicePlugin.Serve().GetAwaiter().GetResult();
         Console.InputEncoding=new UTF8Encoding(false);Console.OutputEncoding=new UTF8Encoding(false);
         if(args.FirstOrDefault()=="--scan-bridge-self-test")
         {

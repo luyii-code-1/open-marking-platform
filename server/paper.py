@@ -243,7 +243,7 @@ def pdf(template):
             label='该区域禁止答题';font_size=min(11,(rw-4)*mm/8);label_width=pdfmetrics.stringWidth(label,FONT,font_size)
             c.setFillGray(1);c.rect((x+rw/2)*mm-label_width/2-3,(h-y-rh/2)*mm-4,label_width+6,font_size+4,fill=1,stroke=0)
             c.setFillGray(.35);c.setFont(FONT,font_size);c.drawCentredString((x+rw/2)*mm,(h-y-rh/2)*mm,label);c.restoreState()
-        if any(q.get('choice_style') in ('bracket','compact') for q in template.get('questions',[])):
+        if manual_binding(template) or any(q.get('choice_style') in ('bracket','compact') for q in template.get('questions',[])):
             if manual_binding(template):
                 for index,gray in enumerate((255,192,128,64,0)):
                     c.setFillGray(gray/255);c.rect((w-44+index*5)*mm,(h-7.5)*mm,4*mm,1.5*mm,fill=1,stroke=0)

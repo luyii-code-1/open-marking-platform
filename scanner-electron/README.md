@@ -4,7 +4,7 @@ Windows 10 build 19041 or later, x64. The Electron shell loads the existing onli
 
 Install the generated setup executable, close the standard scanner, then open **Scanner Electron**. Connect from the server's scanner desk using its pairing link, or enter the server address and pairing code in the client. The server's HTTPS certificate must be trusted by Windows. After pairing, the client loads the server's `/scanner.html` page.
 
-For HuaGoScan G200, select **TWAIN** and discover the scanner. TWAIN discovery and acquisition run through the bundled x86 worker and modern 32-bit DSM. Capture uses Native transfer, 200 dpi, 8-bit grayscale and the batch's A3/A4 and simplex/duplex settings. WIA acquisition retains its existing settings. After turning on the scanner, allow a few seconds for it to become ready before starting acquisition.
+For HuaGoScan G200, select **TWAIN** and discover the scanner. TWAIN discovery and acquisition run through the bundled x86 worker and modern 32-bit DSM using Native transfer. The **扫描参数** menu selects 150/200/300/600 DPI and black-and-white/grayscale/color. Defaults are 300 DPI and grayscale. Settings are saved on this computer and apply to the next scan; A3/A4 and simplex/duplex follow the batch. After turning on the scanner, allow a few seconds for it to become ready before starting acquisition.
 
 Build from the repository root:
 

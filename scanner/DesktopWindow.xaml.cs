@@ -30,7 +30,22 @@ public partial class DesktopWindow : Window
     private readonly DesktopController _controller=new();
     private readonly DispatcherTimer _timer=new(){Interval=TimeSpan.FromSeconds(8)};
     private bool _closing,_ready;
-    public DesktopWindow(){InitializeComponent();}
+    private bool _settingsReady;
+    public DesktopWindow(){InitializeComponent();RefreshScanSettings();}
+    private void RefreshScanSettings()
+    {
+        _settingsReady=false;
+        DpiChoice.SelectedValue=_controller.ScanSettings.Dpi.ToString();ColorChoice.SelectedValue=_controller.ScanSettings.Color;
+        DpiChoice.IsEnabled=ColorChoice.IsEnabled=!_controller.Capturing;
+        _settingsReady=true;
+    }
+    private async void ScanSettingsChanged(object sender,System.Windows.Controls.SelectionChangedEventArgs args)
+    {
+        if(!_settingsReady||_closing)return;
+        try{await _controller.Invoke("scanSettings",JsonSerializer.SerializeToElement(new{dpi=int.Parse(DpiChoice.SelectedValue.ToString()!),color=ColorChoice.SelectedValue.ToString()}));}
+        catch(Exception error){System.Windows.MessageBox.Show(this,error.Message,"扫描参数");}
+        finally{RefreshScanSettings();}
+    }
     private bool Allowed(string source)
     {
         if(!Uri.TryCreate(source,UriKind.Absolute,out var value))return false;
@@ -60,6 +75,7 @@ public partial class DesktopWindow : Window
             Browser.CoreWebView2.WebMessageReceived+=Message;
             _controller.Changed=()=>Dispatcher.BeginInvoke(()=>
             {
+                RefreshScanSettings();
                 if(!_closing&&Allowed(Browser.Source?.AbsoluteUri??""))Browser.CoreWebView2.PostWebMessageAsJson("{\"event\":\"changed\",\"protocol\":\"omp-scanner-4\"}");
             });
             _timer.Tick+=async(_,_)=>await _controller.Tick();_timer.Start();

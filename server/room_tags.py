@@ -27,8 +27,9 @@ def view(db,tags):
 
 def progress(db,tag):
     submissions=[s for s in find(db,'submissions',group_id=tag['group_id']) if includes(s,tag['id'])] if tag.get('group_id') else []
-    scanned=len({s['student_id'] for s in submissions if s.get('status')!='absent' and s.get('pages')})
-    absent=len({s['student_id'] for s in submissions if s.get('status')=='absent'})
+    scanned_ids={s['student_id'] for s in submissions if s.get('status')!='absent' and s.get('pages')}
+    scanned=len(scanned_ids)
+    absent=len({s['student_id'] for s in submissions if s.get('status')=='absent'}-scanned_ids)
     batches={b['id'] for b in find(db,'scan-batches',group_id=tag['group_id']) if includes(b,tag['id'])} if tag.get('group_id') else set()
     pages=[p for p in objects(db,'pages') if p.get('batch_id') in batches and not p.get('excluded')]
     confirmed_pages={p for s in submissions for p in s.get('pages',[])}
@@ -42,7 +43,7 @@ def progress(db,tag):
 
 def snapshot(db,project_id,identifiers,group=None):
     if not isinstance(identifiers,list) or any(not isinstance(i,str) for i in identifiers) or len(set(identifiers))!=len(identifiers):raise HTTPException(422,'考场标签编号无效')
-    if group and group.get('grade_id') and len(identifiers)!=1:raise HTTPException(422,'请选择当前年级下的一个考场')
+    if group and group.get('grade_id') and len(identifiers)>1:raise HTTPException(422,'每份答卷最多归属一个考场')
     result=[]
     for identifier in identifiers:
         tag=require(db,identifier,'room-tags')

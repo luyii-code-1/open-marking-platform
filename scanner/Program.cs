@@ -5,6 +5,12 @@ public static class Program
     [STAThread]
     public static int Main(string[] args)
     {
+        if(args.FirstOrDefault()=="--device-plugin")return DevicePlugin.Serve().GetAwaiter().GetResult();
+        if(args.FirstOrDefault()=="--scan-bridge-self-test")
+        {
+            try{ScannerBridgeSelfTest.Run(args.Contains("--discover")).GetAwaiter().GetResult();return 0;}
+            catch(Exception error){Console.Error.WriteLine("SCAN BRIDGE SELFTEST FAIL: "+error.Message);return 1;}
+        }
         if(args.FirstOrDefault()=="--room-scope-self-test")
         {
             try{RoomScopeSelfTest.Run(args).GetAwaiter().GetResult();return 0;}

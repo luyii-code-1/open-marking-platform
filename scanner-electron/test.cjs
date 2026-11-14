@@ -22,15 +22,20 @@ test('Renderer requests cannot invoke host lifecycle methods', () => {
 })
 test('Preload preserves the existing WebView message protocol without exposing IPC', () => {
   let exposed,receive;const sent=[]
-  const electron={contextBridge:{exposeInMainWorld(name,value){assert.equal(name,'chrome');exposed=value}},ipcRenderer:{on(channel,listener){assert.equal(channel,'scanner:message');receive=listener},send(...args){sent.push(args)}}}
+  const originalChrome={runtime:{marker:'existing Chromium API'}}
+  const world=vm.createContext({window:{chrome:originalChrome}})
+  const electron={contextBridge:{exposeInMainWorld(name,value){assert.equal(name,'ompScannerHost');assert.equal(Object.hasOwn(world.window,name),false);world.window[name]=value;exposed=value},executeInMainWorld({func}){vm.runInContext('('+func.toString()+')()',world)}},ipcRenderer:{on(channel,listener){assert.equal(channel,'scanner:message');receive=listener},send(...args){sent.push(args)}}}
   vm.runInNewContext(fs.readFileSync(__dirname+'/preload.cjs','utf8'),{require(name){assert.equal(name,'electron');return electron}})
   let message
   const listener=event=>message=event.data
-  exposed.webview.addEventListener('message',listener)
-  exposed.webview.postMessage({id:'one',method:'state'})
+  assert.equal(world.window.chrome,originalChrome)
+  assert.equal(world.window.chrome.runtime.marker,'existing Chromium API')
+  assert.equal(world.window.chrome.webview,exposed)
+  exposed.addEventListener('message',listener)
+  exposed.postMessage({id:'one',method:'state'})
   assert.equal(sent[0][0],'scanner:request')
   receive({}, {id:'one',ok:true})
   assert.equal(message.id,'one')
-  exposed.webview.removeEventListener('message',listener);message=undefined;receive({},{});assert.equal(message,undefined)
+  exposed.removeEventListener('message',listener);message=undefined;receive({},{});assert.equal(message,undefined)
   assert.equal(exposed.ipcRenderer,undefined)
 })
