@@ -46,6 +46,7 @@ def inline(node,width,underlined=False):
     tag,attrs,children=node
     if tag=='span' and 'data-answer-line' in attrs:
         raw=attrs['data-answer-line'] or ''
+        if raw=='end':return '<onDraw name="answerLine" label="end"/>'
         if not re.fullmatch(r'\d{1,3}(?:\.\d{1,2})?',raw):raise ValueError('答题线长度无效')
         return rule_markup(raw,width)
     style=attrs.get('style','').lower()
@@ -63,16 +64,36 @@ def inline(node,width,underlined=False):
     return content
 
 
+class AnswerParagraph(Paragraph):
+    def breakLinesCJK(self, maxWidths):
+        result = super().breakLinesCJK(maxWidths)
+        if result.kind == 1:
+            for line in result.lines:
+                for word in line.words:
+                    rule = getattr(word, 'cbDefn', None)
+                    if rule and rule.label == 'end':
+                        # Keep the source fragment independent of this wrap's width.
+                        word.cbDefn = rule.clone(width=max(0, line.extraSpace))
+                        line.extraSpace = 0
+                        break
+        return result
+
+
 def flowables(html,width):
     if len(html)>100000:raise ValueError('单题富文本过长')
     parser=Parser();parser.feed(html)
     style=ParagraphStyle('answer',fontName=FONT,fontSize=9,leading=13,wordWrap='CJK')
     def paragraph(content):
-        result=Paragraph(content or ' ',style)
-        for frag in result.frags:
+        result=AnswerParagraph(content or ' ',style)
+        for i,frag in enumerate(result.frags):
             cb=getattr(frag,'cbDefn',None)
             if cb and getattr(cb,'name',None)=='answerLine':
-                cb.kind='img';cb.image=_RULE_PIXEL;cb.width=float(cb.label);cb.height=.55;cb.valign=-1
+                cb.kind='img';cb.image=_RULE_PIXEL;cb.height=.75;cb.valign=-1
+                if cb.label=='end':
+                    cb.width=0
+                    if i+1==len(result.frags) or not hasattr(result.frags[i+1],'lineBreak'):
+                        frag.lineBreak=True
+                else:cb.width=float(cb.label)
                 # The CJK line breaker needs a character for its wrap decision.
                 # For image fragments it uses the declared width and draws only the image.
                 frag.text='\ufffc'

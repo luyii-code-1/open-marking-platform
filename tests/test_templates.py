@@ -30,6 +30,7 @@ def test_pdf_preview_matches_published_print_pixels_without_persisting_draft(tmp
         headers=setup(client)
         with db.connect() as connection:group=db.put(connection,'groups',{'name':'组'})
         body=definition(group['id'],paper_size,sides)
+        body['questions'][1]['content_html']='<p><u>说明</u>，修改：<span data-answer-line="end">&nbsp;</span></p>'
         body.update(column_frame=True,layout_version=3,print_style='standard-v2',print_notes=[
             {'id':'hint','page':sides,'x':20,'y':140,'width':100,'height':8,'html':'<p>补充说明：结果为 _ _ _ 米。</p>'}
         ])

@@ -52,3 +52,22 @@ def test_inline_answer_lines_keep_ink_separate_from_prompt(short):
     assert len(boxes)==2 and boxes[1][0]==0 and boxes[1][2]==pytest.approx(60*mm,abs=.001)
     layout('<p>普通<u>强调</u>普通</p>',70*mm,100*mm,canvas)
     assert len(underlines)==1 and underlines[0][0]>0
+
+
+@pytest.mark.parametrize('width',[90,240])
+def test_fill_to_end_uses_remaining_print_width(width):
+    rule='<span data-answer-line="end">&nbsp;</span>'
+    canvas=Canvas(io.BytesIO())
+    ink=[]
+    canvas.drawImage=lambda image,x,y,w,h,**opts:ink.append((x,y,w))
+    prompt='请根据前面的题干作答，<b>修改：</b>'
+    layout(prompt+rule+'下一行：'+rule,width,100,canvas)
+    assert len(ink)==2
+    assert ink[0][1]>ink[1][1]
+    for x,_,w in ink:
+        assert x>0 and w>0
+        assert x+w==pytest.approx(width)
+    ink.clear()
+    layout(rule+'<br/>'+rule,width,100,canvas)
+    assert len(ink)==2 and ink[0][1]-ink[1][1]==pytest.approx(13)
+    assert all(x==0 and w==pytest.approx(width) for x,_,w in ink)
