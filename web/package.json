@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@ant-design/icons": "^6.0.0",
+    "@fluentui/svg-icons": "1.1.346",
     "antd": "^5.27.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"

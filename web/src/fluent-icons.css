@@ -1,0 +1,131 @@
+/* Component wrappers keep their accessible labels and state classes. */
+.anticon-arrow-left { --fluent-glyph: url("@fluentui/svg-icons/icons/arrow_left_20_regular.svg"); }
+.anticon-arrow-right { --fluent-glyph: url("@fluentui/svg-icons/icons/arrow_right_20_regular.svg"); }
+.anticon-left { --fluent-glyph: url("@fluentui/svg-icons/icons/chevron_left_20_regular.svg"); }
+.anticon-right { --fluent-glyph: url("@fluentui/svg-icons/icons/chevron_right_20_regular.svg"); }
+.anticon-down { --fluent-glyph: url("@fluentui/svg-icons/icons/chevron_down_20_regular.svg"); }
+.anticon-up { --fluent-glyph: url("@fluentui/svg-icons/icons/chevron_up_20_regular.svg"); }
+.anticon-double-left { --fluent-glyph: url("@fluentui/svg-icons/icons/chevron_double_left_20_regular.svg"); }
+.anticon-double-right { --fluent-glyph: url("@fluentui/svg-icons/icons/chevron_double_right_20_regular.svg"); }
+.anticon-caret-up { --fluent-glyph: url("@fluentui/svg-icons/icons/caret_up_20_regular.svg"); }
+.anticon-caret-down { --fluent-glyph: url("@fluentui/svg-icons/icons/caret_down_20_regular.svg"); }
+.anticon-menu-fold { --fluent-glyph: url("@fluentui/svg-icons/icons/panel_left_contract_20_regular.svg"); }
+.anticon-menu-unfold { --fluent-glyph: url("@fluentui/svg-icons/icons/panel_left_expand_20_regular.svg"); }
+.anticon-upload { --fluent-glyph: url("@fluentui/svg-icons/icons/arrow_upload_20_regular.svg"); }
+.anticon-download { --fluent-glyph: url("@fluentui/svg-icons/icons/arrow_download_20_regular.svg"); }
+.anticon-reload { --fluent-glyph: url("@fluentui/svg-icons/icons/arrow_clockwise_20_regular.svg"); }
+.anticon-logout { --fluent-glyph: url("@fluentui/svg-icons/icons/arrow_exit_20_regular.svg"); }
+.anticon-apartment { --fluent-glyph: url("@fluentui/svg-icons/icons/organization_20_regular.svg"); }
+.anticon-audit { --fluent-glyph: url("@fluentui/svg-icons/icons/clipboard_task_20_regular.svg"); }
+.anticon-bar-chart { --fluent-glyph: url("@fluentui/svg-icons/icons/chart_multiple_20_regular.svg"); }
+.anticon-bold { --fluent-glyph: url("@fluentui/svg-icons/icons/text_bold_20_regular.svg"); }
+.anticon-book { --fluent-glyph: url("@fluentui/svg-icons/icons/book_20_regular.svg"); }
+.anticon-copy { --fluent-glyph: url("@fluentui/svg-icons/icons/copy_20_regular.svg"); }
+.anticon-delete { --fluent-glyph: url("@fluentui/svg-icons/icons/delete_20_regular.svg"); }
+.anticon-file-search { --fluent-glyph: url("@fluentui/svg-icons/icons/document_search_20_regular.svg"); }
+.anticon-history { --fluent-glyph: url("@fluentui/svg-icons/icons/history_20_regular.svg"); }
+.anticon-italic { --fluent-glyph: url("@fluentui/svg-icons/icons/text_italic_20_regular.svg"); }
+.anticon-key { --fluent-glyph: url("@fluentui/svg-icons/icons/key_20_regular.svg"); }
+.anticon-more { --fluent-glyph: url("@fluentui/svg-icons/icons/more_horizontal_20_regular.svg"); }
+.anticon-plus { --fluent-glyph: url("@fluentui/svg-icons/icons/add_20_regular.svg"); }
+.anticon-read { --fluent-glyph: url("@fluentui/svg-icons/icons/book_open_20_regular.svg"); }
+.anticon-save { --fluent-glyph: url("@fluentui/svg-icons/icons/save_20_regular.svg"); }
+.anticon-scan { --fluent-glyph: url("@fluentui/svg-icons/icons/scan_20_regular.svg"); }
+.anticon-setting { --fluent-glyph: url("@fluentui/svg-icons/icons/settings_20_regular.svg"); }
+.anticon-table { --fluent-glyph: url("@fluentui/svg-icons/icons/table_20_regular.svg"); }
+.anticon-team { --fluent-glyph: url("@fluentui/svg-icons/icons/people_team_20_regular.svg"); }
+.anticon-underline { --fluent-glyph: url("@fluentui/svg-icons/icons/text_underline_20_regular.svg"); }
+.anticon-zoom-in { --fluent-glyph: url("@fluentui/svg-icons/icons/zoom_in_20_regular.svg"); }
+.anticon-zoom-out { --fluent-glyph: url("@fluentui/svg-icons/icons/zoom_out_20_regular.svg"); }
+.anticon-close { --fluent-glyph: url("@fluentui/svg-icons/icons/dismiss_20_regular.svg"); }
+.anticon-check { --fluent-glyph: url("@fluentui/svg-icons/icons/checkmark_20_regular.svg"); }
+.anticon-search { --fluent-glyph: url("@fluentui/svg-icons/icons/search_20_regular.svg"); }
+.anticon-ellipsis { --fluent-glyph: url("@fluentui/svg-icons/icons/more_horizontal_20_regular.svg"); }
+.anticon-close-circle { --fluent-glyph: url("@fluentui/svg-icons/icons/dismiss_circle_20_regular.svg"); }
+.anticon-check-circle { --fluent-glyph: url("@fluentui/svg-icons/icons/checkmark_circle_20_regular.svg"); }
+.anticon-info-circle { --fluent-glyph: url("@fluentui/svg-icons/icons/info_20_regular.svg"); }
+.anticon-exclamation-circle { --fluent-glyph: url("@fluentui/svg-icons/icons/warning_20_regular.svg"); }
+.anticon-question-circle { --fluent-glyph: url("@fluentui/svg-icons/icons/question_circle_20_regular.svg"); }
+.anticon-eye { --fluent-glyph: url("@fluentui/svg-icons/icons/eye_20_regular.svg"); }
+.anticon-eye-invisible { --fluent-glyph: url("@fluentui/svg-icons/icons/eye_off_20_regular.svg"); }
+.anticon-minus { --fluent-glyph: url("@fluentui/svg-icons/icons/subtract_20_regular.svg"); }
+.anticon-filter { --fluent-glyph: url("@fluentui/svg-icons/icons/filter_20_regular.svg"); }
+.anticon-calendar { --fluent-glyph: url("@fluentui/svg-icons/icons/calendar_ltr_20_regular.svg"); }
+.anticon-clock-circle { --fluent-glyph: url("@fluentui/svg-icons/icons/clock_20_regular.svg"); }
+.anticon-edit { --fluent-glyph: url("@fluentui/svg-icons/icons/edit_20_regular.svg"); }
+.anticon-file { --fluent-glyph: url("@fluentui/svg-icons/icons/document_20_regular.svg"); }
+.anticon-paper-clip { --fluent-glyph: url("@fluentui/svg-icons/icons/attach_20_regular.svg"); }
+.anticon-loading { --fluent-glyph: url("@fluentui/svg-icons/icons/spinner_ios_20_regular.svg"); }
+.anticon-swap-right { --fluent-glyph: url("@fluentui/svg-icons/icons/arrow_right_20_regular.svg"); }
+.anticon-vertical-align-top { --fluent-glyph: url("@fluentui/svg-icons/icons/arrow_up_20_regular.svg"); }
+.anticon-caret-right { --fluent-glyph: url("@fluentui/svg-icons/icons/caret_right_20_regular.svg"); }
+.anticon-caret-left { --fluent-glyph: url("@fluentui/svg-icons/icons/caret_left_20_regular.svg"); }
+
+:is(
+  .anticon-arrow-left,
+  .anticon-arrow-right,
+  .anticon-left,
+  .anticon-right,
+  .anticon-down,
+  .anticon-up,
+  .anticon-double-left,
+  .anticon-double-right,
+  .anticon-caret-up,
+  .anticon-caret-down,
+  .anticon-menu-fold,
+  .anticon-menu-unfold,
+  .anticon-upload,
+  .anticon-download,
+  .anticon-reload,
+  .anticon-logout,
+  .anticon-apartment,
+  .anticon-audit,
+  .anticon-bar-chart,
+  .anticon-bold,
+  .anticon-book,
+  .anticon-copy,
+  .anticon-delete,
+  .anticon-file-search,
+  .anticon-history,
+  .anticon-italic,
+  .anticon-key,
+  .anticon-more,
+  .anticon-plus,
+  .anticon-read,
+  .anticon-save,
+  .anticon-scan,
+  .anticon-setting,
+  .anticon-table,
+  .anticon-team,
+  .anticon-underline,
+  .anticon-zoom-in,
+  .anticon-zoom-out,
+  .anticon-close,
+  .anticon-check,
+  .anticon-search,
+  .anticon-ellipsis,
+  .anticon-close-circle,
+  .anticon-check-circle,
+  .anticon-info-circle,
+  .anticon-exclamation-circle,
+  .anticon-question-circle,
+  .anticon-eye,
+  .anticon-eye-invisible,
+  .anticon-minus,
+  .anticon-filter,
+  .anticon-calendar,
+  .anticon-clock-circle,
+  .anticon-edit,
+  .anticon-file,
+  .anticon-paper-clip,
+  .anticon-loading,
+  .anticon-swap-right,
+  .anticon-vertical-align-top,
+  .anticon-caret-right,
+  .anticon-caret-left
+) > svg {
+  background-color: currentColor;
+  -webkit-mask: var(--fluent-glyph) center / contain no-repeat;
+  mask: var(--fluent-glyph) center / contain no-repeat;
+  forced-color-adjust: preserve-parent-color;
+}
