@@ -12,7 +12,7 @@ import time
 import xml.etree.ElementTree as ET
 import cv2
 import httpx
-from server import paper
+from server import db,paper
 
 
 def run(scanner_dll=None):
@@ -46,13 +46,19 @@ def run(scanner_dll=None):
                     client.headers['Authorization']='Bearer '+response.json()['token']
                     def create(kind,value):
                         response=client.post(kind,json=value);response.raise_for_status();return response.json()
+                    def publish_qr_fixture(template):
+                        # This suite exercises legacy QR-based side detection. New cards
+                        # are manually bound; seed the previous format in the isolated DB.
+                        with db.connect(root/'server-data') as connection:
+                            db.put(connection,'templates',{**template,'layout_version':2})
+                        return create(f"templates/{template['id']}/publish",{})
                     project=create('projects',{'name':'扫描端联调'})
                     subject=create('subjects',{'project_id':project['id'],'name':'测试科目'})
                     group=create('groups',{'subject_id':subject['id'],'name':'测试组'})
                     cls=create('classes',{'name':'测试班','grade':'10'})
                     create('students',{'name':'测试学生','candidate_number':'123','class_id':cls['id']})
                     template=create('templates',{'name':'Scanner smoke','group_id':group['id'],'paper':'A4','sides':1,'candidate_length':3,'questions':[{'number':1,'type':'single','options':4,'points':3,'answer':['B'],'regions':[{'page':1,'x':15,'y':110,'width':90,'height':20}]}]})
-                    response=client.post(f"templates/{template['id']}/publish");response.raise_for_status();template=response.json()
+                    template=publish_qr_fixture(template)
                     pdf=root/'sheet.pdf';response=client.get(f"templates/{template['id']}/pdf");response.raise_for_status();pdf.write_bytes(response.content)
                     subprocess.run([renderer,'-r','150','-singlefile','-png',str(pdf),str(root/'sheet')],capture_output=True,check=True)
                     image=cv2.imread(str(root/'sheet.png'),cv2.IMREAD_GRAYSCALE);sx=image.shape[1]/210;sy=image.shape[0]/297
@@ -65,7 +71,7 @@ def run(scanner_dll=None):
                     cv2.imwrite(str(root/'missing-corner.png'),damaged)
                     duplex_group=create('groups',{'subject_id':subject['id'],'name':'双面测试组'})
                     duplex_template=create('templates',{'name':'Duplex smoke','group_id':duplex_group['id'],'paper':'A4','sides':2,'candidate_length':3,'questions':[{'number':1,'type':'single','options':4,'points':3,'answer':['B'],'regions':[{'page':1,'x':15,'y':110,'width':90,'height':20}]}]})
-                    response=client.post(f"templates/{duplex_template['id']}/publish");response.raise_for_status();duplex_template=response.json()
+                    duplex_template=publish_qr_fixture(duplex_template)
                     response=client.get(f"templates/{duplex_template['id']}/pdf");response.raise_for_status();(root/'duplex.pdf').write_bytes(response.content)
                     subprocess.run([renderer,'-r','150','-png',str(root/'duplex.pdf'),str(root/'duplex')],capture_output=True,check=True)
                     image=cv2.imread(str(root/'duplex-1.png'),cv2.IMREAD_GRAYSCALE)

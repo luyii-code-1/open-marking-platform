@@ -283,11 +283,34 @@ public sealed class DesktopController : IDisposable
                 }
                 Freeze(reviewBatch,"原图已送交管理员核查，处理后刷新服务端状态。");return State(args);
             case "retryPage":
-                if(Capturing)throw new InvalidOperationException("请先停止采集。");
+                if(Capturing || _uploadGate.CurrentCount==0)throw new InvalidOperationException("请等待当前采集或上传完成。");
                 var retryBatch=Batch(Text(args,"batch_id"));var retryPage=_queue.Pages(retryBatch.Id).First(p=>p.CaptureId==Text(args,"page_id"));
+                if(retryPage.Status is "uploaded" or "excluded" || retryBatch.Status=="paired" ||
+                   retryBatch.Error.StartsWith("原图已送交") || retryBatch.Error.StartsWith("同步被服务器拒绝"))
+                    throw new InvalidOperationException("此页请通过异常核查处理。");
                 var quality=JsonSerializer.Deserialize<QualityReport>(retryPage.QualityJson,new JsonSerializerOptions{PropertyNameCaseInsensitive=true});
+                if(quality?.Issues is ["missing_markers"] && retryPage.Status=="blocked")
+                {
+                    quality=await Task.Run(()=>{
+                        using var image=Image.FromFile(retryPage.Path);
+                        return QualityInspector.Inspect(image,retryBatch,retryPage.Side,quality.Options);
+                    },_lifetime.Token);
+                    _queue.UpdateQualityReport(retryPage.CaptureId,quality);
+                    if(!quality.Passed){
+                        _queue.PageError(retryPage.CaptureId,quality.Summary,true);
+                        Freeze(retryBatch,quality.Summary);
+                        throw new InvalidOperationException(quality.Summary);
+                    }
+                }
                 if(quality?.Passed!=true)throw new InvalidOperationException("该页未通过采集质量检查，请排除整张后重扫，或在管理端核查原卷。");
-                await Recognize(retryBatch,retryPage);if(!_queue.Pages(retryBatch.Id).Any(p=>p.Status=="blocked"))_queue.PairLocally(retryBatch);return State(args);
+                if(Json(retryPage.RecognitionJson).TryGetProperty("operator_correction",out _))
+                    throw new InvalidOperationException("已人工更正的答卷请在核对界面编辑。");
+                await Recognize(retryBatch,retryPage);
+                if(!_queue.Pages(retryBatch.Id).Any(p=>p.Status=="blocked")){
+                    try{_queue.PairLocally(retryBatch);}
+                    catch(InvalidOperationException error){Freeze(retryBatch,error.Message);throw;}
+                }
+                return State(args);
             case "exclude":
                 if(Capturing)throw new InvalidOperationException("请先停止采集。");
                 var excludeBatch=Batch(Text(args,"batch_id"));if(excludeBatch.Status=="paired")throw new InvalidOperationException("批次已提交，请在管理端处理补扫。");
@@ -318,10 +341,32 @@ public sealed class DesktopController : IDisposable
         if(batch.Status!="open")throw new InvalidOperationException(batch.Error.Length>0?batch.Error:"该批次已关闭，请建立新批次。");
         if(batch.CaptureMode=="duplex")DuplexOrder.RequireComplete(batch,_queue.Pages(batch.Id));
     }
+    private string? CandidateIssue(BatchRow batch,string candidate)
+    {
+        if(candidate.Length==0||candidate.Contains('?'))return "准考证号未填清，请核对原图。";
+        var group=_packages[batch.ProjectId].GetProperty("groups").EnumerateArray().First(g=>Text(g,"id")==batch.GroupId);
+        if(group.TryGetProperty("roster",out var roster)&&roster.ValueKind==JsonValueKind.Array){
+            if(roster.GetArrayLength()==0)return "题卡应考名单为空，请在后台设置名单后重新下载项目，再重试本地识读。";
+            if(!roster.EnumerateArray().Any(s=>Text(s,"candidate_number")==candidate))return "准考证号不在当前题卡应考名单中，请核对名单或原图。";
+        }
+        if((group.TryGetProperty("confirmed_candidates",out var known)&&known.EnumerateArray().Any(s=>s.GetString()==candidate))||
+            _queue.Batches().Where(b=>b.Id!=batch.Id&&b.ServerUrl==batch.ServerUrl&&b.GroupId==batch.GroupId&&(b.Status=="local_paired"||b.Status=="paired")).Any(b=>Json(b.LocalPairsJson).EnumerateArray().Any(pair=>Text(pair,"candidate_number")==candidate)))
+            return "已扫描此准考证号，请核对原图";
+        return null;
+    }
     private async Task Recognize(BatchRow batch,PageRow page)
     {
-        try{var result=await _worker.Recognize(batch,page,_lifetime.Token);_queue.PageRecognized(page.CaptureId,result.GetRawText());Notify();}
-        catch(Exception error)when(error is not OutOfMemoryException){_queue.PageError(page.CaptureId,error.Message,true);Freeze(batch,"本地识读未完成："+error.Message);throw;}
+        string? issue;
+        try{
+            var result=await _worker.Recognize(batch,page,_lifetime.Token);
+            issue=page.Side=="front"?CandidateIssue(batch,Text(result,"candidate_number")):null;
+            _queue.PageRecognized(page.CaptureId,result.GetRawText(),issue);
+        }
+        catch(Exception error)when(error is not (OutOfMemoryException or OperationCanceledException)){
+            _queue.PageError(page.CaptureId,error.Message,true);Freeze(batch,error.Message);throw;
+        }
+        if(issue!=null){Freeze(batch,issue);throw new InvalidOperationException(issue);}
+        Notify();
     }
     private async Task Capture(BatchRow batch,Func<Func<Image,Task>,Task> acquire,string side)
     {
@@ -343,24 +388,10 @@ public sealed class DesktopController : IDisposable
                 var page=await Task.Run(()=>_queue.AddPage(session,side,image),_lifetime.Token);
                 collected++;Notify();
                 if(page.Status=="blocked"){_captureCancel?.Cancel();Freeze(session,page.Error);throw new OperationCanceledException();}
-                if(page.Status!="blocked")
+                try{await Recognize(session,page);}
+                catch(Exception error)when(error is not (OutOfMemoryException or OperationCanceledException))
                 {
-                    try
-                    {
-                        var result=await _worker.Recognize(session,page,_lifetime.Token);
-                        _queue.PageRecognized(page.CaptureId,result.GetRawText());
-                        if(page.Side=="front"){
-                            var candidate=Text(result,"candidate_number");
-                            var config=_packages[session.ProjectId].GetProperty("groups").EnumerateArray().First(g=>Text(g,"id")==session.GroupId);
-                            if(candidate.Length==0||candidate.Contains('?')||(config.TryGetProperty("roster",out var roster)&&roster.ValueKind==JsonValueKind.Array&&!roster.EnumerateArray().Any(s=>Text(s,"candidate_number")==candidate)))
-                                throw new InvalidOperationException("准考证号不清或不在应考名单，请核对原图");
-                            if((config.TryGetProperty("confirmed_candidates",out var known)&&known.EnumerateArray().Any(s=>s.GetString()==candidate))||
-                                _queue.Batches().Where(b=>b.Id!=session.Id&&b.ServerUrl==session.ServerUrl&&b.GroupId==session.GroupId&&(b.Status=="local_paired"||b.Status=="paired")).Any(b=>Json(b.LocalPairsJson).EnumerateArray().Any(pair=>Text(pair,"candidate_number")==candidate)))
-                                throw new InvalidOperationException("已扫描此准考证号，请核对原图");
-                        }
-                    }
-                    catch(Exception error) when(error is not (OutOfMemoryException or OperationCanceledException))
-                    { _queue.PageError(page.CaptureId,error.Message,true);_captureCancel?.Cancel();Freeze(session,error.Message);throw new OperationCanceledException(); }
+                    _captureCancel?.Cancel();throw new OperationCanceledException();
                 }
                 if(collected==expected&&(batch.Sides==1||batch.CaptureMode=="duplex"))
                 {

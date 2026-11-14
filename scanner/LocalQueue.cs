@@ -176,6 +176,9 @@ public sealed partial class LocalQueue
     }
 
     public void PageUploaded(string id, string serverId) => Execute("UPDATE pages SET status='uploaded',error='',server_id=$server WHERE capture_id=$id", ("$id", id), ("$server", serverId));
+    public void UpdateQualityReport(string id, QualityReport report) =>
+        Execute("UPDATE pages SET quality_report=$report WHERE capture_id=$id AND status='blocked'",
+            ("$id", id), ("$report", System.Text.Json.JsonSerializer.Serialize(report, System.Text.Json.JsonSerializerOptions.Web)));
     public void PageExcluded(string id) => Execute("UPDATE pages SET status='excluded',error='管理员已排除该页，原始文件保留' WHERE capture_id=$id", ("$id", id));
     public void PageError(string id, string error, bool blocked = false) => Execute("UPDATE pages SET error=$error,status=$status WHERE capture_id=$id", ("$id", id), ("$error", error), ("$status", blocked ? "blocked" : "pending"));
     public void RetryBlocked(string batchId) => Execute("UPDATE pages SET status='pending',error='' WHERE batch_id=$batch AND status='blocked'", ("$batch", batchId));

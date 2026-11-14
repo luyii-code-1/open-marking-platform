@@ -18,7 +18,10 @@ public sealed partial class LocalQueue
         UPDATE batches SET project_id=$project,subject_id=$subject,config_sha256=$hash,template_json=$template,roster_json=$roster,local_pairs_json=$pairs,room_tags_json=$tags WHERE id=$id
         """,("$id",batch.Id),("$project",batch.ProjectId),("$subject",batch.SubjectId),("$hash",batch.ConfigSha256),("$template",batch.TemplateJson),("$roster",batch.RosterJson),("$pairs",batch.LocalPairsJson),("$tags",batch.RoomTagsJson));
 
-    public void PageRecognized(string captureId,string result)=>Execute("UPDATE pages SET recognition_json=$result,status='pending',error='' WHERE capture_id=$id AND status!='excluded'",("$id",captureId),("$result",result));
+    public void PageRecognized(string captureId,string result,string? issue=null)=>Execute("""
+        UPDATE pages SET recognition_json=$result,status=$status,error=$error
+        WHERE capture_id=$id AND status IN ('pending','blocked')
+        """,("$id",captureId),("$result",result),("$status",issue==null?"pending":"blocked"),("$error",issue??""));
 
     public string PairLocally(BatchRow batch)
     {
