@@ -145,3 +145,26 @@ def export_exceptions(group_id:str|None=None,room_tag_id:str|None=None,status:st
             values.append({**v,'room_tags':view(db,source.get('room_tags',[])),'group_id':v.get('group_id') or source.get('group_id')})
         values=[v for v in values if includes(v,room_tag_id) and (not group_id or v.get('group_id')==group_id) and (not status or v['status']==status)]
         return export_csv(['记录编号','类型','考场标签','说明','状态','核查结论'],[[v['id'],v['kind'],'、'.join(t.get('label',t['name']) for t in v['room_tags']),v.get('reason',''),v['status'],v.get('resolution','')] for v in values],'exceptions.csv')
+
+@router.post('/projects/{identifier}/room-tags/batch')
+def create_batch(identifier:str,body:dict,current=Depends(admin)):
+    names=body.get('names')
+    if not isinstance(names,list) or not 1<=len(names)<=500 or not all(isinstance(n,str) and 1<=len(n.strip())<=60 for n in names):
+        raise HTTPException(422,'每批可创建 1 至 500 个考场，每个名称限 60 字')
+    if not body.get('group_id'):raise HTTPException(422,'请选择题卡')
+    with connect() as db:
+        db.execute('BEGIN IMMEDIATE')
+        require(db,identifier,'projects')
+        known={r['name'] for r in find(db,'room-tags',group_id=body['group_id'])}
+        created=0
+        skipped=[]
+        for raw in names:
+            name=raw.strip()
+            if name in known:
+                skipped.append(name)
+                continue
+            value=validate_room(db,identifier,{'name':name,'group_id':body['group_id'],'expected_students':body.get('expected_students')})
+            put(db,'room-tags',value,current['id'])
+            known.add(name)
+            created+=1
+        return {'created':created,'skipped':skipped}

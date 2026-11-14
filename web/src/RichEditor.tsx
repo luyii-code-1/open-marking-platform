@@ -51,7 +51,7 @@ export function cleanHtml(value:string){
   return doc.body.innerHTML
 }
 
-type Props={value:string;onChange:(value:string)=>void;readOnly?:boolean;toolbarHost?:HTMLElement|null;autoFocus?:boolean}
+type Props={value:string;onChange:(value:string)=>void;readOnly?:boolean;toolbarHost?:HTMLElement|null;autoFocus?:boolean;textStyle?:React.CSSProperties}
 
 function fitLines(root:HTMLElement){
   for(const line of root.querySelectorAll<HTMLElement>('[data-answer-line="end"]')){
@@ -70,7 +70,7 @@ function fitLines(root:HTMLElement){
   }
 }
 
-export function RichEditor({value,onChange,readOnly=false,toolbarHost,autoFocus=false}:Props){
+export function RichEditor({value,onChange,readOnly=false,toolbarHost,autoFocus=false,textStyle}:Props){
   const editor=useRef<HTMLDivElement>(null),lastRange=useRef<Range|null>(null)
   const lastValue=useRef<string|null>(null)
   const [length,setLength]=useState(30)
@@ -87,7 +87,7 @@ export function RichEditor({value,onChange,readOnly=false,toolbarHost,autoFocus=
     const observer=new ResizeObserver(()=>fitLines(root))
     observer.observe(root)
     return ()=>observer.disconnect()
-  },[])
+  },[textStyle?.fontSize,textStyle?.lineHeight])
   function changed(){
     const root=editor.current!
     // Store the line's intent; its measured screen width belongs only to this editor.
@@ -154,5 +154,5 @@ export function RichEditor({value,onChange,readOnly=false,toolbarHost,autoFocus=
     <Button size="small" disabled={readOnly} onMouseDown={e=>e.preventDefault()} onClick={()=>insert(answerLine(document,'end').outerHTML)}>铺到行末</Button>
     <Button size="small" aria-label="插入表格" title="插入表格" icon={<TableOutlined/>} disabled={readOnly} onMouseDown={e=>e.preventDefault()} onClick={()=>insert('<table><tr><td>内容</td><td>内容</td></tr><tr><td>内容</td><td>内容</td></tr></table><p><br></p>')}/>
   </Space>
-  return <>{toolbarHost?createPortal(toolbar,toolbarHost):toolbarHost===undefined?toolbar:null}<div ref={editor} className="rich-editor" contentEditable={!readOnly} suppressContentEditableWarning role="textbox" aria-label="可粘贴 Word 内容的文字编辑框" data-placeholder="输入文字，或从 Word 粘贴" aria-multiline="true" onBlur={remember} onPointerUp={remember} onKeyUp={remember} onInput={()=>{if(!readOnly){remember();changed()}}} onPaste={e=>{e.preventDefault();if(readOnly)return;const html=e.clipboardData.getData('text/html');if(html)insert(html);else pastePlain(e.clipboardData.getData('text/plain'))}}/></>
+  return <>{toolbarHost?createPortal(toolbar,toolbarHost):toolbarHost===undefined?toolbar:null}<div ref={editor} className="rich-editor" style={textStyle} contentEditable={!readOnly} suppressContentEditableWarning role="textbox" aria-label="可粘贴 Word 内容的文字编辑框" data-placeholder="输入文字，或从 Word 粘贴" aria-multiline="true" onBlur={remember} onPointerUp={remember} onKeyUp={remember} onInput={()=>{if(!readOnly){remember();changed()}}} onPaste={e=>{e.preventDefault();if(readOnly)return;const html=e.clipboardData.getData('text/html');if(html)insert(html);else pastePlain(e.clipboardData.getData('text/plain'))}}/></>
 }

@@ -20,7 +20,16 @@ from .omr import ABSENT_X, ABSENT_Y, dimensions, code, bubbles, decode, align, m
 
 
 
+def text_layout_options(template):
+    size = template.get('font_size', 9)
+    leading = template.get('leading', 13)
+    if not all(type(v) in (int, float) for v in (size, leading)) or not (6 <= size <= 36 and size <= leading <= 72):
+        raise ValueError('字号须为 6 至 36 磅，行距须介于字号与 72 磅之间')
+    return dict(font_size=size, leading=leading)
+
+
 def validate(template):
+    text_options = text_layout_options(template)
     w,h=dimensions(template)
     compact=any(q.get('choice_style') in ('bracket','compact') for q in template.get('questions',[]))
     columns=panels(template)
@@ -62,7 +71,7 @@ def validate(template):
             occupied.append(region)
             if question.get('content_html') and not question.get('parts'):
                 image_height=min(region['height']-12,question.get('image_height',25)) if question.get('image_asset_id') else 0
-                rich_layout(question['content_html'],(region['width']-6)*mm,(region['height']-12-image_height)*mm)
+                rich_layout(question['content_html'],(region['width']-6)*mm,(region['height']-12-image_height)*mm,**text_options)
         if question['type']!='subjective':
             count=int(question.get('options',4))
             if count not in (3,4,5) or not set(question.get('answer',[]))<=set('ABCDE'[:count]):
@@ -100,7 +109,7 @@ def validate(template):
             raise ValueError('版面文字超出本栏可用范围')
         if any(r['page']==note['page'] and x<r['x']+r['width'] and r['x']<x+width and y<r['y']+r['height'] and r['y']<y+height for r in protected):
             raise ValueError('版面文字与选择题或禁答区重叠')
-        rich_layout(note['html'],width*mm,height*mm)
+        rich_layout(note['html'],width*mm,height*mm,**text_options)
 
 
 
@@ -136,6 +145,7 @@ def pdf(template):
     from .merged_questions import print_questions
     template={**template,'questions':list(print_questions(template))}
     validate(template)
+    text_options = text_layout_options(template)
     output=io.BytesIO()
     w,h=dimensions(template)
     c=canvas.Canvas(output,pagesize=(w*mm,h*mm))
@@ -233,7 +243,7 @@ def pdf(template):
                     c.setStrokeColorRGB(.7,.7,.7)
                     style=question.get('style','none' if background_id else 'line')
                     if question.get('content_html'):
-                        text_height=rich_layout(question['content_html'],(rw-6)*mm,(rh-12)*mm)/mm
+                        text_height=rich_layout(question['content_html'],(rw-6)*mm,(rh-12)*mm,**text_options)/mm
                     else:text_height=0
                     body_top=y+12+text_height
                     body_bottom=y+rh-3-(min(rh-12,question.get('image_height',25)) if question.get('image_asset_id') else 0)
@@ -250,7 +260,7 @@ def pdf(template):
                             for col in range(cols):c.rect((x+3+col*cell)*mm,(h-grid_top-(row+1)*cell)*mm,cell*mm,cell*mm)
                     c.setStrokeColorRGB(0,0,0)
                     image_height=min(rh-12,question.get('image_height',25)) if question.get('image_asset_id') else 0
-                    if question.get('content_html'):rich_layout(question['content_html'],(rw-6)*mm,(rh-12-image_height)*mm,c,(x+3)*mm,(h-y-9)*mm)
+                    if question.get('content_html'):rich_layout(question['content_html'],(rw-6)*mm,(rh-12-image_height)*mm,c,(x+3)*mm,(h-y-9)*mm,**text_options)
                     if question.get('image_asset_id'):
                         from .storage import materialize
                         try:asset=materialize('assets/'+question['image_asset_id']+'.png')
@@ -278,7 +288,7 @@ def pdf(template):
             c.restoreState()
         for note in template.get('print_notes',[]):
             if note['page']==page:
-                rich_layout(note['html'],note['width']*mm,note['height']*mm,c,note['x']*mm,(h-note['y'])*mm)
+                rich_layout(note['html'],note['width']*mm,note['height']*mm,c,note['x']*mm,(h-note['y'])*mm,**text_options)
         for area in forbidden_regions(template,page):
             x,y,rw,rh=(area[k] for k in ('x','y','width','height'))
             c.saveState();c.setStrokeGray(.7);c.setLineWidth(.15*mm);c.setDash(2,2)

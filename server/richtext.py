@@ -79,10 +79,10 @@ class AnswerParagraph(Paragraph):
         return result
 
 
-def flowables(html,width):
+def flowables(html,width,font_size=9,leading=13):
     if len(html)>100000:raise ValueError('单题富文本过长')
     parser=Parser();parser.feed(html)
-    style=ParagraphStyle('answer',fontName=FONT,fontSize=9,leading=13,wordWrap='CJK')
+    style=ParagraphStyle('answer',fontName=FONT,fontSize=font_size,leading=leading,wordWrap='CJK')
     def paragraph(content):
         result=AnswerParagraph(content or ' ',style)
         for i,frag in enumerate(result.frags):
@@ -136,9 +136,9 @@ def flowables(html,width):
     return visit(parser.root)
 
 
-def layout(html,width,height,canvas=None,x=0,top=0):
+def layout(html,width,height,canvas=None,x=0,top=0,*,font_size=9,leading=13):
     used=0
-    for flow in flowables(html,width):
+    for flow in flowables(html,width,font_size,leading):
         _,needed=flow.wrap(width,max(0,height-used))
         if used+needed>height+.01:raise ValueError('富文本超过答题区域，请扩大区域或精简内容')
         if canvas is not None:flow.drawOn(canvas,x,top-used-needed)

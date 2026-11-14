@@ -224,3 +224,26 @@ def test_optional_room_can_be_assigned_after_scan(school):
     f['request']('POST',route,{'room_id':f['rooms'][1]['id']},422)
     f['post'](route,{'room_id':f['rooms'][0]['id']})
     assert f['request']('GET','room-tags?group_id='+group['id'])[0]['scanned_students']==1
+
+
+def test_batch_rooms_and_delete_unused_records(school):
+    post,request=school['post'],school['request']
+    path='projects/'+school['project']['id']+'/room-tags/batch'
+    body={'group_id':school['groups'][0]['id'],'expected_students':30,'names':['01','02','02','03']}
+    assert post(path,body)=={'created':2,'skipped':['01','02']}
+    assert post(path,body)['created']==0
+    post(path,{**body,'names':['04','']},422)
+    with db.connect() as conn:
+        rooms={r['name']:r for r in db.find(conn,'room-tags',group_id=body['group_id'])}
+    assert '04' not in rooms
+    request('DELETE','records/room-tags/'+rooms['02']['id'])
+    grade=post('grades',{'name':'备用年级'})
+    cls=post('classes',{'name':'备用班','grade_id':grade['id']})
+    student=post('students',{'name':'测试','candidate_number':'000001234','class_id':cls['id']})
+    request('DELETE','records/grades/'+grade['id'],status=409)
+    request('DELETE','records/classes/'+cls['id'],status=409)
+    request('DELETE','records/students/'+school['students'][0]['id'],status=409)
+    for kind,row in [('students',student),('classes',cls),('grades',grade)]:
+        request('DELETE',f"records/{kind}/{row['id']}")
+    teacher=post('users',{'username':'unused-teacher','name':'测试教师','role':'teacher','password':'teacher-password'})
+    request('DELETE','records/users/'+teacher['id'])

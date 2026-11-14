@@ -30,14 +30,16 @@ def test_pdf_preview_matches_published_print_pixels_without_persisting_draft(tmp
         headers=setup(client)
         with db.connect() as connection:group=db.put(connection,'groups',{'name':'组'})
         body=definition(group['id'],paper_size,sides)
+        body.update(font_size=13,leading=20)
         body['questions'][1]['content_html']='<p><u>说明</u>，修改：<span data-answer-line="end">&nbsp;</span></p>'
         body.update(column_frame=True,layout_version=3,print_style='standard-v2',print_notes=[
-            {'id':'hint','page':sides,'x':20,'y':140,'width':100,'height':8,'html':'<p>补充说明：结果为 _ _ _ 米。</p>'}
+            {'id':'hint','page':sides,'x':20,'y':140,'width':100,'height':10,'html':'<p>补充说明：结果为 _ _ _ 米。</p>'}
         ])
         created=client.post('/api/v1/templates',json=body,headers=headers).json()
         published=client.post(f"/api/v1/templates/{created['id']}/publish",headers=headers)
         assert published.status_code==200,published.text
         template=published.json()
+        assert (template['font_size'],template['leading'])==(13,20)
         pdf=client.get(f"/api/v1/templates/{template['id']}/pdf",headers=headers)
         source=tmp_path/'print.pdf';source.write_bytes(pdf.content)
         for page in range(1,sides+1):

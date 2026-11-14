@@ -15,7 +15,7 @@ from .identifiers import prepare_questions
 
 router=APIRouter(prefix='/api/v1')
 _render_slots=threading.BoundedSemaphore(2)
-DEFINITION_FIELDS=('name','subtitle','paper','sides','candidate_length','layout_version','sheet_columns','notice_template','notice_layout','print_style','column_frame','uniform_subjective','print_notes','forbidden_regions','background_assets','background_asset_id','questions')
+DEFINITION_FIELDS=('name','subtitle','font_size','leading','paper','sides','candidate_length','layout_version','sheet_columns','notice_template','notice_layout','print_style','column_frame','uniform_subjective','print_notes','forbidden_regions','background_assets','background_asset_id','questions')
 
 
 @router.put('/groups/{group_id}/drafts/{identifier}')
