@@ -98,7 +98,7 @@ def project_rows(db,identifier,current):
         rows=results_for(db,group['id'],current)
         if not rows and current['role'] not in ('admin','manager'):continue
         grade=(get(db,group.get('grade_id'),'grades') or {}).get('name','')
-        columns.append({'id':group['id'],'subject_id':group['subject_id'],'subject':subjects[group['subject_id']]['name'],'grade':grade,'group':group['name'],'published':bool(group.get('frozen'))})
+        columns.append({'id':group['id'],'subject_id':group['subject_id'],'subject':subjects[group['subject_id']]['name'],'grade':grade,'group':group['name'],'conversion_enabled':bool(group.get('conversion_id')),'published':bool(group.get('frozen'))})
         for row in rows:
             student=students.setdefault(row['student_id'],{k:row[k] for k in ('student_id','candidate_number','name','class_id','class_name','grade')})
             student.setdefault('scores',{})[group['id']]={'raw':row['total'],'converted':row.get('converted_score'),'status':row['status'],'room_tags':row.get('room_tags',[]),'grade_id':row.get('group_grade_id')}

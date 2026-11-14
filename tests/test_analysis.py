@@ -60,6 +60,7 @@ def test_analysis_statistics_rank_scope_conversion_and_exports(tmp_path,monkeypa
         cross=client.get('/api/v1/analysis/project',params={'project_id':project['id']},headers=teacher_headers).json()
         assert len(cross['columns'])==1 and len(cross['students'])==3
         cross=client.get('/api/v1/analysis/project',params={'project_id':project['id']},headers=admin).json()
+        assert {c['id']:c['conversion_enabled'] for c in cross['columns']}=={g['id']:bool(g.get('conversion_id')) for g in groups}
         assert len(cross['columns'])==2 and cross['students'][0]['recorded_effective_sum']==120
         for view in ('classes','questions','distribution','students'):
             response=client.get('/api/v1/analysis/group/export',params={**params,'view':view},headers=teacher_headers)
