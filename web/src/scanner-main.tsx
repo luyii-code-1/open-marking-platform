@@ -59,8 +59,22 @@ function Scanner() {
   const room=batch?.room_tags?.[0]&&pack?.room_tags?.find((r:Row)=>r.id===batch.room_tags[0].id)
   const readyToUpload=pendingSheets.length>0&&!needsReview&&!state?.capturing
   const roomComplete=room?.expected_students>0&&pendingSheets.length+(room.scanned_students||0)+(room.confirmed_absent||0)>=room.expected_students
-  function confirmRoomUpload(){
-    modal.confirm({title:'本考场答卷已核对完毕？',content:`${room?.name||'未指定考场'} · 本机待上传 ${pendingSheets.length} 份答卷`,okText:'开始上传',cancelText:'继续检查',onOk:()=>action('upload',{batch_id:batchId})})
+  const [review,setReview]=useState<Row[]|null>(null),[answer,setAnswer]=useState<Row|null>(null)
+  const [original,setOriginal]=useState(''),[sideIndex,setSideIndex]=useState(0),[originalError,setOriginalError]=useState('')
+  const imageRequest=useRef(0)
+  async function reviewRoom(){
+    await action('roomReview',{batch_id:batchId},(rows:Row[])=>{
+      const names=new Map<string,string>((group?.roster||[]).map((r:Row)=>[r.candidate_number,r.name]))
+      setReview(rows.map(r=>({...r,name:names.get(r.candidate)||'未匹配'})))
+    })
+  }
+  async function openOriginal(row:Row,index:number){
+    const request=++imageRequest.current
+    setAnswer(row);setSideIndex(index);setOriginal('');setOriginalError('')
+    try{
+      const result=await scannerCall('originalPage',{batch_id:row.batch_id,page_id:row.sides[index].id})
+      if(request===imageRequest.current)setOriginal(result.url)
+    }catch(e){if(request===imageRequest.current)setOriginalError((e as Error).message)}
   }
   const locked = busy || !!state?.capturing || !!state?.syncing
   async function openProject(id: string) { await action('openProject', { project_id: id }, () => { setInProject(true); setSubject(''); setGrade('');setGroup(''); setBatch('') }) }
@@ -90,7 +104,7 @@ function Scanner() {
     ...(inProject && group ? [{ title: <Button type="link" disabled={locked} onClick={() => setBatch('')}>{cardName(group,subject)}</Button> }] : []),
     ...(inProject && batch ? [{ title: batch.room_tags?.[0]?.name||'未指定考场' }] : []),
   ]
-  if(state&&!state.manual_room_upload)return <main className="scanner-unavailable"><Typography.Title level={3}>请更新扫描客户端</Typography.Title><p>从管理后台的扫描台下载安装包后重新打开。</p><Button onClick={()=>action('offlinePage')}>打开已安装版本的本地页面</Button></main>
+  if(state&&!state.room_review)return <main className="scanner-unavailable"><Typography.Title level={3}>请更新扫描客户端</Typography.Title><p>从管理后台的扫描台下载安装包后重新打开。</p><Button onClick={()=>action('offlinePage')}>打开已安装版本的本地页面</Button></main>
   if (!hasScannerHost) return <main className="scanner-unavailable"><Typography.Title level={3}>扫描工作台</Typography.Title><Typography.Paragraph>请在扫描客户端打开此页面。</Typography.Paragraph></main>
   return <div className="scanner-app">
     <header className="scanner-header"><Space size={16}><Brand /><Typography.Title level={4}>扫描工作台</Typography.Title></Space><Space size={12}><Tag color={state?.online ? 'green' : undefined}>{state?.online ? '已连接' : '离线'}</Tag><Dropdown menu={{ items: [
@@ -122,7 +136,7 @@ function Scanner() {
                 { key: 'refresh', label: '刷新服务端状态', disabled: locked || !state.online, onClick: () => action('refreshBatch', { batch_id: batchId }) },
               ] }}><Button icon={<DownOutlined />} iconPosition="end">更多操作</Button></Dropdown>
             </Space></div>
-              {pendingSheets.length>0&&<Alert type={needsReview?'warning':'info'} message={needsReview?'本考场有待核对答卷':readyToUpload&&roomComplete?'已达到考场预期人数，请核对后开始上传':`已暂存 ${pendingSheets.length} 份，请核对后开始上传`} action={<Button disabled={locked||state.syncing||!readyToUpload||!state.online} onClick={confirmRoomUpload}>开始上传</Button>}/>}
+              {roomSheets.some(r=>r.total>0)&&<Alert type={needsReview?'warning':'info'} message={needsReview?'本考场有待核对答卷':readyToUpload&&roomComplete?'已达到考场预期人数，请核对后开始上传':`已暂存 ${pendingSheets.length} 份，请核对后开始上传`} action={<Button disabled={locked} onClick={reviewRoom}>核对答卷</Button>}/>}
               {batch.error && <Alert type="warning" message={batch.error} />}
               <Collapse defaultActiveKey={['device']} items={[{ key: 'device', label: '设备设置', children: <Space wrap size={12}><Select aria-label="分辨率" disabled={locked} value={state.scan_settings?.dpi||300} options={[150,200,300,600].map(value=>({value,label:value+' DPI'}))} onChange={dpi=>action('scanSettings',{dpi,color:state.scan_settings?.color||'gray'})}/><Select aria-label="颜色" disabled={locked} value={state.scan_settings?.color||'gray'} options={[{value:'gray',label:'灰度'},{value:'bw',label:'黑白'},{value:'color',label:'彩色'}]} onChange={color=>action('scanSettings',{dpi:state.scan_settings?.dpi||300,color})}/><Select aria-label="驱动接口" value={driver} disabled={locked} style={{ width: 130 }} onChange={value => { setDriver(value); setDevices([]); setDevice('') }} options={[{ value: 'Twain', label: 'TWAIN' }, { value: 'Wia', label: 'WIA' }, { value: 'Escl', label: 'eSCL' },{value:'external',label:'外部插件'}]} />{driver==='external'&&<Button disabled={locked} onClick={()=>action('choosePlugin',{},()=>{setDevices([]);setDevice('')})}>选择插件程序</Button>}<Button loading={busyKey===actionKey('devices')} disabled={locked} onClick={() => action('devices', { driver }, rows => { setDevices(rows); setDevice(rows[0]?.id || '') })}>发现扫描仪</Button><Select aria-label="扫描仪" placeholder="选择扫描仪" disabled={locked} value={device || undefined} style={{ minWidth: 260 }} options={devices.map(d => ({ value: d.id, label: d.name }))} onChange={setDevice} />{batch.capture_mode !== 'duplex' && batch.sides === 2 && <Select aria-label="扫描面" disabled={locked} value={side} onChange={setSide} options={[{ value: 'front', label: '正面' }, { value: 'back', label: '背面' }]} />}</Space> }]} />
               <Typography.Paragraph className="scanner-progress" type="secondary" role="status" aria-live="polite">{state.message || '\u00a0'}</Typography.Paragraph>
@@ -132,6 +146,18 @@ function Scanner() {
               ]} />
             </section>}
     </main>
+    <Drawer title={`${batch?.room_tags?.[0]?.name||'未指定考场'} · 已扫答卷`} open={review!==null} onClose={()=>setReview(null)} width="min(850px,95vw)" footer={<Button type="primary" disabled={!readyToUpload||!state.online||locked||!review?.some(r=>r.status==='local_paired')} onClick={()=>action('upload',{batch_id:batchId},()=>setReview(null))}>核对完毕，开始上传</Button>}>
+      <Table<Row> rowKey="id" dataSource={review||[]} onRow={r=>rowNavigation(()=>void openOriginal(r,0),r.candidate||'扫描原图')} columns={[
+        {title:'准考证号',dataIndex:'candidate',render:v=>v||'未识读'},
+        {title:'姓名',dataIndex:'name'},
+        {title:'缺考标记',dataIndex:'absent',render:v=>v==null?'请核对原图':v?'已填涂':'未填涂'},
+        {title:'状态',dataIndex:'status',render:v=><Status value={v}/>}
+      ]}/>
+    </Drawer>
+    <Drawer title={`${answer?.name||''} ${answer?.candidate||''} · 扫描原图`} open={!!answer} onClose={()=>{imageRequest.current++;setAnswer(null);setOriginal('')}} width="min(1000px,96vw)">
+      {answer&&<Space direction="vertical" style={{width:'100%'}}><Space>{answer.sides.map((s:Row,i:number)=><Button key={s.id} type={i===sideIndex?'primary':'default'} onClick={()=>openOriginal(answer,i)}>{s.side==='front'?'正面':'背面'}</Button>)}</Space>
+      {originalError?<Alert type="error" message={originalError}/>:original?<img className="scanner-preview" src={original} alt="扫描原图"/>:<Card loading/>}</Space>}
+    </Drawer>
     <Drawer title="连接服务器" open={connection} onClose={() => setConnection(false)} width={420}><Form form={connectForm} layout="vertical" onFinish={values => action('connect', values, () => { connectForm.setFieldValue('pairing_code', ''); setConnection(false); setInProject(false); setSubject(''); setGrade('');setGroup(''); setBatch('') })}>
       <Form.Item name="server_url" label="服务端地址" rules={[{ required: true }]}><Input placeholder="https://服务器地址" /></Form.Item>
       <Typography.Paragraph type="secondary">已登记的设备可直接连接。首次使用时在管理后台生成配对码，再在此处填写完成绑定。</Typography.Paragraph>

@@ -54,7 +54,7 @@ def project_package(identifier: str, current=Depends(scan_admin)):
             confirmed=find(db,'submissions',group_id=group['id'])
             valid=[s for s in confirmed if s.get('pages') or s.get('status')=='absent']
             packaged.append({'id': group['id'], 'name': group['name'], 'subject_id': group['subject_id'], 'frozen': bool(group.get('frozen')), 'grade_id':group.get('grade_id'), 'grade_name':(get(db,group.get('grade_id'),'grades') or {}).get('name',''),
-                             'template': configuration(template), 'config_sha256': config_hash(template),
+                             'template': {**configuration(template), 'notice_layout':template.get('notice_layout',1), 'notice_template':template.get('notice_template')}, 'config_sha256': config_hash(template),
                              'confirmed_candidates':sorted({s['candidate_number'] for s in valid}),
                              'confirmed_students':len({s['student_id'] for s in valid}),
                              'unassigned':[{'id':s['id'],'candidate_number':s['candidate_number']} for s in valid if not s.get('room_tags')],

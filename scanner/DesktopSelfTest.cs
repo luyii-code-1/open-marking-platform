@@ -58,6 +58,14 @@ internal static class DesktopSelfTest
                 }
                 var pairs=JsonDocument.Parse(queue.PairLocally(batch));Check(pairs.RootElement[0].GetProperty("candidate_number").GetString()=="123","Offline candidate recognition failed.");
                 Check(queue.Pages(batchId).Count==2,"Offline queue lost a page.");
+                var review=Json(await offline.Invoke("roomReview",Json(new{batch_id=batchId})));
+                Check(review.GetArrayLength()==1&&review[0].GetProperty("candidate").GetString()=="123"&&review[0].GetProperty("absent").ValueKind==JsonValueKind.False,"Room review identity or absence flag is incorrect: "+review.GetRawText());
+                var sides=review[0].GetProperty("sides");Check(sides.GetArrayLength()==2,"Room review lost a side.");
+                foreach(var side in sides.EnumerateArray()){
+                    var id=side.GetProperty("id").GetString();
+                    var original=Json(await offline.Invoke("originalPage",Json(new{batch_id=batchId,page_id=id})));
+                    Check(Convert.FromBase64String(original.GetProperty("url").GetString()!.Split(',')[1]).SequenceEqual(File.ReadAllBytes(queue.Pages(batchId).Single(p=>p.CaptureId==id).Path)),"Original scan differs from saved file.");
+                }
                 var firstQuestion=JsonDocument.Parse(batch.TemplateJson).RootElement.GetProperty("questions")[0];
                 var preview=Json(await offline.Invoke("preview",Json(new{batch_id=batchId,page_id=queue.Pages(batchId).First(p=>p.Side=="front").CaptureId,question_id=firstQuestion.GetProperty("id").GetString()})));
                 using(var imageStream=new MemoryStream(Convert.FromBase64String(preview.GetProperty("url").GetString()!.Split(',')[1])))

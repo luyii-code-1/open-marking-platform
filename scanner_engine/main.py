@@ -55,6 +55,7 @@ def process(root, request):
     result = {'engine_version': ENGINE_VERSION, 'template_id': template['id'], 'template_revision': template['revision'],
               'config_sha256': request['config_sha256'], 'source_sha256': digest(content),
               'candidate_number': candidate, 'selections': selections, 'absent_mark': absent_mark(normalized, side, template),
+              'absence_layout_known': 'notice_layout' in template or not manual_binding(template),
               'normalized_sha256': digest(encoded), 'local_cuts_sha256': digest(cuts), 'cuts': entries}
     write_atomic(directory / 'recognition.json', json.dumps(result, ensure_ascii=False).encode())
     return result
