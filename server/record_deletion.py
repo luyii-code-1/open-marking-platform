@@ -3,12 +3,12 @@ import json
 from typing import Literal
 from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException
-from .db import connect, find, get
+from .db import connect, find, get, objects
 from .dependencies import admin, require
 from .lifecycle import writable
 
 router = APIRouter(prefix='/api/v1')
-KINDS = Literal['room-tags', 'grades', 'classes', 'students', 'users']
+KINDS = Literal['room-tags', 'grades', 'classes', 'students', 'users', 'subject-tags', 'electives']
 LABELS = {'subjects':'科目','groups':'题卡','classes':'班级','students':'学生',
           'rosters':'应考名单','scan-batches':'扫描批次','submissions':'答卷',
           'assignments':'阅卷分工','tasks':'阅卷任务','room-tags':'考场'}
@@ -28,6 +28,21 @@ def delete_record(kind: KINDS, identifier: str, current=Depends(admin)):
         else:
             row = require(db,identifier,kind)
             writable(db,kind,row)
+        if kind=='subject-tags':
+            name=row['name']
+            if find(db,'electives',subject=name):
+                raise HTTPException(409,'该科目已有年级选科名单，请先处理对应名单')
+            for subject in objects(db,'subjects'):
+                if subject.get('subject_tag_id')==identifier or (not subject.get('subject_tag_id') and subject.get('name')==name):
+                    project=get(db,subject.get('project_id'),'projects') or {}
+                    raise HTTPException(409,'该科目已用于考试：'+project.get('name','未命名考试'))
+            if any(name in role.get('subjects',[]) for cls in objects(db,'classes') for role in cls.get('teaching',{}).values()):
+                raise HTTPException(409,'该科目已有班级任教关系')
+        if kind=='electives':
+            from .electives import card_catalog
+            for group in find(db,'groups',grade_id=row['grade_id']):
+                if (card_catalog(db,group) or {}).get('id')==identifier:
+                    raise HTTPException(409,'选科名单已用于题卡：'+group['name'])
         if kind=='students':
             cls=get(db,row.get('class_id'),'classes') or {}
             if cls.get('grade_id') and any(g.get('roster_mode')!='selected' for g in find(db,'groups',grade_id=cls['grade_id'])):
@@ -46,5 +61,5 @@ def delete_record(kind: KINDS, identifier: str, current=Depends(admin)):
             db.execute('UPDATE objects SET deleted=1 WHERE id=?',(identifier,))
             db.execute('UPDATE identifiers SET retired=1 WHERE id=?',(identifier,))
         db.execute('INSERT INTO audit(id,actor,action,object_id,body) VALUES(?,?,?,?,?)',
-                   (str(uuid4()),current['id'],'delete',identifier,json.dumps({'kind':kind,'name':row['name']},ensure_ascii=False)))
+                   (str(uuid4()),current['id'],'delete',identifier,json.dumps({'kind':kind,'name':row['subject'] if kind=='electives' else row['name']},ensure_ascii=False)))
         return {'deleted':True}

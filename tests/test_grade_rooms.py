@@ -264,3 +264,35 @@ def test_catalog_exam_creation_and_roster_snapshot(school):
     assert roster()=={students[0],students[2]}
     r('POST',base+'/elective')
     assert roster()==set(students[1:])
+
+
+def test_sheet_search_and_group_progress(school):
+    f=school
+    student=f['students'][0]
+    f['pair'](student)
+    group=f['groups'][0]
+    progress=f['request']('GET','groups/'+group['id']+'/workflow')
+    assert (progress['roster_scanned'],progress['roster_count'],progress['unpaired_pages'])==(1,3,0)
+    assert progress['grading_progress']['objective']=={'done':1,'total':1}
+    path='projects/'+f['project']['id']+'/scanned-sheets?q='
+    by_name=f['request']('GET',path+student['name'])
+    item=by_name['items'][0]
+    assert by_name['total']==1 and item['candidate_number']==student['candidate_number']
+    assert item['pages'][0]['image_url'].endswith('/image')
+    assert f['request']('GET',path+student['candidate_number']+'&group_id='+f['groups'][1]['id'])['total']==0
+    other=f['post']('projects',{'name':'其他考试'})
+    assert f['request']('GET','projects/'+other['id']+'/scanned-sheets?q='+student['name'])['total']==0
+
+
+def test_subject_catalog_removal(school):
+    r=school['request']
+    tag=r('POST','subject-tags',{'name':'实验课'})
+    remove='records/subject-tags/'+tag['id']
+    elective=r('PUT','electives',{'grade_id':school['grade']['id'],'subject':tag['name'],'student_ids':[]})
+    r('DELETE',remove,status=409)
+    r('DELETE','records/electives/'+elective['id'])
+    r('DELETE',remove)
+    assert tag not in r('GET','subject-tags')
+    linked=r('POST','subject-tags',{'name':'劳动'})
+    r('POST','projects',{'name':'劳动考试','catalog_ids':[linked['id']]})
+    assert '劳动考试' in r('DELETE','records/subject-tags/'+linked['id'],status=409)['detail']

@@ -55,6 +55,26 @@ def overview(db,group,current):
             'open_batches':sum(b.get('status')!='paired' and b['received_pages']>0 for b in details),'open_exceptions':len(exceptions),
             'scanned':sum(s.get('status')!='absent' for s in submissions),'results':counts,
             'published':bool(group.get('frozen')),'template_id':group.get('template_id')}
+    roster_ids={student['id'] for student in roster['students']}
+    scanned_ids={submission['student_id'] for submission in submissions if submission.get('pages')}
+    state['roster_scanned']=len(roster_ids & scanned_ids)
+    state['scanned_students']=len(scanned_ids)
+    state['unpaired_pages']=sum(max(0,b['received_pages']-b['linked_pages']) for b in details)
+    # Count scores against the version actually used by each submitted sheet.
+    from .merged_questions import label
+    templates={}
+    by_student={r['student_id']:r for r in rows}
+    progress={kind:{'done':0,'total':0} for kind in ('objective','subjective')}
+    for submission in submissions:
+        if submission['status']=='absent':continue
+        tid=submission['template_id']
+        if tid not in templates:templates[tid]=require(db,tid,'templates')
+        scores=by_student.get(submission['student_id'],{}).get('scores',{})
+        for question in templates[tid]['questions']:
+            counter=progress['subjective' if question['type']=='subjective' else 'objective']
+            counter['total']+=1
+            counter['done']+=int(scores.get(label(question)) is not None)
+    state['grading_progress']=progress
     state['publication_blockers']=publication_blockers(state)
     return state
 
@@ -137,3 +157,39 @@ def finish_empty(identifier:str,body:dict,current=Depends(admin)):
         if body.get('confirm') is not True:raise HTTPException(422,'请确认该批次无需接收页面')
         batch.update(status='paired',completed_empty=True,completed_at=time.time())
         return put(db,'scan-batches',batch,current['id'])
+
+
+@router.get('/projects/{identifier}/scanned-sheets')
+def scanned_sheets(identifier:str,q:str,group_id:str|None=None,page:int=1,current=Depends(admin)):
+    term=q.strip()
+    if not term or len(term)>100 or not 1<=page<=1000000:
+        raise HTTPException(422,'请输入姓名或准考证号，并选择有效页码')
+    with connect() as db:
+        db.execute('BEGIN')
+        require(db,identifier,'projects')
+        if group_id:
+            from .room_tags import project_for_group
+            if project_for_group(db,group_id)!=identifier:raise HTTPException(404,'题卡不属于本考试')
+        source="""FROM objects s JOIN objects g ON g.id=json_extract(s.body,'$.group_id') AND g.kind='groups' AND g.deleted=0
+            JOIN objects subj ON subj.id=json_extract(g.body,'$.subject_id') AND subj.kind='subjects' AND subj.deleted=0
+            LEFT JOIN objects st ON st.id=json_extract(s.body,'$.student_id') AND st.kind='students'
+            WHERE s.kind='submissions' AND s.deleted=0 AND json_array_length(s.body,'$.pages')>0
+            AND json_extract(subj.body,'$.project_id')=? AND (? IS NULL OR g.id=?)
+            AND (instr(lower(json_extract(s.body,'$.student_snapshot.name')),lower(?))>0
+            OR instr(lower(json_extract(st.body,'$.name')),lower(?))>0
+            OR instr(json_extract(s.body,'$.candidate_number'),?)>0)"""
+        params=(identifier,group_id,group_id,term,term,term)
+        total=db.execute('SELECT count(*) '+source,params).fetchone()[0]
+        matches=db.execute("""SELECT s.id,s.body,json_extract(st.body,'$.name') AS current_name,
+            json_extract(subj.body,'$.name') AS subject,json_extract(g.body,'$.name') AS card """+
+            source+" ORDER BY json_extract(s.body,'$.candidate_number'),subject,s.id LIMIT 20 OFFSET ?",(*params,(page-1)*20))
+        items=[]
+        for row in matches:
+            sub=json.loads(row['body'])
+            pages=[]
+            for pid in sub['pages']:
+                image=get(db,pid,'pages')
+                if image:pages.append({'id':pid,'side':image.get('side'),'image_url':f'/api/v1/pages/{pid}/image'})
+            items.append({'id':row['id'],'name':(sub.get('student_snapshot') or {}).get('name') or row['current_name'],
+                          'candidate_number':sub['candidate_number'],'subject':row['subject'],'card':row['card'],'pages':pages})
+        return {'items':items,'total':total,'page':page}

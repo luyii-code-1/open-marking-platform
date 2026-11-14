@@ -1,3 +1,4 @@
+import {SheetLookup} from './SheetLookup'
 import {CatalogPicker} from './Electives'
 import { RoomTagManager } from './RoomTags'
 import { useEffect,useState } from 'react'
@@ -66,6 +67,7 @@ export function Exams({location,navigate}:{location:ExamLocation;navigate:(path:
         {title:'操作',className:'row-actions',render:(_:unknown,row:Row)=><Space><Rename kind="subjects" row={row} refresh={refresh}/><HierarchyDelete kind="subjects" target={row} onDeleted={refresh}/></Space>},
       ]}/>},
       {key:'rooms',label:'考场设置',children:<RoomTagManager projectId={project.id}/>},
+      {key:'sheets',label:'答题卡查询',children:<SheetLookup key={project.id} projectId={project.id}/>},
       {key:'summary',label:'跨科成绩',children:<Results admin projectId={project.id} projectOnly/>},
       {key:'storage',label:'存储设置',children:<ProjectStorage project={project} onSaved={refresh}/>},
       {key:'archives',label:'归档与释放',children:<ArchiveManager projectId={project.id}/>},
@@ -98,7 +100,7 @@ function SubjectGrades({subject,groups,grades,onEnter,refresh}:{subject:Row;grou
 }
 function GroupWorkspace({group,project,section,onSection,onRooms}:{group:Row;project:Row;section:string;onSection:(section:string)=>void;onRooms:()=>void}){
   return <Tabs activeKey={section} onChange={onSection} tabBarExtraContent={<Button onClick={()=>onSection('template')}>题卡设计</Button>} items={groupSections.filter(([key])=>key!=='template').map(([key,label])=>({key,label,children:
-    key==='overview'?<GroupOverview group={group} onSection={onSection}/>:
+    key==='sheets'?<SheetLookup key={group.id} projectId={project.id} groupId={group.id}/>:key==='overview'?<GroupOverview group={group} onSection={onSection}/>:
     (key==='scans'||key==='marking')&&!group.template_id?<Card><Empty description={key==='scans'?'发布题卡后即可建立扫描批次':'发布题卡后即可分配教师与阅卷'}><Button type="primary" onClick={()=>onSection('template')}>设计题卡</Button></Empty></Card>:
     key==='template'?<TemplateEditor groupId={group.id}/>:key==='roster'?<Roster groupId={group.id}/>:
     key==='scans'?<Space direction="vertical" size={24} style={{width:'100%'}}><div><Button onClick={onRooms}>考场设置</Button></div><Scans groupId={group.id}/></Space>:key==='marking'?<ReviewAllocation templateId={group.template_id} frozen={!!group.frozen}/>:
@@ -117,6 +119,22 @@ function GroupOverview({group,onSection}:{group:Row;onSection:(section:string)=>
     {key:'exceptions',label:'异常核查',detail:workflow.data.group_id?`${workflow.data.open_exceptions} 项待核查`:'核查识别与评阅中的待处理事项'},
     {key:'results',label:'成绩',detail:group.frozen?'成绩已发布':'检查统计并确认发布'},
   ]
-  const w=workflow.data,next=!group.template_id?'template':w.roster_needs_review?'roster':w.open_exceptions?'exceptions':(w.open_batches||!w.scan_closed)?'scans':w.results?.pending?'marking':'results'
-  return <><ErrorNotice error={templates.error||roster.error||workflow.error}/>{w.group_id&&!group.frozen&&<Card title="当前待办" style={{marginBottom:24}}><Space><Text>{entries.find(e=>e.key===next)?.detail}</Text><Button type="primary" onClick={()=>onSection(next)}>{next==='roster'?'核对应考名单':entries.find(e=>e.key===next)?.label}</Button></Space></Card>}<div className="group-work-grid">{entries.map(item=><button type="button" className="workspace-entry" key={item.key} onClick={()=>onSection(item.key)}><span className="workspace-entry-title">{item.label}<RightOutlined/></span><span className="workspace-entry-detail">{item.detail}</span></button>)}</div></>
+  const w=workflow.data,progress=w.grading_progress
+  const status=(part:'objective'|'subjective')=>{
+    const {done,total}=progress[part]
+    if(!total)return template?.questions.some(q=>(q.type==='subjective')===(part==='subjective'))?'等待实考卷入库':'无此题型'
+    return (done===total?'已完成':'进行中')+` · ${done}/${total} 题次`
+  }
+  return <><ErrorNotice error={templates.error||roster.error||workflow.error}/>
+    {progress&&<Card title="题卡流程" extra={<Button loading={workflow.loading} onClick={workflow.reload}>刷新</Button>} style={{marginBottom:16}}>
+      <Space wrap size={[28,12]}>
+        <div>已扫描 <strong>{w.roster_configured?`${w.roster_scanned}/${w.roster_count}`:`${w.scanned_students}（未设名单）`}</strong> 人</div>
+        <div>待配对 <strong>{w.unpaired_pages}</strong> 页</div>
+        <div>客观题自动批阅 <strong>{status('objective')}</strong></div>
+        <div>主观题阅卷 <strong>{status('subjective')}</strong></div>
+        {!!w.regrades&&<div>待重阅 {w.regrades} 项</div>}
+        <Tag>{w.published?'成绩已发布':'成绩未发布'}</Tag>
+      </Space>
+    </Card>}
+    <div className="group-work-grid">{entries.map(item=><button type="button" className="workspace-entry" key={item.key} onClick={()=>onSection(item.key)}><span className="workspace-entry-title">{item.label}<RightOutlined/></span><span className="workspace-entry-detail">{item.detail}</span></button>)}</div></>
 }

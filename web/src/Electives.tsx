@@ -1,3 +1,4 @@
+import {DeleteRecord} from './DeleteRecord'
 import {useState} from 'react'
 import {App, Card, Select, Space, Upload,Input,Radio,Tag,Checkbox,Tabs} from 'antd'
 import { Table } from './DataTable'
@@ -12,7 +13,7 @@ export function Electives({grades,students,classes}:{grades:Row[];students:Row[]
   function choose(g:string,s:string){setGrade(g);setSubject(s);const row=lists.data.find(l=>l.grade_id===g&&l.subject===s);setIds(row?.student_ids||[]);setKind(row?.kind_of_subject||'elective')}
   const classNames=new Map(classes.filter(c=>c.grade_id===grade).map(c=>[c.id,c.name]))
   const roster=students.filter(s=>classNames.has(s.class_id))
-  return <Space direction="vertical" style={{width:'100%'}}><Card title="选科名单"><Tabs items={grades.filter(g=>!g.archived).map(g=>({key:g.id,label:g.name,children:<Table<Row> rowKey="id" dataSource={lists.data.filter(row=>row.grade_id===g.id)} loading={lists.loading} columns={[{title:'科目',dataIndex:'subject'},{title:'应考范围',render:(_,r)=>r.kind_of_subject==='required'?'年级全体':`选考 · ${r.student_ids.length} 人`},{title:'操作',render:(_,r)=><Button onClick={()=>choose(r.grade_id,r.subject)}>编辑</Button>}]}/>}))}/></Card><Card title="设置应考范围"><Space wrap style={{marginBottom:16}}>
+  return <Space direction="vertical" style={{width:'100%'}}><Card title="选科名单"><Tabs items={grades.filter(g=>!g.archived).map(g=>({key:g.id,label:g.name,children:<Table<Row> rowKey="id" dataSource={lists.data.filter(row=>row.grade_id===g.id)} loading={lists.loading} columns={[{title:'科目',dataIndex:'subject'},{title:'应考范围',render:(_,r)=>r.kind_of_subject==='required'?'年级全体':`选考 · ${r.student_ids.length} 人`},{title:'操作',render:(_,r)=><Space><Button onClick={()=>choose(r.grade_id,r.subject)}>编辑</Button><DeleteRecord kind="electives" row={{...r,name:r.subject}} reload={async()=>{await lists.reload();if(grade===r.grade_id&&subject===r.subject)choose('','')}}/></Space>}]}/>}))}/></Card><Card title="设置应考范围"><Space wrap style={{marginBottom:16}}>
     <Select disabled={busy} placeholder="选择年级" style={{width:160}} value={grade||undefined} onChange={g=>choose(g,subject)} options={grades.map(g=>({value:g.id,label:g.name}))}/>
     <Select disabled={busy} showSearch optionFilterProp="label" placeholder="选择科目" style={{width:220}} value={subject||undefined} onChange={s=>choose(grade,s)} options={subjects.data.map(s=>({value:s.name,label:s.name}))}/>
     <Radio.Group disabled={busy} value={kind} onChange={e=>setKind(e.target.value)} options={[{value:'required',label:'必考'},{value:'elective',label:'选考'}]}/>
@@ -38,7 +39,7 @@ export function SubjectCatalog(){
       try{const result=await request<{created:number}>('/subject-tags/import',{method:'POST',body});await tags.reload();message.success(`新增 ${result.created} 个科目`)}
       catch(e){message.error((e as Error).message)}finally{setBusy(false)}return false
     }}><Button title="Excel 或 CSV，表头为“科目”">导入科目表</Button></Upload>
-    </Space><Table rowKey="id" dataSource={tags.data} loading={tags.loading} columns={[{title:'科目',dataIndex:'name'}]}/></Card>},
+    </Space><Table rowKey="id" dataSource={tags.data} loading={tags.loading} columns={[{title:'科目',dataIndex:'name'},{title:'操作',render:(_,row)=><DeleteRecord kind="subject-tags" row={row} reload={tags.reload}/>}]}/></Card>},
     {key:'electives',label:'选科名单',children:<Electives key={tags.data.map(t=>t.id).join(',')} grades={grades.data} students={students.data} classes={classes.data}/>}]} />
 }
 

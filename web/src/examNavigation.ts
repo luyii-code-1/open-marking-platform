@@ -2,7 +2,7 @@ import type { Row } from './api'
 
 export const groupSections = [
   ['overview', '工作台'], ['template', '题卡设计'], ['roster', '应考名单'],
-  ['scans', '扫描与补扫'], ['marking', '阅卷分配'], ['exceptions', '异常核查'], ['results', '成绩'],
+  ['scans', '扫描与补扫'], ['sheets','答题卡查询'], ['marking', '阅卷分配'], ['exceptions', '异常核查'], ['results', '成绩'],
 ] as const
 export type GroupSection = typeof groupSections[number][0]
 export type ExamLocation = { projectId?: string; subjectId?: string; gradeId?:string; groupId?: string; section?: string }
@@ -38,7 +38,7 @@ export function readLocation(hash: string): Location {
     if (page !== 'exams') return { page }
     if (!parts[1]) return { page }
     const location: Location = { page, projectId: parts[1] }
-    if (parts[2] !== 'subjects') return { ...location, section: ['archives', 'summary', 'storage', 'rooms'].includes(parts[2]) ? parts[2] : undefined }
+    if (parts[2] !== 'subjects') return { ...location, section: ['archives', 'summary', 'storage', 'rooms', 'sheets'].includes(parts[2]) ? parts[2] : undefined }
     if (!parts[3]) return location
     location.subjectId = parts[3]
     if(parts[4]==='grades'&&parts[5]){
