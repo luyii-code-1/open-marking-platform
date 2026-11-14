@@ -24,7 +24,7 @@ export function StorageConnections() {
   return <Space direction="vertical" size={24} style={{width:'100%'}}>
     <ErrorNotice error={resource.error} retry={resource.reload}/>
     <Card title="存储连接" extra={<Button type="primary" onClick={()=>edit(null)}>添加连接</Button>}>
-      <Table rowKey="id" loading={resource.loading} dataSource={resource.data} pagination={{defaultPageSize:10}} columns={[
+      <Table rowKey="id" loading={resource.loading} dataSource={resource.data} pagination={{defaultPageSize:50}} columns={[
         {title:'连接',render:(_,row)=><Space direction="vertical" size={0}><Text>{row.name}</Text><Text type="secondary">{row.bucket}</Text></Space>},
         {title:'考试项目',dataIndex:'project_count'},
         {title:'媒体处理',render:(_,row)=><Tag>{row.media_enabled?'已开启':'关闭'}</Tag>},

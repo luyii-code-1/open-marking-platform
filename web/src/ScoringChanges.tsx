@@ -29,7 +29,7 @@ export function ScoringChanges({template,onSaved}:{template:Template;onSaved:()=
         </Form>
         <Collapse items={[{key:'json',label:'高级 JSON',children:<Input.TextArea value={json} rows={10} onChange={e=>{setJson(e.target.value);setReport(undefined);setConfirmed(false)}} aria-label="答案与评分规则JSON"/>}]}/>
         <Input.TextArea value={reason} rows={2} onChange={e=>setReason(e.target.value)} placeholder="填写调整原因"/>
-        {report&&<><Alert type="warning" message={`涉及 ${report.affected_submissions} 份答卷，其中 ${report.changed_scores} 份分数变化。确认后需重新发布成绩。`}/><Table rowKey="id" dataSource={report.rows} pagination={{pageSize:8}} columns={[{title:'考号',dataIndex:'candidate_number'},{title:'受影响题目原得分',dataIndex:'before'},{title:'新得分',dataIndex:'after'}]}/><Checkbox checked={confirmed} onChange={e=>setConfirmed(e.target.checked)}>已核对影响范围，确认进入复核并重新计分</Checkbox></>}
+        {report&&<><Alert type="warning" message={`涉及 ${report.affected_submissions} 份答卷，其中 ${report.changed_scores} 份分数变化。确认后需重新发布成绩。`}/><Table rowKey="id" dataSource={report.rows} pagination={{defaultPageSize:50}} columns={[{title:'考号',dataIndex:'candidate_number'},{title:'受影响题目原得分',dataIndex:'before'},{title:'新得分',dataIndex:'after'}]}/><Checkbox checked={confirmed} onChange={e=>setConfirmed(e.target.checked)}>已核对影响范围，确认进入复核并重新计分</Checkbox></>}
       </Space>
     </Modal></>
 }

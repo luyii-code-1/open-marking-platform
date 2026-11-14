@@ -56,7 +56,7 @@ function ReviewQueueStatus({records,status,error,sync,target}:{records:ReviewRec
   return <>
     {target?createPortal(notice,target):notice}
     <Modal title="本地待传评分" width={760} open={open} onCancel={()=>setOpen(false)} footer={<Space><Button onClick={exportRecords}>导出记录</Button><Button onClick={()=>setOpen(false)}>关闭</Button></Space>}>
-      <Table rowKey="key" dataSource={pending} pagination={{pageSize:8}} columns={[{title:'题卡',render:(_,r)=>r.template.name},{title:'题号',render:(_,r)=>r.question.number},{title:'分数',render:(_,r)=>r.operation?.score},{title:'状态',render:(_,r)=>r.error||'等待服务器确认'},{title:'操作',render:(_,r)=>r.status==='conflict'?<Popconfirm title="确认已核对或导出这份记录？" description="仅移除本地记录，服务器评分保持当前结果。" onConfirm={()=>forgetReview(r.owner,r.task.id)}><Button size="small">移除本地记录</Button></Popconfirm>:null}]}/>
+      <Table rowKey="key" dataSource={pending} pagination={{defaultPageSize:50}} columns={[{title:'题卡',render:(_,r)=>r.template.name},{title:'题号',render:(_,r)=>r.question.number},{title:'分数',render:(_,r)=>r.operation?.score},{title:'状态',render:(_,r)=>r.error||'等待服务器确认'},{title:'操作',render:(_,r)=>r.status==='conflict'?<Popconfirm title="确认已核对或导出这份记录？" description="仅移除本地记录，服务器评分保持当前结果。" onConfirm={()=>forgetReview(r.owner,r.task.id)}><Button size="small">移除本地记录</Button></Popconfirm>:null}]}/>
     </Modal>
   </>
 }

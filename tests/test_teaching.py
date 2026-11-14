@@ -56,3 +56,16 @@ def test_new_accounts_and_duplicate_confirmation(school):
         uid=c.execute("SELECT id FROM users WHERE name='教师乙'").fetchone()[0]
         again=matrix_import(c,table,True,'admin',{'6:1':uid,'7:1':uid})
         assert not again['created'] and not again['pending']
+
+def test_class_editor_saves_memberships_atomically(school):
+    f=school
+    r=f['request']
+    teacher=f['post']('users',{'username':'class-editor','password':'teacher-password-long','name':'教师'})
+    uid=teacher['id']
+    cls=f['cls']['id']
+    payload={'previous_teaching':{},'previous_teacher_ids':[], 'teacher_ids':[uid],'teaching':{uid:{'subjects':['数学'],'homeroom':True}}}
+    saved=r('PUT','classes/'+cls,payload)
+    assert saved['teaching'][uid]['subjects']==['数学']
+    r('PUT','classes/'+cls,{**payload,'name':'过时修改'},409)
+    saved=r('PUT','classes/'+cls,{'previous_teaching':saved['teaching'],'previous_teacher_ids':[uid],'teacher_ids':[],'teaching':{}})
+    assert saved['teaching']=={} and saved['teacher_ids']==[]

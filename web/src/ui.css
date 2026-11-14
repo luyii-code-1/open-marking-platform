@@ -20,3 +20,5 @@
 .brand-collapsed{justify-content:center;padding:0 8px}
 .brand-login{height:auto;padding:0;justify-content:center;margin:0 auto 24px}
 @media(prefers-reduced-motion:reduce){.ant-btn,.ant-btn-icon,.ant-btn-loading-icon{transition:none!important}}
+
+.list-search.ant-input-search { width: min(100%, 300px); margin-bottom: 12px; }

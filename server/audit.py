@@ -22,12 +22,16 @@ def filters(actor,object_id):
 
 
 @router.get('/audit')
-def audits(before:int|None=Query(None,ge=1),limit:int=Query(50,ge=1,le=200),actor:str=Query('',max_length=100),object_id:str=Query('',max_length=100),kind:str=Query('',max_length=100),action:str=Query('',max_length=100),current=Depends(system_admin)):
+def audits(before:int|None=Query(None,ge=1),limit:int=Query(50,ge=1,le=200),actor:str=Query('',max_length=100),object_id:str=Query('',max_length=100),kind:str=Query('',max_length=100),action:str=Query('',max_length=100),q:str=Query('',max_length=120),current=Depends(system_admin)):
     clauses,params=filters(actor,object_id)
     if kind:clauses.append('o.kind=?');params.append(kind)
     if action:clauses.append('a.action=?');params.append(action)
+    if q.strip():
+        fields=['u.name', 'a.actor', 'a.object_id', 'o.kind', 'a.action', 'a.created']
+        clauses.append('('+' OR '.join("instr(lower(COALESCE("+field+",'')),lower(?))>0" for field in fields)+')')
+        params.extend([q.strip()]*len(fields))
     where=' WHERE '+' AND '.join(clauses) if clauses else ''
-    source='audit a LEFT JOIN objects o ON o.id=a.object_id'
+    source='audit a LEFT JOIN objects o ON o.id=a.object_id LEFT JOIN users u ON u.id=a.actor'
     with connect() as db:
         total=db.execute('SELECT count(*) FROM '+source+where,params).fetchone()[0]
         if before:
@@ -39,12 +43,16 @@ def audits(before:int|None=Query(None,ge=1),limit:int=Query(50,ge=1,le=200),acto
 
 
 @router.get('/requests')
-def requests(request:Request,before:int|None=Query(None,ge=1),limit:int=Query(50,ge=1,le=200),actor:str=Query('',max_length=100),object_id:str=Query('',max_length=100),status:int|None=Query(None,ge=100,le=599),current=Depends(system_admin)):
+def requests(request:Request,before:int|None=Query(None,ge=1),limit:int=Query(50,ge=1,le=200),actor:str=Query('',max_length=100),object_id:str=Query('',max_length=100),status:int|None=Query(None,ge=100,le=599),q:str=Query('',max_length=120),current=Depends(system_admin)):
     journal=request.app.state.request_journal;journal.flush()
     clauses,params=filters(actor,object_id)
     if status is not None:clauses.append('a.status=?');params.append(status)
+    if q.strip():
+        fields=['u.name', 'a.actor', 'a.object_id', 'a.route', 'a.method', 'a.status', 'a.created', 'a.peer']
+        clauses.append('('+' OR '.join("instr(lower(COALESCE("+field+",'')),lower(?))>0" for field in fields)+')')
+        params.extend([q.strip()]*len(fields))
     where=' WHERE '+' AND '.join(clauses) if clauses else ''
-    source='request_log a'
+    source='request_log a LEFT JOIN users u ON u.id=a.actor'
     with connect() as db:
         total=db.execute('SELECT count(*) FROM '+source+where,params).fetchone()[0]
         if before:

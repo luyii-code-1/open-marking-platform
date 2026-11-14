@@ -63,6 +63,24 @@ def edit_class(identifier:str,body:dict,current=Depends(admin)):
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
         item=require(db,identifier,'classes')
+        if 'teaching' in body:
+            if body.get('previous_teaching')!=item.get('teaching',{}) or body.get('previous_teacher_ids')!=item.get('teacher_ids',[]):
+                raise HTTPException(409,'任教关系已被更新，请重新打开班级')
+            roles=body['teaching']
+            ids=body.get('teacher_ids')
+            if not isinstance(ids,list) or not all(isinstance(uid,str) for uid in ids) or not isinstance(roles,dict) or set(roles)-set(ids):
+                raise HTTPException(422,'教师列表无效')
+            for uid in ids:
+                if not db.execute("SELECT 1 FROM users WHERE id=? AND role='teacher'",(uid,)).fetchone():raise HTTPException(422,'请选择有效的教师账号')
+            from .teaching import Relation
+            from pydantic import ValidationError
+            try:
+                clean={}
+                for uid,role in roles.items():
+                    rel=Relation(teacher_id=uid,class_id=identifier,**role)
+                    clean[uid]={'subjects':sorted({v.strip() for v in rel.subjects if v.strip()}),'homeroom':rel.homeroom}
+                item['teaching']=clean
+            except (ValidationError,TypeError):raise HTTPException(422,'任教学科或班主任设置无效')
         for key in ('name','teacher_ids'):
             if key in body: item[key]=body[key]
         if 'teacher_ids' in body and 'teaching' in item:
