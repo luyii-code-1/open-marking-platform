@@ -7,12 +7,11 @@ import { Button } from './Button'
 import { CopyOutlined, DownloadOutlined, PlusOutlined, SaveOutlined } from '@ant-design/icons'
 import { request, download, newQuestion, send, useResource, type Question, type Row, type Template } from './api'
 import { ErrorNotice } from './EntityTable'
-import { Paper } from './PrintPaper'
+import { Paper, type TextTarget } from './PrintPaper'
 import { TemplateLibrary } from './TemplateLibrary'
 import { HierarchyPicker } from './HierarchyPicker'
 import { useUnsavedChanges } from './useNavigation'
 import { ObjectiveEditor } from './ObjectiveEditor'
-import { RichEditor } from './RichEditor'
 import { QuestionSettings } from './QuestionSettings'
 
 import { mergeQuestions, splitQuestions, questionNumbers, questionLabel } from './mergeQuestions'
@@ -32,6 +31,26 @@ export function TemplateEditor({ groupId }: { groupId?: string }) {
   const [saveAction, setSaveAction] = useState(''), [dirty, setDirty] = useState(false), [pane, setPane] = useState('objective'), [settingsOpen, setSettingsOpen] = useState(false)
   const [answerMode,setAnswerMode]=useState(true),[forbiddenMode,setForbiddenMode]=useState(false)
   const [mergeIds,setMergeIds]=useState<string[]>([])
+  const [editing,setEditing]=useState<TextTarget|null>(null)
+  useEffect(()=>setEditing(null),[value.id])
+  function editText(target:TextTarget|null){
+    setEditing(target)
+    if(!target)return
+    setSettingsOpen(false);setDraw(false);setForbiddenMode(false);setAnswerMode(false)
+    if(target.kind==='note'){setNoteId(target.id);setPane('notes')}
+    else {setQuestionId(target.id);setPane('subjective')}
+  }
+  function updateText(target:TextTarget,html:string){
+    const current=saverRef.current!.value
+    if(target.kind==='note'){
+      change({print_notes:current.print_notes?.map(n=>n.id===target.id?{...n,html}:n)})
+    }else change({questions:current.questions.map(q=>{
+      if(q.id!==target.id)return q
+      if(!q.parts)return {...q,content_html:html}
+      const number=q.regions[target.index]?.part_number
+      return {...q,parts:q.parts.map(part=>part.number===number?{...part,content_html:html}:part)}
+    })})
+  }
   const [noteId,setNoteId]=useState('')
   const notes=value.print_notes||[], note=notes.find(n=>n.id===noteId&&n.page===page)
   const initialized = useRef(''), { message, modal } = App.useApp()
@@ -60,7 +79,7 @@ export function TemplateEditor({ groupId }: { groupId?: string }) {
     saver.edit(uniformSubjectiveWidths({ ...saver.value, ...update }))
   }
   function select(id: string, edit = false) {
-    setQuestionId(id);setForbiddenMode(false)
+    setEditing(null);setQuestionId(id);setForbiddenMode(false)
     const q = value.questions.find(q => q.id === id)
     if (q) { setPane(q.type === 'subjective' ? 'subjective' : 'objective'); setAnswerMode(q.type!=='subjective');setDraw(q.type==='subjective'&&!q.parts); if (q.regions[0]) setPage(q.regions[0].page) }
     if (edit) setSettingsOpen(true)
@@ -150,25 +169,25 @@ export function TemplateEditor({ groupId }: { groupId?: string }) {
     </div></Card>
     {saver.error&&<Alert type="error" showIcon message="草稿未保存" description={saver.error} action={<Space><Button onClick={()=>void saver.flush().catch(()=>{})}>重试保存</Button><Button onClick={()=>modal.confirm({title:"重新载入服务器草稿？",content:"当前未保存的修改将被替换。",onOk:async()=>{const rows=await request<Template[]>('/templates');const latest=rows.find(t=>t.id===value.id);if(!latest)throw new Error("服务器尚无该草稿，请重试保存");saver.load(editableCopy(latest));await templates.reload()}})}>重新载入</Button></Space>}/>}
     <div className="template-workbench">
-      <Card className="template-config"><Tabs activeKey={pane} onChange={key=>{setPane(key);setForbiddenMode(false);setAnswerMode(key==='objective');setDraw(key==='subjective');if(key==='subjective'&&question?.type!=='subjective')setQuestionId(subjective[0]?.id||'')}} items={[
+      <Card className="template-config"><Tabs activeKey={pane} onChange={key=>{setEditing(null);setPane(key);setForbiddenMode(false);setAnswerMode(key==='objective');setDraw(key==='subjective');if(key==='subjective'&&question?.type!=='subjective')setQuestionId(subjective[0]?.id||'')}} items={[
         { key: 'setup', label: '底版', children: setup },
         { key: 'objective', label: '选择题', children: <ObjectiveEditor value={value} page={page} readOnly={readOnly || saving} selected={questionId} onChange={questions => change({ questions, layout_version:3 })} onSelect={id => select(id)} onEdit={id => select(id, true)} /> },
-        { key: 'subjective', label: '主观题', children: <div className="editor-section"><Space wrap><Button icon={<PlusOutlined />} disabled={readOnly||saving} onClick={() => { const q = newQuestion(Math.max(0, ...value.questions.flatMap(questionNumbers)) + 1); change({ questions: [...value.questions, q] }); setQuestionId(q.id); setDraw(true); setAnswerMode(false); setForbiddenMode(false) }}>添加主观题并框选</Button><Button disabled={readOnly||saving||mergeIds.length<2} onClick={combine}>合并题目</Button></Space><Text type="secondary">选中题号，在对应栏内从上往下拖出作答范围。</Text><Table<Question> rowSelection={readOnly?undefined:{selectedRowKeys:mergeIds,onChange:keys=>setMergeIds(keys.map(String)),getCheckboxProps:q=>({disabled:!!q.parts||saving})}} rowClassName={q=>q.id===questionId?'selected-question-row':''} onRow={q=>({onClick:()=>{setQuestionId(q.id);setDraw(!q.parts);if(q.regions.length)setPage(q.regions[0].page)}})} rowKey="id" size="middle" dataSource={subjective} pagination={{ defaultPageSize:50 }} locale={{ emptyText: <Empty description="添加主观题后，在预览中框选答题区域" /> }} columns={[{ title: '题号', render:(_,q)=>questionLabel(q) }, { title: '分值', render:(_,q)=><InputNumber aria-label={'第'+q.number+'题分值'} disabled={readOnly||saving||!!q.parts} min={0.01} precision={2} value={q.points} onChange={points=>{if(points!==null)change({questions:value.questions.map(item=>item.id===q.id?{...item,points}:item)})}}/> }, { title: '区域', render: (_, q) => q.regions.length ? `${q.regions.length} 个` : '待框选' }, { title: '', render: (_, q) => <Button type="link" onClick={() => select(q.id, true)}>设置</Button> }]} /></div> },
+        { key: 'subjective', label: '主观题', children: <div className="editor-section"><Space wrap><Button icon={<PlusOutlined />} disabled={readOnly||saving} onClick={() => { const q = newQuestion(Math.max(0, ...value.questions.flatMap(questionNumbers)) + 1); change({ questions: [...value.questions, q] }); setEditing(null);setQuestionId(q.id); setDraw(true); setAnswerMode(false); setForbiddenMode(false) }}>添加主观题并框选</Button><Button disabled={readOnly||saving||mergeIds.length<2} onClick={combine}>合并题目</Button></Space><Text type="secondary">在栏内上下拖动框选作答区，双击已有题区编辑题干。</Text><Table<Question> rowSelection={readOnly?undefined:{selectedRowKeys:mergeIds,onChange:keys=>setMergeIds(keys.map(String)),getCheckboxProps:q=>({disabled:!!q.parts||saving})}} rowClassName={q=>q.id===questionId?'selected-question-row':''} onRow={q=>({onClick:()=>{setEditing(null);setQuestionId(q.id);setDraw(!q.parts);if(q.regions.length)setPage(q.regions[0].page)}})} rowKey="id" size="middle" dataSource={subjective} pagination={{ defaultPageSize:50 }} locale={{ emptyText: <Empty description="添加主观题后，在预览中框选答题区域" /> }} columns={[{ title: '题号', render:(_,q)=>questionLabel(q) }, { title: '分值', render:(_,q)=><InputNumber aria-label={'第'+q.number+'题分值'} disabled={readOnly||saving||!!q.parts} min={0.01} precision={2} value={q.points} onChange={points=>{if(points!==null)change({questions:value.questions.map(item=>item.id===q.id?{...item,points}:item)})}}/> }, { title: '区域', render: (_, q) => q.regions.length ? `${q.regions.length} 个` : '待框选' }, { title: '', render: (_, q) => <Button type="link" onClick={() => select(q.id, true)}>设置</Button> }]} /></div> },
         { key:'notes',label:'版面文字',children:<div className="editor-section">
-          <Text>点击网格添加题号或提示，也可拖出文字框。拖动文字框移动，拖右下角调整大小。</Text>
-          {!!notes.filter(n=>n.page===page).length&&<Select aria-label="当前面的文字框" placeholder="选择文字框" value={note?.id} onChange={setNoteId} options={notes.filter(n=>n.page===page).map((n,i)=>({value:n.id,label:new DOMParser().parseFromString(n.html,'text/html').body.textContent?.trim().slice(0,35)||('文字框 '+(i+1))}))}/>}
-          {note&&<><RichEditor key={note.id} readOnly={readOnly||saving} value={note.html} onChange={html=>change({print_notes:notes.map(n=>n.id===note.id?{...n,html}:n)})}/><Button danger disabled={readOnly||saving} onClick={()=>{change({print_notes:notes.filter(n=>n.id!==note.id)});setNoteId('')}}>删除文字框</Button></>}
+          <Text>点击网格添加文字，双击已有文字修改。拖动文字框移动，拖右下角调整大小。</Text>
+          {!!notes.filter(n=>n.page===page).length&&<Select aria-label="当前面的文字框" placeholder="选择文字框" value={note?.id} onChange={id=>{setEditing(null);setNoteId(id)}} options={notes.filter(n=>n.page===page).map((n,i)=>({value:n.id,label:new DOMParser().parseFromString(n.html,'text/html').body.textContent?.trim().slice(0,35)||('文字框 '+(i+1))}))}/>}
+          {note&&<><Button disabled={readOnly||saving} onClick={()=>editText({kind:'note',id:note.id,index:0})}>在题卡上编辑文字</Button><Button danger disabled={readOnly||saving} onClick={()=>{change({print_notes:notes.filter(n=>n.id!==note.id)});setNoteId('')}}>删除文字框</Button></>}
         </div>}
       ]} /></Card>
-      <Card className="template-preview" title={pane==='notes'?'文字排版网格':'题卡画布'} extra={<Space wrap><Radio.Group value={page} onChange={event => setPage(event.target.value)} options={Array.from({ length: value.sides }, (_, i) => ({ label: i === 0 ? '正面' : '背面', value: i + 1 }))} />{!readOnly && pane!=='notes' && <Radio.Group value={forbiddenMode?'forbidden':answerMode?'answer':draw?'draw':'move'} onChange={event=>{setForbiddenMode(event.target.value==='forbidden');setAnswerMode(event.target.value==='answer');setDraw(event.target.value==='draw')}} options={[...(pane==='objective'?[{label:'设答案',value:'answer'}]:[]),...(pane==='subjective'?[{label:'框选题区',value:'draw'}]:[]),{label:'移动',value:'move'},...(pane==='setup'?[{label:'禁答区',value:'forbidden'}]:[])]} />}</Space>}>
-        <Paper noteMode={pane==='notes'} selectedNote={noteId} onNoteSelect={setNoteId} onNoteRegion={(region,id)=>{
+      <Card className="template-preview" title={pane==='notes'?'文字排版网格':'题卡画布'} extra={<Space wrap><Radio.Group value={page} onChange={event => {setEditing(null);setPage(event.target.value)}} options={Array.from({ length: value.sides }, (_, i) => ({ label: i === 0 ? '正面' : '背面', value: i + 1 }))} />{!readOnly && pane!=='notes' && <Radio.Group value={forbiddenMode?'forbidden':answerMode?'answer':draw?'draw':'move'} onChange={event=>{setEditing(null);setForbiddenMode(event.target.value==='forbidden');setAnswerMode(event.target.value==='answer');setDraw(event.target.value==='draw')}} options={[...(pane==='objective'?[{label:'设答案',value:'answer'}]:[]),...(pane==='subjective'?[{label:'框选题区',value:'draw'}]:[]),{label:'移动',value:'move'},...(pane==='setup'?[{label:'禁答区',value:'forbidden'}]:[])]} />}</Space>}>
+        <Paper editing={editing} onEdit={editText} onTextChange={updateText} noteMode={pane==='notes'} selectedNote={noteId} onNoteSelect={setNoteId} onNoteRegion={(region,id)=>{
           if(id){change({print_notes:notes.map(n=>n.id===id?{...n,...region}:n)});return}
-          const added={...region,id:crypto.randomUUID(),html:'<p>文字</p>'}
-          change({print_notes:[...notes,added]});setNoteId(added.id)
+          const added={...region,id:crypto.randomUUID(),html:''}
+          change({print_notes:[...notes,added]});editText({kind:'note',id:added.id,index:0})
         }} value={value} page={page} selected={questionId} draw={draw&&!answerMode&&!forbiddenMode&&!question?.parts} forbiddenMode={forbiddenMode} onForbidden={forbidden_regions=>change({forbidden_regions})} answerMode={answerMode} readOnly={readOnly || saving} onAnswer={answerOnCard} onSelect={(id,targetPage)=>{setQuestionId(id);const q=value.questions.find(q=>q.id===id);if(q){setPane(q.type==='subjective'?'subjective':'objective');if(q.type==='subjective')setAnswerMode(false)}if(targetPage)setPage(targetPage)}} onRegion={(id, region, index) => change({ questions: value.questions.map(q => q.id === id ? { ...q, regions: index === undefined ? [...q.regions, region] : q.regions.map((r, i) => i === index ? region : r) } : q) })} />
-        {!readOnly && pane!=='notes' && <Text type="secondary" className="preview-selection">{forbiddenMode?'禁答区保存到当前题卡，与打印稿一致。':answerMode?'点选图卡选项，或按1–5/A–E设答案；单选自动下一题，多选按Enter继续。':question?`当前选择第 ${question.number} 题 · 在预览上拖动可${draw?'添加答题区':'移动已有区域'}`:''}</Text>}
+        {!readOnly && !editing && pane!=='notes' && <Text type="secondary" className="preview-selection">{forbiddenMode?'禁答区保存到当前题卡，与打印稿一致。':answerMode?'点选图卡选项，或按1–5/A–E设答案；单选自动下一题，多选按Enter继续。':question?`当前选择第 ${question.number} 题 · 在预览上拖动可${draw?'添加答题区':'移动已有区域'}`:''}</Text>}
       </Card>
     </div>
-    <QuestionSettings onSplit={()=>{if(!question?.parts)return;change({questions:value.questions.flatMap(q=>q.id===question.id?splitQuestions(q):[q])});setSettingsOpen(false);setMergeIds([])}} question={question} open={settingsOpen} readOnly={readOnly || saving} onClose={() => setSettingsOpen(false)} onChange={patchQuestion} onDraw={() => { setForbiddenMode(false); setDraw(true); setAnswerMode(false); setSettingsOpen(false) }} onDelete={() => { if (!question) return; change({ questions: value.questions.filter(q => q.id !== question.id) }); setQuestionId(''); setSettingsOpen(false) }} />
+    <QuestionSettings onText={()=>{if(!question?.regions.length)return;const index=Math.max(0,question.regions.findIndex(r=>r.page===page));setPage(question.regions[index].page);editText({kind:'question',id:question.id,index})}} onSplit={()=>{if(!question?.parts)return;change({questions:value.questions.flatMap(q=>q.id===question.id?splitQuestions(q):[q])});setSettingsOpen(false);setMergeIds([])}} question={question} open={settingsOpen} readOnly={readOnly || saving} onClose={() => setSettingsOpen(false)} onChange={patchQuestion} onDraw={() => { setForbiddenMode(false); setDraw(true); setAnswerMode(false); setSettingsOpen(false) }} onDelete={() => { if (!question) return; change({ questions: value.questions.filter(q => q.id !== question.id) }); setQuestionId(''); setSettingsOpen(false) }} />
   </div>
 }

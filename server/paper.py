@@ -232,11 +232,11 @@ def pdf(template):
                 else:
                     c.setStrokeColorRGB(.7,.7,.7)
                     style=question.get('style','none' if background_id else 'line')
-                    if template.get('column_frame') and question.get('content_html'):
+                    if question.get('content_html'):
                         text_height=rich_layout(question['content_html'],(rw-6)*mm,(rh-12)*mm)/mm
                     else:text_height=0
                     body_top=y+12+text_height
-                    body_bottom=y+rh-3-(min(rh-12,question.get('image_height',25)) if question.get('image_asset_id') and template.get('column_frame') else 0)
+                    body_bottom=y+rh-3-(min(rh-12,question.get('image_height',25)) if question.get('image_asset_id') else 0)
                     if style=='line' and body_top<=body_bottom:
                         lines=int(question.get('lines',max(1,int((rh-14)/8))))
                         if not 1<=lines<=100:raise ValueError('横线行数应为1至100')
@@ -245,7 +245,7 @@ def pdf(template):
                         cell=float(question.get('cell_size',8))
                         if not 4<=cell<=20:raise ValueError('作文格大小应为4至20毫米')
                         grid_top=y+10+text_height
-                        cols=int((rw-6)/cell);rows=int((body_bottom-grid_top+1)/cell) if template.get('column_frame') else int((rh-12)/cell)
+                        cols=int((rw-6)/cell);rows=int((body_bottom-grid_top+1)/cell) if template.get('column_frame') or text_height or question.get('image_asset_id') else int((rh-12)/cell)
                         for row in range(rows):
                             for col in range(cols):c.rect((x+3+col*cell)*mm,(h-grid_top-(row+1)*cell)*mm,cell*mm,cell*mm)
                     c.setStrokeColorRGB(0,0,0)

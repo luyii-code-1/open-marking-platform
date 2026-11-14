@@ -28,3 +28,27 @@ def test_grid_image_background_and_overflow(tmp_path,monkeypatch):
     assert paper.pdf(template).startswith(b'%PDF')
     question['content_html']='<p>内容</p>'*100
     with pytest.raises(ValueError,match='超过答题区域'):paper.validate(template)
+
+
+@pytest.mark.parametrize('short',[
+    '<span data-answer-line="15">&nbsp;</span>',
+    '<u>'+'&nbsp;'*21+'</u>',
+    '__________',
+])
+def test_inline_answer_lines_keep_ink_separate_from_prompt(short):
+    from reportlab.lib.units import mm
+    sample='1.句子'+short+'有问题，修改：<span data-answer-line="60">&nbsp;</span><div>下一行</div>'
+    canvas=Canvas(io.BytesIO())
+    boxes=[];underlines=[]
+    canvas.drawImage=lambda image,x,y,w,h,**opts:boxes.append((x,y,w,h))
+    canvas.line=lambda *xy:underlines.append(xy)
+    layout(sample,125*mm,100*mm,canvas)
+    assert len(boxes)==2 and not underlines
+    first,second=boxes
+    assert first[0]>0 and second[0]>first[0]+first[2]
+    assert first[1]==second[1] and second[2]==pytest.approx(60*mm,abs=.001)
+    boxes.clear()
+    layout(sample,70*mm,100*mm,canvas)
+    assert len(boxes)==2 and boxes[1][0]==0 and boxes[1][2]==pytest.approx(60*mm,abs=.001)
+    layout('<p>普通<u>强调</u>普通</p>',70*mm,100*mm,canvas)
+    assert len(underlines)==1 and underlines[0][0]>0

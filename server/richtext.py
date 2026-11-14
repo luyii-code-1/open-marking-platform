@@ -3,6 +3,9 @@ import re
 from html import escape
 from html.parser import HTMLParser
 from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib.units import mm
+from reportlab.lib.utils import ImageReader
+from PIL import Image
 from reportlab.platypus import Paragraph,Table,TableStyle,Spacer
 
 
@@ -25,15 +28,29 @@ class Parser(HTMLParser):
         if not self.blocked:self.stack[-1][2].append(data)
 
 
-def inline(node,underlined=False):
+# ReportLab treats inline images as indivisible layout items. The ink is a
+# local one-pixel swatch stretched to the specified physical dimensions.
+_RULE_PIXEL=ImageReader(Image.new('RGB',(1,1),'black'))
+
+
+def rule_markup(length,width):
+    size=min(width,max(mm,min(400,float(length))*mm))
+    return f'<onDraw name="answerLine" label="{size:.4f}"/>'
+
+
+def inline(node,width,underlined=False):
     if isinstance(node,str):
-        if underlined:
-            node=re.sub(r'[ \t]+',lambda m:'\xa0'*len(m[0]),node)
-        return re.sub(r'_(?:[ \t\xa0]*_)+',lambda m:'<u>'+'&#160;'*(2*len(m[0]))+'</u>',escape(node))
+        pattern=r'(_(?:[ \t\xa0]*_)+|[ \t\xa0]{2,})' if underlined else r'(_(?:[ \t\xa0]*_)+)'
+        return ''.join(rule_markup(len(part)*(1.42 if '_' in part else .71),width) if i%2 else escape(part)
+                       for i,part in enumerate(re.split(pattern,node)))
     tag,attrs,children=node
+    if tag=='span' and 'data-answer-line' in attrs:
+        raw=attrs['data-answer-line'] or ''
+        if not re.fullmatch(r'\d{1,3}(?:\.\d{1,2})?',raw):raise ValueError('答题线长度无效')
+        return rule_markup(raw,width)
     style=attrs.get('style','').lower()
     underline=tag=='u' or ('text-decoration' in style and 'underline' in style)
-    content=''.join(inline(child,underlined or underline) for child in children)
+    content=''.join(inline(child,width,underlined or underline) for child in children)
     if tag=='br':return '<br/>'
     if tag in ('b','strong'):content='<b>'+content+'</b>'
     if tag in ('i','em'):content='<i>'+content+'</i>'
@@ -50,28 +67,51 @@ def flowables(html,width):
     if len(html)>100000:raise ValueError('单题富文本过长')
     parser=Parser();parser.feed(html)
     style=ParagraphStyle('answer',fontName=FONT,fontSize=9,leading=13,wordWrap='CJK')
-    def paragraph(content):return Paragraph(content or ' ',style)
+    def paragraph(content):
+        result=Paragraph(content or ' ',style)
+        for frag in result.frags:
+            cb=getattr(frag,'cbDefn',None)
+            if cb and getattr(cb,'name',None)=='answerLine':
+                cb.kind='img';cb.image=_RULE_PIXEL;cb.width=float(cb.label);cb.height=.55;cb.valign=-1
+                # The CJK line breaker needs a character for its wrap decision.
+                # For image fragments it uses the declared width and draws only the image.
+                frag.text='\ufffc'
+        return result
     def visit(node):
-        if isinstance(node,str):return [paragraph(inline(node))] if node.strip() else []
+        if isinstance(node,str):return [paragraph(inline(node,width))] if node.strip() else []
         tag,attrs,children=node
         if tag=='table':
             rows=[]
             def collect(n):
                 if isinstance(n,str):return
-                if n[0]=='tr':rows.append([paragraph(inline(cell)) for cell in n[2] if not isinstance(cell,str) and cell[0] in ('td','th')])
+                if n[0]=='tr':rows.append([cell for cell in n[2] if not isinstance(cell,str) and cell[0] in ('td','th')])
                 else:
                     for child in n[2]:collect(child)
             collect(node);rows=[r for r in rows if r]
             if not rows:return []
             columns=max(map(len,rows))
             if columns>30 or len(rows)>100:raise ValueError('表格过大')
-            table=Table([row+['']*(columns-len(row)) for row in rows],colWidths=[width/columns]*columns)
+            cells=[[paragraph(inline(cell,max(1,width/columns-8))) for cell in row]+['']*(columns-len(row)) for row in rows]
+            table=Table(cells,colWidths=[width/columns]*columns)
             table.setStyle(TableStyle([('GRID',(0,0),(-1,-1),.4,'#555555'),('VALIGN',(0,0),(-1,-1),'TOP'),('LEFTPADDING',(0,0),(-1,-1),4),('RIGHTPADDING',(0,0),(-1,-1),4)]))
             return [table,Spacer(1,3)]
         if tag in ('p','h1','h2','h3','li'):
-            return [paragraph(('- ' if tag=='li' else '')+inline(node)),Spacer(1,3)]
-        if any(not isinstance(c,str) and c[0] in ('p','div','table','ul','ol','h1','h2','h3') for c in children):return [f for child in children for f in visit(child)]
-        return [paragraph(inline(node))] if inline(node).strip() else []
+            return [paragraph(('- ' if tag=='li' else '')+inline(node,width)),Spacer(1,3)]
+        blocks=('p','div','table','ul','ol','li','h1','h2','h3')
+        if any(not isinstance(child,str) and child[0] in blocks for child in children):
+            result=[];run=[]
+            for child in children:
+                if not isinstance(child,str) and child[0] in blocks:
+                    if run:
+                        content=''.join(run)
+                        if content.strip():result.append(paragraph(content))
+                        run=[]
+                    result.extend(visit(child))
+                else:run.append(inline(child,width))
+            if run and ''.join(run).strip():result.append(paragraph(''.join(run)))
+            return result
+        content=inline(node,width)
+        return [paragraph(content)] if content.strip() else []
     return visit(parser.root)
 
 

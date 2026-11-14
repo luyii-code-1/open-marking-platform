@@ -4,10 +4,9 @@ import { Button } from './Button'
 import { DeleteOutlined } from '@ant-design/icons'
 import { request, type Question, type Row } from './api'
 import { questionLabel } from './mergeQuestions'
-import { RichEditor } from './RichEditor'
 import { answerLetters, parseAnswer } from './objectiveLayout'
 
-export function QuestionSettings({ question: q, open, readOnly, onClose, onChange, onDelete, onDraw, onSplit }: { question?: Question; open: boolean; readOnly: boolean; onClose: () => void; onChange: (patch: Partial<Question>) => void; onDelete: () => void; onDraw: () => void; onSplit:()=>void }) {
+export function QuestionSettings({ question: q, open, readOnly, onClose, onChange, onDelete, onDraw, onSplit, onText }: { question?: Question; open: boolean; readOnly: boolean; onClose: () => void; onChange: (patch: Partial<Question>) => void; onDelete: () => void; onDraw: () => void; onSplit:()=>void;onText:()=>void }) {
   const [ruleOpen, setRuleOpen] = useState(false), [ruleText, setRuleText] = useState(''), [trial,setTrial]=useState(''), [trialResult,setTrialResult]=useState(''), [trialBusy,setTrialBusy]=useState(false), { message } = App.useApp()
   if (!q) return null
   const rule = q.rule || { mode: 'exact' }, mode = String(rule.mode || 'exact')
@@ -31,7 +30,7 @@ export function QuestionSettings({ question: q, open, readOnly, onClose, onChang
         {q.review_mode === 'double' && <Form.Item label="允许差值（≤ 此值取平均）"><InputNumber min={0} max={q.points} precision={2} value={q.threshold} onChange={threshold => onChange({ threshold: threshold ?? 0 })} /></Form.Item>}
         {!q.parts&&<><Form.Item label="答题区样式"><Select value={q.style || 'line'} options={[{ label: '横线', value: 'line' }, { label: '作文格', value: 'grid' }, { label: '富文本', value: 'rich' }, { label: '底图或空白', value: 'none' }]} onChange={style => onChange({ style })} /></Form.Item>
         {q.style === 'grid' ? <Form.Item label="格子大小（毫米）"><InputNumber min={4} max={20} value={q.cell_size || 8} onChange={cell_size => onChange({ cell_size: cell_size || 8 })} /></Form.Item> : (!q.style || q.style === 'line') && <Form.Item label="横线行数"><InputNumber min={1} max={100} value={q.lines || 5} onChange={lines => onChange({ lines: lines || 5 })} /></Form.Item>}
-        <Collapse items={[{ key: 'content', label: '预置题干、答题线与图片', children: <Space direction="vertical" size={16} style={{ width: '100%' }}><RichEditor readOnly={readOnly} value={q.content_html || ''} onChange={content_html => onChange({ content_html })} /><Upload disabled={readOnly} accept="image/*" showUploadList={false} beforeUpload={async file => { const data = new FormData(); data.append('file', file); try { const asset = await request<Row>('/assets', { method: 'POST', body: data }); onChange({ image_asset_id: asset.id }) } catch (e) { message.error((e as Error).message) } return false }}><Button>插入作答区图片</Button></Upload></Space> }]} />
+        <Collapse items={[{ key: 'content', label: '预置题干、答题线与图片', children: <Space direction="vertical" size={16} style={{ width: '100%' }}><Button disabled={readOnly||!q.regions.length} onClick={onText}>在题卡上编辑题干</Button><Upload disabled={readOnly} accept="image/*" showUploadList={false} beforeUpload={async file => { const data = new FormData(); data.append('file', file); try { const asset = await request<Row>('/assets', { method: 'POST', body: data }); onChange({ image_asset_id: asset.id }) } catch (e) { message.error((e as Error).message) } return false }}><Button>插入作答区图片</Button></Upload></Space> }]} />
         </>}
       </>}
     </Form>

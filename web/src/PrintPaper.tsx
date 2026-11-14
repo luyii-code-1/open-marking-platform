@@ -3,12 +3,37 @@ import { useEffect, useRef, useState } from 'react'
 import { Alert, App, Space, Typography } from 'antd'
 import { Button } from './Button'
 import { requestBlob, type PrintNote, type Region, type Template } from './api'
+import { RichEditor } from './RichEditor'
 import { choiceCenters, compactChoice } from './objectiveLayout'
 import { forbiddenRegion, forbiddenConflict, subjectiveRegion, noteRegion, intersects } from './sheetRegions'
 
+export type TextTarget={kind:'question'|'note';id:string;index:number}
 type Drag = { x:number;y:number;qid:string;index?:number;region?:Region;forbidden?:boolean;note?:boolean;resize?:boolean }
-export function Paper({value,page,selected,draw,answerMode=false,forbiddenMode=false,readOnly=false,noteMode=false,selectedNote,onNoteSelect,onNoteRegion,onSelect,onRegion,onAnswer,onForbidden}:{value:Template;page:number;selected?:string;draw:boolean;answerMode?:boolean;forbiddenMode?:boolean;readOnly?:boolean;noteMode?:boolean;selectedNote?:string;onNoteSelect?:(id:string)=>void;onNoteRegion?:(region:Region,id?:string)=>void;onSelect:(id:string,page?:number)=>void;onRegion:(id:string,region:Region,index?:number)=>void;onAnswer?:(id:string,letter:string)=>void;onForbidden?:(regions:Region[])=>void}) {
+export function Paper({value,page,selected,draw,answerMode=false,forbiddenMode=false,readOnly=false,noteMode=false,selectedNote,editing,onEdit,onTextChange,onNoteSelect,onNoteRegion,onSelect,onRegion,onAnswer,onForbidden}:{value:Template;page:number;selected?:string;draw:boolean;answerMode?:boolean;forbiddenMode?:boolean;readOnly?:boolean;noteMode?:boolean;selectedNote?:string;editing?:TextTarget|null;onEdit?:(target:TextTarget|null)=>void;onTextChange?:(target:TextTarget,html:string)=>void;onNoteSelect?:(id:string)=>void;onNoteRegion?:(region:Region,id?:string)=>void;onSelect:(id:string,page?:number)=>void;onRegion:(id:string,region:Region,index?:number)=>void;onAnswer?:(id:string,letter:string)=>void;onForbidden?:(regions:Region[])=>void}) {
   const width=value.paper==='A3'?420:210,height=297,svg=useRef<SVGSVGElement>(null),start=useRef<Drag|null>(null)
+  const [toolsHost,setToolsHost]=useState<HTMLDivElement|null>(null)
+  const editQ=editing?.kind==='question'?value.questions.find(q=>q.id===editing.id):undefined
+  const editNote=editing?.kind==='note'?value.print_notes?.find(n=>n.id===editing.id):undefined
+  const editRegion=editNote??editQ?.regions[editing?.index??0]
+  const prompt=editQ?.parts?.find(p=>p.number===editRegion?.part_number)??editQ
+  const inset=editNote?0:3
+  const editorBox=editing&&editRegion?.page===page&&!readOnly?{
+    x:editRegion.x+inset,y:editRegion.y+(editNote?0:9),w:editRegion.width-2*inset,
+    h:Math.max(3,editRegion.height-(editNote?0:12)-(prompt?.image_asset_id?Math.min(editRegion.height-12,prompt.image_height??25):0)),
+  }:null
+  function editAt(e:React.MouseEvent){
+    if(readOnly||forbiddenMode||editorBox||!onEdit)return
+    const box=svg.current!.getBoundingClientRect()
+    const x=(e.clientX-box.left)*width/box.width,y=(e.clientY-box.top)*height/box.height
+    const hit=(r:Region)=>r.page===page&&x>=r.x&&x<=r.x+r.width&&y>=r.y&&y<=r.y+r.height
+    const n=value.print_notes?.find(hit)
+    if(n){onNoteSelect?.(n.id);onEdit?.({kind:'note',id:n.id,index:0});return}
+    for(const q of value.questions){
+      if(q.type!=='subjective')continue
+      const index=q.regions.findIndex(hit)
+      if(index>=0){onSelect(q.id);onEdit?.({kind:'question',id:q.id,index});return}
+    }
+  }
   const [zoom,setZoom]=useState<number|null>(null), scroll=useRef<HTMLDivElement>(null)
   const [fit,setFit]=useState(100)
   useEffect(()=>{
@@ -93,18 +118,20 @@ export function Paper({value,page,selected,draw,answerMode=false,forbiddenMode=f
     e.stopPropagation()
     onNoteSelect?.(note.id)
     if(readOnly)return
+    if(editorBox){onEdit?.(null);return}
     start.current={...point(e),qid:note.id,note:true,region:note,resize}
-    svg.current!.setPointerCapture(e.pointerId)
+    e.currentTarget.setPointerCapture(e.pointerId)
   }
   return <Space direction="vertical" style={{width:'100%'}}>
     <Space size={8}><Button size="small" icon={<ZoomOutOutlined />} disabled={scale<=10} onClick={()=>setZoom(Math.max(10,scale-10))}>缩小</Button><Button size="small" type={zoom===null?'primary':'default'} onClick={()=>setZoom(null)}>适合屏幕</Button><Button size="small" title="恢复 100%" onClick={()=>setZoom(100)}>{scale}%</Button><Button size="small" icon={<ZoomInOutlined />} disabled={scale>=300} onClick={()=>setZoom(Math.min(300,scale+10))}>放大</Button></Space>
+    {editorBox&&<div className="paper-edit-tools"><strong>{editNote?'版面文字':`第 ${prompt?.number} 题题干`}</strong><div ref={setToolsHost}/><Button size="small" type="primary" onClick={()=>onEdit?.(null)}>完成</Button></div>}
     {forbiddenMode&&<Space wrap><Typography.Text type="secondary">拖动空白处添加禁答区；拖动区域移动，拖动右下角调整大小。</Typography.Text><Button size="small" danger disabled={readOnly||selectedForbidden===null} onClick={()=>{onForbidden?.((value.forbidden_regions||[]).filter((_,i)=>i!==selectedForbidden));setSelectedForbidden(null)}}>删除选中禁答区</Button></Space>}
     {error?<Alert type="warning" showIcon message="打印预览尚未更新" description={error} action={<Button size="small" onClick={()=>setRetry(v=>v+1)}>重试</Button>}/>:<Typography.Text type="secondary" role="status">{pending?'正在更新打印预览…':'预览已更新'}{pending&&visible?'，下方暂显示上次生成的打印稿。':''}{value.status!=='published'&&value.status!=='superseded'?' · 草稿预览，发布后可导出打印稿。':''}</Typography.Text>}
-    <div ref={scroll} className="paper-scroll"><svg ref={svg} tabIndex={answerMode?0:undefined} onKeyDown={answerKey} style={{width:`${scale}%`,minWidth:0,marginInline:'auto'}} className={`paper-svg ${draw||forbiddenMode||noteMode?'drawing':''}`} viewBox={`0 0 ${width} ${height}`} aria-label={answerMode?'点击选项或使用数字键设置标准答案':'题卡打印预览与答题区域编辑'} onPointerDown={e=>{if(answerMode){e.currentTarget.focus();return}if(readOnly||(!noteMode&&!forbiddenMode&&(!draw||!selected)))return;start.current={...point(e),qid:selected||'',forbidden:forbiddenMode,note:noteMode};setDraft(null);e.currentTarget.setPointerCapture(e.pointerId)}} onPointerMove={e=>{if(start.current)setDraft(regionAt(point(e),start.current))}} onPointerUp={finish} onPointerCancel={()=>{start.current=null;setDraft(null)}}>
+    <div ref={scroll} className="paper-scroll"><svg ref={svg} tabIndex={answerMode?0:undefined} onDoubleClick={editAt} onKeyDown={e=>{if(!editorBox)answerKey(e)}} style={{width:`${scale}%`,minWidth:0,marginInline:'auto'}} className={`paper-svg ${draw||forbiddenMode||noteMode?'drawing':''}`} viewBox={`0 0 ${width} ${height}`} aria-label={answerMode?'点击选项或使用数字键设置标准答案':'题卡打印预览与答题区域编辑'} onPointerDown={e=>{if(editorBox){onEdit?.(null);return}if(answerMode){e.currentTarget.focus();return}if(readOnly||(!noteMode&&!forbiddenMode&&(!draw||!selected)))return;start.current={...point(e),qid:selected||'',forbidden:forbiddenMode,note:noteMode};setDraft(null);e.currentTarget.setPointerCapture(e.pointerId)}} onPointerMove={e=>{if(start.current)setDraft(regionAt(point(e),start.current))}} onPointerUp={finish} onPointerCancel={()=>{start.current=null;setDraft(null)}}>
       <rect width={width} height={height} fill="white"/>
       {visible&&<image href={visible.url} x={0} y={0} width={width} height={height} preserveAspectRatio="none" pointerEvents="none"/>}
       {value.questions.flatMap(q=>q.regions.map((r,index)=>r.page!==page?null:<g key={`${q.id}-${index}`} pointerEvents={forbiddenMode||noteMode||draw&&!readOnly?'none':undefined}>
-        <rect data-question-id={q.id} x={r.x} y={r.y} width={r.width} height={r.height} fill={selected===q.id?'#0866ff12':'transparent'} stroke={selected===q.id?'#0866ff':'transparent'} strokeWidth={.4} onPointerDown={e=>{e.stopPropagation();onSelect(q.id);svg.current?.focus();if(!readOnly&&!draw&&!answerMode){start.current={...point(e),qid:q.id,index,region:r};svg.current!.setPointerCapture(e.pointerId)}}}><title>第{q.number}题 · 区域{index+1}</title></rect>
+        <rect data-question-id={q.id} x={r.x} y={r.y} width={r.width} height={r.height} fill={selected===q.id?'#0866ff12':'transparent'} stroke={selected===q.id?'#0866ff':'transparent'} strokeWidth={.4} onPointerDown={e=>{e.stopPropagation();onSelect(q.id);svg.current?.focus();if(!editorBox&&!readOnly&&!draw&&!answerMode){start.current={...point(e),qid:q.id,index,region:r};svg.current!.setPointerCapture(e.pointerId)}}}><title>第{q.number}题 · 区域{index+1}</title></rect>
         {answerMode&&q.type!=='subjective'&&choiceCenters(q,r).map(({letter,x,y})=><rect key={letter} role="button" aria-label={`第${q.number}题选项${letter}`} aria-pressed={q.answer.includes(letter)} x={x-(q.choice_style==='bracket'?4:2)} y={y-1.5} width={q.choice_style==='bracket'?8:compactChoice.width} height={3} rx={.4} fill={q.answer.includes(letter)?'#0866ff35':'transparent'} stroke={q.answer.includes(letter)?'#0866ff':'transparent'} strokeWidth={.3} style={{cursor:readOnly?'default':'pointer'}} onPointerDown={e=>{e.stopPropagation();svg.current?.focus()}} onClick={()=>{if(!readOnly)onAnswer?.(q.id,letter)}}><title>第{q.number}题 · {letter}</title></rect>)}
       </g>))}
       {noteMode&&<>
@@ -119,6 +146,12 @@ export function Paper({value,page,selected,draw,answerMode=false,forbiddenMode=f
         <rect x={r.x} y={r.y} width={r.width} height={r.height} fill="#0866ff10" stroke={selectedForbidden===index?'#0866ff':'#888'} strokeWidth={.4} style={{cursor:readOnly?'default':'move'}} onPointerDown={e=>{e.stopPropagation();setSelectedForbidden(index);if(readOnly)return;start.current={...point(e),qid:'',forbidden:true,index,region:r};svg.current!.setPointerCapture(e.pointerId)}}><title>禁答区 {index+1}</title></rect>
         {selectedForbidden===index&&!readOnly&&<rect x={r.x+r.width-2} y={r.y+r.height-2} width={4} height={4} fill="#0866ff" style={{cursor:'nwse-resize'}} onPointerDown={e=>{e.stopPropagation();start.current={...point(e),qid:'',forbidden:true,index,region:r,resize:true};svg.current!.setPointerCapture(e.pointerId)}}><title>调整禁答区大小</title></rect>}
       </g>)}
+      {editorBox&&editing&&<foreignObject key={editing.kind+editing.id+editing.index} x={editorBox.x} y={editorBox.y} width={editorBox.w} height={editorBox.h}
+        onPointerDown={e=>e.stopPropagation()} onDoubleClick={e=>e.stopPropagation()} onKeyDown={e=>{e.stopPropagation();if(e.key==='Escape'&&!e.nativeEvent.isComposing)onEdit?.(null)}}>
+        <div className="paper-text-editor" style={{width:editorBox.w*96/25.4,height:editorBox.h*96/25.4,transform:'scale('+25.4/96+')'}}>
+          <RichEditor autoFocus toolbarHost={toolsHost} value={editNote?.html??prompt?.content_html??''} onChange={html=>onTextChange?.(editing,html)}/>
+        </div>
+      </foreignObject>}
       {draft&&<rect x={draft.x} y={draft.y} width={draft.width} height={draft.height} stroke="#0866ff" fill="#0866ff20" strokeDasharray="2 1" strokeWidth={.6} pointerEvents="none"/>}
     </svg></div>
   </Space>
