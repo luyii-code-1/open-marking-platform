@@ -1,3 +1,4 @@
+from .merged_questions import label as question_label
 import csv
 import io
 import math
@@ -47,8 +48,8 @@ def analyze(db,group_id,current,metric='raw',include_absent=False,pass_ratio=.6,
         by_class.append({'id':cid,'name':cohort[0]['class_name'],'grade':cohort[0]['grade'],**summarize(cohort)})
     questions=[]
     for q in template['questions']:
-        values=[r['scores'][str(q['number'])] for r in rows if r['scores'][str(q['number'])] is not None and (include_absent or r['status']!='absent')]
-        questions.append({'id':q['id'],'number':q['number'],'type':q['type'],'points':q['points'],**describe(values,q['points'],pass_ratio,excellent_ratio)})
+        values=[r['scores'][question_label(q)] for r in rows if r['scores'].get(question_label(q)) is not None and (include_absent or r['status']!='absent')]
+        questions.append({'id':q['id'],'number':question_label(q) if q.get('parts') else q['number'],'type':q['type'],'points':q['points'],**describe(values,q['points'],pass_ratio,excellent_ratio)})
     eligible=[r for r in rows if r.get(key) is not None and (include_absent or r['status']!='absent')]
     # Competition ranks: ties share their rank and the next rank has a gap.
     score_counts={}

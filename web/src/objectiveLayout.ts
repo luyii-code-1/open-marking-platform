@@ -51,7 +51,7 @@ export function applyAnswers(questions: Question[], input: string) {
   return questions.map(q => answers.has(q.id) ? { ...q, answer: answers.get(q.id)! } : q)
 }
 
-type Layout = { columns: number; startPage: number }
+type Layout = { columns: number; startPage: number; order?: 'row'|'column' }
 export const compactChoice = { width: 4, height: 2.3, pitch: 4.8, rowHeight: 4.6, optionPitch: 5 }
 export function choiceCenters(question: Question, region: Region) {
   if (question.choice_style === 'compact') return [...answerLetters.slice(0, question.options)].map((letter,index)=>({letter,x:region.x+9+index*5,y:region.y+2.4}))
@@ -59,22 +59,27 @@ export function choiceCenters(question: Question, region: Region) {
   return [...answerLetters.slice(0, question.options)].map((letter, index) => ({ letter, x: region.x + (compact ? 14 + index * 9.5 : 12 + index * Math.min(12, (region.width - 12) / question.options)), y: region.y + (compact ? 3 : 7) }))
 }
 const overlaps = (a: Region, b: Region) => a.page === b.page && a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height
-export function arrangeObjective(template: Template, ids: string[], { columns, startPage }: Layout) {
+export function arrangeObjective(template: Template, ids: string[], { columns, startPage, order }: Layout) {
   const selected = new Set(ids), target = template.questions.filter(q => selected.has(q.id)).sort((a, b) => a.number - b.number)
   if (!target.length || target.some(q => q.type === 'subjective')) throw new Error('请选择需要排布的客观题')
-  if (!Number.isInteger(columns) || columns < 1 || columns > 10 || !Number.isInteger(startPage) || startPage < 1 || startPage > template.sides) throw new Error('排布列数或起始面无效')
+  if (!Number.isInteger(columns) || columns < 0 || columns > 10 || !Number.isInteger(startPage) || startPage < 1 || startPage > template.sides) throw new Error('排布列数或起始面无效')
   const paperWidth = template.paper === 'A3' ? 420 : 210, panels = template.paper === 'A3' ? template.sheet_columns || 2 : 1, gap = 3
   const panelWidth = (paperWidth-24-(panels-1)*8)/panels
+  if (columns===0) {
+    const widest=Math.max(...target.map(q=>12+(q.options-1)*5))
+    columns=Math.min(4,Math.max(1,Math.floor((panelWidth+gap)/(widest+gap+6))))
+  }
   const width = Math.floor(((panelWidth - (columns - 1) * gap) / columns) * 10) / 10
   if (target.some(q => width < 12 + (q.options - 1) * 5)) throw new Error('当前题卡栏内放不下选项，请减少客观题列数')
-  const occupied = [...template.questions.filter(q => !selected.has(q.id)).flatMap(q => q.regions),...(template.forbidden_regions||[])]
+  const occupied = [...template.questions.filter(q => !selected.has(q.id)).flatMap(q => q.regions),...(template.forbidden_regions||[]),...(template.print_notes||[])]
   const slots: Region[] = []
   for (let page = startPage; page <= template.sides && slots.length < target.length; page++) {
     for(let panel=0;panel<panels&&slots.length<target.length;panel++) {
       const top=page===1&&panel===0?100:35
       for(let block=0;top+block*27+4*compactChoice.pitch+compactChoice.rowHeight<=255&&slots.length<target.length;block++)
-        for(let col=0;col<columns&&slots.length<target.length;col++)
-          for(let row=0;row<5&&slots.length<target.length;row++) {
+        for(let i=0;i<columns*5&&slots.length<target.length;i++) {
+            const row=order==='row'?Math.floor(i/columns):i%5
+            const col=order==='row'?i%columns:Math.floor(i/5)
             const y=top+block*27+row*compactChoice.pitch
             if(y+compactChoice.rowHeight>255)continue
             const slot={page,x:Math.round((12+panel*(panelWidth+8)+col*(width+gap))*1000)/1000,y:Math.round(y*1000)/1000,width,height:compactChoice.rowHeight}
@@ -88,10 +93,11 @@ export function arrangeObjective(template: Template, ids: string[], { columns, s
 }
 
 export function addObjective(template: Template, config: Layout & { numbers: string; type: 'single' | 'multiple'; options: number; points: number }, uuid = () => crypto.randomUUID()) {
-  const numbers = parseQuestionNumbers(config.numbers), existing = new Set(template.questions.map(q => q.number))
+  const numbers = parseQuestionNumbers(config.numbers), existing = new Set(template.questions.flatMap(q => q.parts?.map(p=>p.number)??[q.number]))
   const duplicate = numbers.filter(number => existing.has(number))
   if (duplicate.length) throw new Error(`题号已存在：${duplicate.join('、')}`)
   if (![3, 4, 5].includes(config.options) || !['single', 'multiple'].includes(config.type) || !Number.isFinite(config.points) || config.points <= 0 || Math.abs(config.points * 100 - Math.round(config.points * 100)) > 1e-7) throw new Error('请选择3/4/5个选项，分值须为最多两位小数的正数')
   const created: Question[] = numbers.map(number => ({ id: uuid(), number, type: config.type, options: config.options, points: config.points, answer: [], rule: { mode: 'exact' }, regions: [], review_mode: 'single', threshold: 0 }))
+  if(config.order==='row')for(const question of created)question.choice_group=created[0].id
   return arrangeObjective({ ...template, questions: [...template.questions, ...created].sort((a, b) => a.number - b.number) }, created.map(q => q.id), config)
 }

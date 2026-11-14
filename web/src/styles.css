@@ -91,3 +91,5 @@
 .ant-table-wrapper .ant-table-pagination .ant-pagination-total-text { margin-inline-end: auto; }
 
 .app-shell > .sidebar { position: sticky; top: 0; align-self: flex-start; height: 100dvh; overflow-y: auto; overscroll-behavior: contain; }
+
+.rich-editor:empty::before{content:attr(data-placeholder);color:#657185;pointer-events:none}

@@ -48,6 +48,27 @@ const a3 = addObjective({ ...template, paper: 'A3', sides: 1 }, { ...config, num
 assert.equal(a3.length, 80)
 assert.equal(arrangeObjective({ ...template, questions }, questions.map(q => q.id), { columns: 2, startPage: 1 }).length, questions.length)
 
+const framed={...template,paper:'A3',sheet_columns:3,print_notes:[{page:1,x:12,y:100,width:125,height:5}]}
+const auto=addObjective(framed,{...config,numbers:'1-8',columns:0,order:'row'},uuid)
+const slots=auto.map(q=>q.regions[0])
+assert.ok(slots[0].y>=105 && slots[0].y===slots[1].y && slots[1].y===slots[2].y)
+assert.ok(slots[0].x<slots[1].x && slots[1].x<slots[2].x)
+assert.equal(slots[3].x,slots[0].x)
+assert.ok(slots[3].y>slots[0].y)
+assert.equal(new Set(auto.map(q=>q.choice_group)).size,1)
+
+const geometrySource=await readFile(new URL('../src/sheetRegions.ts',import.meta.url),'utf8')
+const geometry=ts.transpileModule(geometrySource,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ES2022}}).outputText
+const {subjectiveRegion,uniformSubjectiveWidths}=await import('data:text/javascript;base64,'+Buffer.from(geometry).toString('base64'))
+const oldRegions=[20,170,300].map(x=>({page:1,x,y:120,width:35,height:20}))
+const adjusted=uniformSubjectiveWidths({...framed,questions:[{...subjective,regions:oldRegions}]})
+const fixed=adjusted.questions[0].regions
+assert.deepEqual(fixed.map(r=>r.width),[126.6,126.6,126.6])
+for(const r of fixed){
+  const dragged=subjectiveRegion(framed,1,{x:r.x+4,y:120},{x:410,y:160})
+  assert.equal(dragged.x,r.x);assert.equal(dragged.width,r.width);assert.equal(dragged.height,40)
+}
+
 const layouts=[{...template,questions:answers},... [2,3].map(sheet_columns=>{
   const sheet={...template,paper:'A3',sheet_columns,sides:2}
   const rows=addObjective(sheet,{...config,numbers:'1-360',columns:sheet_columns===3?3:4,options:5},uuid)

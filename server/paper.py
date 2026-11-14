@@ -47,6 +47,10 @@ def validate(template):
                 panel=min(columns-1,max(0,int((region['x']-12+.01)/(panel_width+8))))
                 left=12+panel*(panel_width+8)
                 if region['x']<left-.01 or region['x']+region['width']>left+panel_width+.01:raise ValueError('答题区域不能跨越题卡分栏')
+                if template.get('uniform_subjective') and question['type']=='subjective':
+                    expected=math.floor((panel_width+1e-8)*10)/10
+                    if abs(region['x']-left)>.011 or abs(region['width']-expected)>.011:
+                        raise ValueError('主观题作答区应与本栏等宽，请重新载入草稿并保存')
             bracket=question.get('choice_style')=='bracket'
             tight=question.get('choice_style')=='compact'
             if question.get('choice_style') not in (None,'bracket','compact'):raise ValueError('选择题填涂样式无效')
@@ -56,7 +60,7 @@ def validate(template):
             for previous in occupied:
                 if previous['page']==region['page'] and region['x']<previous['x']+previous['width'] and previous['x']<region['x']+region['width'] and region['y']<previous['y']+previous['height'] and previous['y']<region['y']+region['height']: raise ValueError('答题区域重叠')
             occupied.append(region)
-            if question.get('content_html'):
+            if question.get('content_html') and not question.get('parts'):
                 image_height=min(region['height']-12,question.get('image_height',25)) if question.get('image_asset_id') else 0
                 rich_layout(question['content_html'],(region['width']-6)*mm,(region['height']-12-image_height)*mm)
         if question['type']!='subjective':
@@ -75,6 +79,28 @@ def validate(template):
         for other in occupied:
             if other['page']==area['page'] and area['x']<other['x']+other['width'] and other['x']<area['x']+area['width'] and area['y']<other['y']+other['height'] and other['y']<area['y']+area['height']:raise ValueError('禁答区与已有区域重叠')
         occupied.append(area)
+    notes=template.get('print_notes',[])
+    if not isinstance(notes,list) or len(notes)>500:
+        raise ValueError('版面文字最多可添加500项')
+    protected=[r for q in template.get('questions',[]) if q['type']!='subjective' for r in q.get('regions',[])]+areas
+    ids=set()
+    for note in notes:
+        if not isinstance(note,dict) or not isinstance(note.get('id'),str) or not note['id'] or note['id'] in ids:
+            raise ValueError('版面文字编号无效')
+        ids.add(note['id'])
+        if not isinstance(note.get('html'),str) or type(note.get('page')) is not int or not 1<=note['page']<=template['sides']:
+            raise ValueError('版面文字或页码无效')
+        if not all(type(note.get(k)) in (int,float) and math.isfinite(note[k]) for k in ('x','y','width','height')):
+            raise ValueError('版面文字坐标无效')
+        x,y,width,height=(note[k] for k in ('x','y','width','height'))
+        panel=max(0,min(columns-1,int((x-12+.01)/(panel_width+8))))
+        left=12+panel*(panel_width+8)
+        top=100 if not manual_binding(template) or (note['page']==1 and panel==0) else 35
+        if x<left-.01 or x+width>left+panel_width+.01 or y<top or y+height>270 or min(width,height)<=0:
+            raise ValueError('版面文字超出本栏可用范围')
+        if any(r['page']==note['page'] and x<r['x']+r['width'] and r['x']<x+width and y<r['y']+r['height'] and r['y']<y+height for r in protected):
+            raise ValueError('版面文字与选择题或禁答区重叠')
+        rich_layout(note['html'],width*mm,height*mm)
 
 
 
@@ -107,6 +133,8 @@ def forbidden_regions(template,page):
 
 
 def pdf(template):
+    from .merged_questions import print_questions
+    template={**template,'questions':list(print_questions(template))}
     validate(template)
     output=io.BytesIO()
     w,h=dimensions(template)
@@ -141,15 +169,21 @@ def pdf(template):
             count=panels(template);pw=(w-24-(count-1)*8)/count
             for panel in range(count):
                 left=12+panel*(pw+8)
-                if panel:
+                if panel and not template.get('column_frame'):
                     c.setDash(1,3);c.setStrokeGray(.65);c.line((left-4)*mm,15*mm,(left-4)*mm,(h-15)*mm);c.setDash();c.setStrokeGray(0)
-                c.setFont(FONT,8);c.drawRightString((left+pw-2)*mm,16*mm,f'第{(page-1)*count+panel+1}栏 / 共{count*template["sides"]}栏')
         for x,y in ((7,7),(w-7,7),(7,h-7),(w-7,h-7)):
             c.rect((x-2)*mm,(h-y-2)*mm,4*mm,4*mm,fill=1,stroke=0)
         if page==1:
             standard_notices=sheet_notices.enabled(template)
             c.setFont(FONT,8 if standard_notices else 9)
-            c.drawString(15*mm,(h-(33 if standard_notices else 39))*mm,'姓名：____________  班级：____________  考场：____________')
+            baseline=(h-(33 if standard_notices else 39))*mm
+            if template.get('column_frame'):
+                field_width=min(40,(title_width-6)/3)*mm
+                for index,label in enumerate(('姓名','班级','考场')):
+                    x=15*mm+index*field_width
+                    c.drawString(x,baseline,label)
+                    c.line(x+7*mm,baseline-1,x+field_width-2*mm,baseline-1)
+            else:c.drawString(15*mm,baseline,'姓名：____________  班级：____________  考场：____________')
             if template.get('layout_version',1)>=2:
                 if sheet_style.enabled(template):
                     header=sheet_style.header_geometry(template)
@@ -172,13 +206,6 @@ def pdf(template):
                     c.rect((x-1.6)*mm,(h-y-1.2)*mm,3.2*mm,2.4*mm)
                     c.setFont('Helvetica',5); c.drawCentredString(x*mm,(h-y-.6)*mm,str(digit))
             if standard_notices:sheet_notices.draw(c,template)
-        column_tops={}
-        for q in template.get('questions',[]):
-            if q.get('choice_style') in ('bracket','compact') and q['type']!='subjective':
-                for r in q['regions']:
-                    if int(r['page'])==page:column_tops[r['x']]=min(column_tops.get(r['x'],r['y']),r['y'])
-        c.setFont(FONT,8)
-        for x,top in column_tops.items():c.drawString((x+2)*mm,(h-top+2)*mm,'题号')
         for question in template.get('questions',[]):
             for region in question['regions']:
                 if int(region['page'])!=page: continue
@@ -205,16 +232,22 @@ def pdf(template):
                 else:
                     c.setStrokeColorRGB(.7,.7,.7)
                     style=question.get('style','none' if background_id else 'line')
-                    if style=='line':
+                    if template.get('column_frame') and question.get('content_html'):
+                        text_height=rich_layout(question['content_html'],(rw-6)*mm,(rh-12)*mm)/mm
+                    else:text_height=0
+                    body_top=y+12+text_height
+                    body_bottom=y+rh-3-(min(rh-12,question.get('image_height',25)) if question.get('image_asset_id') and template.get('column_frame') else 0)
+                    if style=='line' and body_top<=body_bottom:
                         lines=int(question.get('lines',max(1,int((rh-14)/8))))
                         if not 1<=lines<=100:raise ValueError('横线行数应为1至100')
-                        for ly in np.linspace(y+12,y+rh-3,lines):c.line((x+3)*mm,(h-ly)*mm,(x+rw-3)*mm,(h-ly)*mm)
+                        for ly in np.linspace(body_top,body_bottom,lines):c.line((x+3)*mm,(h-ly)*mm,(x+rw-3)*mm,(h-ly)*mm)
                     elif style=='grid':
                         cell=float(question.get('cell_size',8))
                         if not 4<=cell<=20:raise ValueError('作文格大小应为4至20毫米')
-                        cols=int((rw-6)/cell);rows=int((rh-12)/cell)
+                        grid_top=y+10+text_height
+                        cols=int((rw-6)/cell);rows=int((body_bottom-grid_top+1)/cell) if template.get('column_frame') else int((rh-12)/cell)
                         for row in range(rows):
-                            for col in range(cols):c.rect((x+3+col*cell)*mm,(h-y-10-(row+1)*cell)*mm,cell*mm,cell*mm)
+                            for col in range(cols):c.rect((x+3+col*cell)*mm,(h-grid_top-(row+1)*cell)*mm,cell*mm,cell*mm)
                     c.setStrokeColorRGB(0,0,0)
                     image_height=min(rh-12,question.get('image_height',25)) if question.get('image_asset_id') else 0
                     if question.get('content_html'):rich_layout(question['content_html'],(rw-6)*mm,(rh-12-image_height)*mm,c,(x+3)*mm,(h-y-9)*mm)
@@ -223,17 +256,29 @@ def pdf(template):
                         try:asset=materialize('assets/'+question['image_asset_id']+'.png')
                         except FileNotFoundError:raise ValueError('题卡插图不存在')
                         c.drawImage(str(asset),(x+3)*mm,(h-y-rh+3)*mm,width=(rw-6)*mm,height=min(rh-12,question.get('image_height',25))*mm,preserveAspectRatio=True,anchor='c',mask='auto')
+        if template.get('column_frame'):
+            sheet_style.draw_choice_frames(c,template,page,h,panels(template),w)
         if sheet_style.enabled(template):
             c.saveState();c.setStrokeGray(.45);c.setLineWidth(.25*mm)
-            for q in template.get('questions',[]):
-                if q['type']!='subjective':continue
-                for r in q['regions']:
-                    if r['page']==page:c.roundRect((r['x']-1)*mm,(h-r['y']-r['height']-1)*mm,(r['width']+2)*mm,(r['height']+2)*mm,2*mm)
             count=panels(template);pw=(w-24-(count-1)*8)/count
+            if template.get('column_frame'):
+                c.setStrokeColorRGB(.73,.36,.32)
+                for panel in range(count):
+                    left=12+panel*(pw+8)
+                    top=97 if page==1 and panel==0 else 31
+                    c.roundRect((left-1.5)*mm,17*mm,(pw+3)*mm,(h-top-17)*mm,2.5*mm)
+            else:
+                for q in template.get('questions',[]):
+                    if q['type']!='subjective':continue
+                    for r in q['regions']:
+                        if r['page']==page:c.roundRect((r['x']-1)*mm,(h-r['y']-r['height']-1)*mm,(r['width']+2)*mm,(r['height']+2)*mm,2*mm)
             size=min(9,(pw-4)*mm/pdfmetrics.stringWidth(sheet_style.FOOTER,FONT,1))
             c.setFillGray(.25);c.setFont(FONT,size)
             for panel in range(count):c.drawCentredString((12+panel*(pw+8)+pw/2)*mm,19*mm,sheet_style.FOOTER)
             c.restoreState()
+        for note in template.get('print_notes',[]):
+            if note['page']==page:
+                rich_layout(note['html'],note['width']*mm,note['height']*mm,c,note['x']*mm,(h-note['y'])*mm)
         for area in forbidden_regions(template,page):
             x,y,rw,rh=(area[k] for k in ('x','y','width','height'))
             c.saveState();c.setStrokeGray(.7);c.setLineWidth(.15*mm);c.setDash(2,2)

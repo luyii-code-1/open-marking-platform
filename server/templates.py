@@ -15,7 +15,7 @@ from .identifiers import prepare_questions
 
 router=APIRouter(prefix='/api/v1')
 _render_slots=threading.BoundedSemaphore(2)
-DEFINITION_FIELDS=('name','subtitle','paper','sides','candidate_length','layout_version','sheet_columns','notice_template','notice_layout','print_style','forbidden_regions','background_assets','background_asset_id','questions')
+DEFINITION_FIELDS=('name','subtitle','paper','sides','candidate_length','layout_version','sheet_columns','notice_template','notice_layout','print_style','column_frame','uniform_subjective','print_notes','forbidden_regions','background_assets','background_asset_id','questions')
 
 
 @router.put('/groups/{group_id}/drafts/{identifier}')
@@ -34,7 +34,7 @@ def save_draft(group_id:str,identifier:str,body:dict,current=Depends(admin)):
         db.execute('BEGIN IMMEDIATE');group=require(db,group_id,'groups')
         old=get(db,identifier,'templates')
         if old and old.get('group_id')!=group_id:raise HTTPException(409,'草稿属于另一题卡')
-        if group.get('frozen') or group.get('template_id') or old and old.get('status')=='published':raise HTTPException(409,'题卡已发布，不能保存草稿')
+        if group.get('frozen') or old and old.get('status') in ('published','superseded'):raise HTTPException(409,'题卡已发布，不能保存草稿')
         if old and old.get('draft_request_id')==body['request_id']:
             if old.get('draft_signature')!=signature:raise HTTPException(409,'保存请求编号重复')
             return old
@@ -46,6 +46,32 @@ def save_draft(group_id:str,identifier:str,body:dict,current=Depends(admin)):
         from .sheet_style import defaults
         defaults(value);prepare_questions(value)
         return put(db,'templates',value,current['id'])
+
+
+@router.delete('/templates/{identifier}')
+def delete_template(identifier:str,draft_version:int|None=None,expected_status:str|None=None,current=Depends(admin)):
+    with connect() as db:
+        db.execute('BEGIN IMMEDIATE')
+        value=require(db,identifier,'templates')
+        group=require(db,value['group_id'],'groups')
+        if group.get('frozen'):raise HTTPException(409,'成绩已冻结')
+        if draft_version is not None and draft_version!=value.get('draft_version',0) or expected_status and expected_status!=value['status']:
+            raise HTTPException(409,'版本已变化，请重新载入后删除')
+        from .lifecycle import writable
+        writable(db,'templates',value)
+        used=db.execute("SELECT 1 FROM objects WHERE deleted=0 AND kind IN ('scan-batches','pages','submissions','tasks','answer-slices') AND json_extract(body,'$.template_id')=? LIMIT 1",(identifier,)).fetchone()
+        if used:raise HTTPException(409,'本版本已用于扫描或阅卷，需保留业务记录')
+        if group.get('template_id')==identifier:
+            put(db,'groups',{**group,'template_id':None},current['id'])
+        assignments=find(db,'assignments',template_id=identifier)
+        for object_id in [a['id'] for a in assignments]+[identifier]:
+            db.execute("INSERT INTO audit(id,actor,action,object_id,body) SELECT ?,?,'delete',id,body FROM objects WHERE id=?",(str(uuid4()),current['id'],object_id))
+            db.execute('UPDATE objects SET deleted=1 WHERE id=?',(object_id,))
+        for q in value['questions']:
+            db.execute('DELETE FROM allocation_state WHERE question_id=?',(q['id'],))
+            db.execute('DELETE FROM review_allocations WHERE question_id=?',(q['id'],))
+        db.execute("UPDATE identifiers SET retired=1 WHERE owner_id=? AND kind='questions'",(identifier,))
+    return {'status':'deleted'}
 
 
 def default_group(db,subject_id,actor):
@@ -94,7 +120,6 @@ def instantiate(identifier:str,body:dict,current=Depends(admin)):
         entry=require(db,identifier,'template-library')
         group=require(db,body['group_id'],'groups') if body.get('group_id') else default_group(db,body.get('subject_id'),current['id'])
         if group.get('frozen'):raise HTTPException(409,'成绩已冻结，请先发起复核或选择新的题卡组')
-        if group.get('template_id'):raise HTTPException(409,'该题卡已有正式版式，请选择其他题卡')
         definition=deepcopy(entry['definition'])
         name=body.get('name',entry['name'])
         if not isinstance(name,str) or not 1<=len(name.strip())<=100:raise HTTPException(422,'请填写100字以内题卡标题')

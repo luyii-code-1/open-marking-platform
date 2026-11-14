@@ -30,6 +30,9 @@ def test_pdf_preview_matches_published_print_pixels_without_persisting_draft(tmp
         headers=setup(client)
         with db.connect() as connection:group=db.put(connection,'groups',{'name':'组'})
         body=definition(group['id'],paper_size,sides)
+        body.update(column_frame=True,layout_version=3,print_style='standard-v2',print_notes=[
+            {'id':'hint','page':sides,'x':20,'y':140,'width':100,'height':8,'html':'<p>补充说明：结果为 _ _ _ 米。</p>'}
+        ])
         created=client.post('/api/v1/templates',json=body,headers=headers).json()
         published=client.post(f"/api/v1/templates/{created['id']}/publish",headers=headers)
         assert published.status_code==200,published.text
@@ -89,6 +92,15 @@ def test_default_group_library_snapshot_new_ids_and_used_group_publish_guard(tmp
         blocked=client.post(f"/api/v1/templates/{two['id']}/publish",headers=headers)
         assert blocked.status_code==409
         with db.connect() as connection:assert db.get(connection,one['group_id'])['template_id']==one['id']
+        replaced=client.post(f"/api/v1/templates/{two['id']}/publish",json={'replace_id':one['id']},headers=headers)
+        assert replaced.status_code==200 and replaced.json()['revision']==2
+        with db.connect() as connection:
+            assert db.get(connection,one['id'])['status']=='superseded'
+            assert db.get(connection,one['group_id'])['template_id']==two['id']
+            assert db.objects(connection,'scan-batches')[0]['template_id']==one['id']
+        assert client.delete('/api/v1/templates/'+one['id'],headers=headers).status_code==409
+        assert client.delete('/api/v1/templates/'+two['id'],headers=headers).status_code==200
+        with db.connect() as connection:assert db.get(connection,one['group_id'])['template_id'] is None
         teacher=create('users',{'username':'teacher','password':'teacher-password','name':'教师'})
         token=client.post('/api/v1/auth/login',json={'username':'teacher','password':'teacher-password'}).json()['token']
         restricted={'Authorization':'Bearer '+token}
@@ -112,3 +124,34 @@ def test_template_check_catches_scoring_and_layout_errors_before_publication(tmp
         body=definition(group['id']);body['questions'][1]['regions'][0]['y']=115
         checked=client.post('/api/v1/templates/check',json=body,headers=headers).json()
         assert not checked['valid'] and any('重叠' in issue for issue in checked['issues'])
+
+
+def test_merged_fill_in_has_one_task_and_one_total(tmp_path,monkeypatch):
+    monkeypatch.setattr(db,'ROOT',tmp_path/'data')
+    with TestClient(app) as client:
+        headers=setup(client)
+        with db.connect() as connection:
+            group=db.put(connection,'groups',{'name':'题卡'})
+            student=db.put(connection,'students',{'name':'考生','class_id':'class','candidate_number':'001'})
+            teacher=connection.execute('SELECT id FROM users LIMIT 1').fetchone()[0]
+        parts=[{'number':n,'points':5,'style':'none'} for n in (12,13,14)]
+        regions=[{'part_number':p['number'],'page':1,'x':12,'y':110+24*i,'width':186,'height':20} for i,p in enumerate(parts)]
+        q={'number':12,'id':str(uuid4()),'points':15,'type':'subjective','parts':parts,'regions':regions}
+        body={'name':'填空题合批','group_id':group['id'],'paper':'A4','sides':1,'questions':[q]}
+        created=client.post('/api/v1/templates',json=body,headers=headers).json()
+        url='/api/v1/templates/'+created['id']
+        assert client.post(url+'/publish',headers=headers).status_code==200
+        assert client.get(url+'/pdf',headers=headers).status_code==200
+        with db.connect() as connection:
+            db.put(connection,'submissions',{'group_id':group['id'],'template_id':created['id'],'student_id':student['id'],'candidate_number':'001','pages':[],'status':'ready'})
+        claim={'template_id':created['id'],'question_id':q['id']}
+        assert client.post('/api/v1/assignments',json={**claim,'user_ids':[teacher]},headers=headers).status_code==200
+        task=client.post('/api/v1/tasks/claim',json=claim,headers=headers).json()
+        assert [r['part_number'] for r in task['regions']]==[12,13,14]
+        score_url='/api/v1/tasks/'+task['id']+'/score'
+        assert client.post(score_url,json={'score':16,'idempotency_key':str(uuid4())},headers=headers).status_code==422
+        scored=client.post(score_url,json={'score':12,'idempotency_key':str(uuid4())},headers=headers)
+        assert scored.status_code==200 and scored.json()['final_score']==12
+        result=client.get('/api/v1/results',params={'group_id':group['id']},headers=headers).json()[0]
+        assert result['scores']=={'12～14':12} and result['total']==12
+        assert client.post('/api/v1/tasks/claim',json=claim,headers=headers).json() is None

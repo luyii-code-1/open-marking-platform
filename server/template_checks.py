@@ -13,9 +13,16 @@ def issues(template,complete=False):
     if template.get('notice_template','none') not in ('none','standard-v1'):errors.append('内置须知模板无效')
     if template.get('notice_layout',1) not in (1,2):errors.append('须知排版无效')
     if template.get('print_style') not in (None,'standard-v2'):errors.append('印刷版式无效')
+    if type(template.get('column_frame',False)) is not bool:errors.append('分栏底版设置无效')
     questions=template.get('questions',[])
     if not isinstance(questions,list) or any(not isinstance(q,dict) for q in questions):return errors+['题目应为对象列表']
     if complete and not questions:errors.append('至少创建一道题')
+    if any('parts' in q for q in questions):
+        from .merged_questions import print_questions
+        try:
+            expanded=list(print_questions(template))
+            errors.extend(issues({**template,'questions':expanded},complete))
+        except (ValueError,TypeError,KeyError,InvalidOperation) as error:errors.append(str(error))
     numbers=set()
     for index,q in enumerate(questions,1):
         label=f"第{q.get('number',index)}题："
@@ -80,6 +87,7 @@ def asset_ids(template):
     if any(key not in [str(p) for p in range(1,template['sides']+1)] for key in backgrounds):raise ValueError('底图页码超出题卡范围')
     values=list(backgrounds.values())
     if template.get('background_asset_id'):values.append(template['background_asset_id'])
-    values.extend(q['image_asset_id'] for q in template.get('questions',[]) if q.get('image_asset_id'))
+    from .merged_questions import print_questions
+    values.extend(q['image_asset_id'] for q in print_questions(template) if q.get('image_asset_id'))
     if any(not isinstance(v,str) for v in values):raise ValueError('图片编号无效')
     return values

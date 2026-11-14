@@ -1,3 +1,4 @@
+import {questionLabel} from './mergeQuestions'
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Alert, Button, Modal, Popconfirm, Space, Tag } from 'antd'
@@ -51,12 +52,12 @@ export function ReviewWorkspace({user,offline,onVerified,onLoginRequired,childre
 function ReviewQueueStatus({records,status,error,sync,target}:{records:ReviewRecord[];status:SyncReport;error:string;sync:()=>Promise<SyncReport>;target:HTMLDivElement|null}){
   const [open,setOpen]=useState(false)
   const pending=records.filter(r=>r.status==='queued'||r.status==='conflict'),conflicts=pending.filter(r=>r.status==='conflict')
-  function exportRecords(){const blob=new Blob([JSON.stringify(pending.map(r=>({task_id:r.task.id,template:r.template.name,question:r.question.number,score:r.operation?.score,operation_id:r.operation?.id,status:r.status,reason:r.error})),null,2)],{type:'application/json'});const url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download='阅卷待传记录.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}
+  function exportRecords(){const blob=new Blob([JSON.stringify(pending.map(r=>({task_id:r.task.id,template:r.template.name,question:questionLabel(r.question),score:r.operation?.score,operation_id:r.operation?.id,status:r.status,reason:r.error})),null,2)],{type:'application/json'});const url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download='阅卷待传记录.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}
   const notice=(pending.length>0||error||status.state==='upgrade')&&<div className="review-queue-status" role="status"><Space wrap>{error?<Alert type="error" message={'本地保存不可用：'+error}/>:<Tag color={conflicts.length?'orange':'blue'}>待上传 {pending.length-conflicts.length} · 待核对 {conflicts.length}</Tag>}{status.message&&<span>{status.message}</span>}<Button size="small" onClick={()=>void sync()}>重试上传</Button>{pending.length>0&&<Button size="small" onClick={()=>setOpen(true)}>查看本地记录</Button>}</Space></div>
   return <>
     {target?createPortal(notice,target):notice}
     <Modal title="本地待传评分" width={760} open={open} onCancel={()=>setOpen(false)} footer={<Space><Button onClick={exportRecords}>导出记录</Button><Button onClick={()=>setOpen(false)}>关闭</Button></Space>}>
-      <Table rowKey="key" dataSource={pending} pagination={{defaultPageSize:50}} columns={[{title:'题卡',render:(_,r)=>r.template.name},{title:'题号',render:(_,r)=>r.question.number},{title:'分数',render:(_,r)=>r.operation?.score},{title:'状态',render:(_,r)=>r.error||'等待服务器确认'},{title:'操作',render:(_,r)=>r.status==='conflict'?<Popconfirm title="确认已核对或导出这份记录？" description="仅移除本地记录，服务器评分保持当前结果。" onConfirm={()=>forgetReview(r.owner,r.task.id)}><Button size="small">移除本地记录</Button></Popconfirm>:null}]}/>
+      <Table rowKey="key" dataSource={pending} pagination={{defaultPageSize:50}} columns={[{title:'题卡',render:(_,r)=>r.template.name},{title:'题号',render:(_,r)=>questionLabel(r.question)},{title:'分数',render:(_,r)=>r.operation?.score},{title:'状态',render:(_,r)=>r.error||'等待服务器确认'},{title:'操作',render:(_,r)=>r.status==='conflict'?<Popconfirm title="确认已核对或导出这份记录？" description="仅移除本地记录，服务器评分保持当前结果。" onConfirm={()=>forgetReview(r.owner,r.task.id)}><Button size="small">移除本地记录</Button></Popconfirm>:null}]}/>
     </Modal>
   </>
 }

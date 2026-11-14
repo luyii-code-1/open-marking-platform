@@ -17,7 +17,7 @@ from pathlib import Path
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from .db import connect, get, initialize, objects, put
+from .db import connect, find, get, initialize, objects, put
 from .scoring import cents, final_score
 from . import db as database
 from . import paper
@@ -201,7 +201,7 @@ def create_route(kind):
                 from .school import assign_class
                 assign_class(db,value,body,current['id'])
             if kind=='templates':
-                if require(db,value['group_id'],'groups').get('template_id'):raise HTTPException(409,'该题卡已有正式版式，请新建题卡使用其他版式')
+                if require(db,value['group_id'],'groups').get('frozen'):raise HTTPException(409,'成绩已冻结')
                 if value.get('paper') not in ('A3','A4') or value.get('sides') not in (1,2):
                     raise HTTPException(422,'纸型或单双面无效')
                 value.update(revision=0,status='draft',layout_version=3)
@@ -284,7 +284,7 @@ def edit_template(identifier:str,body:dict,current=Depends(admin)):
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
         old=require(db,identifier,'templates')
-        if old['status']=='published': raise HTTPException(409,'已发布版式不能直接编辑，请复制新题卡')
+        if old['status'] in ('published','superseded'): raise HTTPException(409,'已发布版式不能直接编辑，请复制新题卡')
         if body.get('draft_version',0)!=old.get('draft_version',0):raise HTTPException(409,'草稿已更新，请重新载入后编辑')
         body={**old,**body,'id':identifier,'group_id':old['group_id'],'status':'draft','revision':old['revision'],'layout_version':3,'draft_version':old.get('draft_version',0)+1}
         body.pop('draft_request_id',None);body.pop('draft_signature',None)
@@ -296,14 +296,16 @@ def edit_template(identifier:str,body:dict,current=Depends(admin)):
 
 
 @app.post('/api/v1/templates/{identifier}/publish')
-def publish(identifier:str,current=Depends(admin)):
+def publish(identifier:str,body:dict|None=None,current=Depends(admin)):
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
         template=require(db,identifier,'templates')
         group=require(db,template['group_id'],'groups')
         if template['status']!='published':
             if group.get('frozen'):raise HTTPException(409,'成绩已冻结，请先发起复核或选择新的题卡组')
-            if group.get('template_id') and group['template_id']!=identifier:raise HTTPException(409,'该题卡已有正式版式，请新建题卡使用其他版式')
+            if template['status']!='draft':raise HTTPException(409,'请选择草稿发布')
+            if group.get('template_id')!=(body or {}).get('replace_id'):
+                raise HTTPException(409,'当前正式版本已变化，请重新载入后确认替换')
         from .template_checks import issues,asset_ids
         errors=issues(template,complete=True)
         if errors:raise HTTPException(422,'；'.join(errors))
@@ -311,7 +313,11 @@ def publish(identifier:str,current=Depends(admin)):
         except (ValueError,KeyError,TypeError) as error:raise HTTPException(422,str(error))
         for asset_id in assets:require(db,asset_id,'assets')
         if template['status']!='published':
-            template.update(status='published',revision=template['revision']+1)
+            versions=find(db,'templates',group_id=group['id'])
+            if group.get('template_id'):
+                previous=require(db,group['template_id'],'templates')
+                put(db,'templates',{**previous,'status':'superseded'},current['id'])
+            template.update(status='published',revision=max((v.get('revision',0) for v in versions),default=0)+1)
             put(db,'templates',template,current['id'])
             group=require(db,template['group_id'],'groups')
             group['template_id']=identifier
@@ -335,7 +341,7 @@ def health():
 @app.get('/api/v1/templates/{identifier}/pdf')
 def print_template(identifier:str,current=Depends(admin)):
     with connect() as db: template=require(db,identifier,'templates')
-    if template['status']!='published': raise HTTPException(409,'请先发布题卡')
+    if template['status'] not in ('published','superseded'): raise HTTPException(409,'请先发布题卡')
     return Response(paper.pdf(template),media_type='application/pdf',headers={'Content-Disposition':'attachment; filename=answer-sheet.pdf'})
 
 

@@ -1,3 +1,4 @@
+from .merged_questions import label as question_label
 import io
 import time
 from uuid import uuid4
@@ -391,15 +392,15 @@ def results_for(db,group_id,current,convert_scores=True):
         if submission['group_id']!=group_id: continue
         student=submission.get('student_snapshot') or require(db,submission['student_id'],'students')
         template=require(db,submission['template_id'],'templates')
-        scores={str(q['number']):result_for(db,submission,q) for q in template['questions']}
+        scores={question_label(q):result_for(db,submission,q) for q in template['questions']}
         ready=all(v is not None for v in scores.values())
         output.append({**identity(student),'candidate_number':student_view(db,student)['candidate_number'] if live else submission['candidate_number'],'scanned_candidate_number':submission['candidate_number'],'room_tags':room_view(db,submission.get('room_tags',[])) if live else submission.get('room_tags',[]),'scores':{k:v/100 if v is not None else None for k,v in scores.items()},'total':sum(scores.values())/100 if ready else None,'status':'absent' if submission['status']=='absent' else 'completed' if ready else 'pending'})
     if members is not None:
         seen={r['student_id'] for r in output}
-        template=require(db,group['template_id'],'templates')
+        template=get(db,group.get('template_id'),'templates') or {'questions':[]}
         for student in members:
             if student['id'] not in seen:
-                output.append({**identity(student),'candidate_number':student['candidate_number'],'scores':{str(q['number']):None for q in template['questions']},'total':None,'status':'unscanned'})
+                output.append({**identity(student),'candidate_number':student['candidate_number'],'scores':{question_label(q):None for q in template['questions']},'total':None,'status':'unscanned'})
     if group.get('conversion_id') and convert_scores:
         from .conversion import apply,active_config
         conversion=active_config(group,require(db,group['conversion_id'],'score-conversions'))

@@ -130,7 +130,7 @@ def create(identifier,actor,progress=None,archive_id=None,ownership=None,preserv
             for record_index,record in enumerate(records):
                 if progress:progress(record_index,len(records),'写入归档')
                 kind,item=record['kind'],record['data']
-                if kind=='templates' and item.get('status')=='published':write_bytes('templates/'+item['id']+'.pdf',pdf(item))
+                if kind=='templates' and item.get('status') in ('published','superseded'):write_bytes('templates/'+item['id']+'.pdf',pdf(item))
                 if kind not in ('pages','assets'):continue
                 from .scan_files import page_suffixes,hash_field
                 for suffix in (page_suffixes(item) if kind=='pages' else ('.png',)):

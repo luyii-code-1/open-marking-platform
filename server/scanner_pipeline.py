@@ -72,7 +72,7 @@ def batch_context(db, identifier, current):
     writable(db, 'scan-batches', batch)
     if group.get('frozen'): raise HTTPException(409, '成绩已经发布，请先在管理端发起复核')
     template = require(db, batch['template_id'], 'templates')
-    if group.get('template_id') != template['id'] or template['revision'] != batch['template_revision']: raise HTTPException(409, '题卡版本已变化，请下载项目配置并重新建立批次')
+    if (group.get('template_id') != template['id'] and template.get('status')!='superseded') or template['revision'] != batch['template_revision']: raise HTTPException(409, '题卡版本已变化，请下载项目配置并重新建立批次')
     return batch, group, template
 
 

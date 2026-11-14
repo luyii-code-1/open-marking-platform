@@ -1,3 +1,4 @@
+import {questionLabel} from './mergeQuestions'
 import { Card, Progress, Space, Tag, Typography } from 'antd'
 import { Table } from './DataTable'
 import { Button } from './Button'
@@ -34,7 +35,7 @@ export function ReviewTasks({ onOpen }: { onOpen: (templateId: string, questionI
     <ErrorNotice error={templates.error || assignments.error} />
     <Table<ReviewTask> rowKey="key" dataSource={rows} loading={templates.loading || assignments.loading} pagination={{ defaultPageSize:50, hideOnSinglePage: true }} scroll={{ x: 700 }} locale={{ emptyText: '暂无分配给你的阅卷任务，请联系管理员分配题目。' }} columns={[
       { title: '考试 / 科目', render: (_, row) => <Space direction="vertical" size={2}><Typography.Text strong>{row.exam}</Typography.Text><Typography.Text type="secondary">{[row.subject, row.template.name].filter(Boolean).join(' · ')}</Typography.Text></Space> },
-      { title: '评阅题目', width: 170, render: (_, row) => <Space direction="vertical" size={4}><Typography.Text>第 {row.question.number} 题 · {row.question.points} 分</Typography.Text><Tag>{row.question.review_mode === 'double' ? '双评' : '单评'}</Tag></Space> },
+      { title: '评阅题目', width: 170, render: (_, row) => <Space direction="vertical" size={4}><Typography.Text>第 {questionLabel(row.question)} 题 · {row.question.points} 分</Typography.Text><Tag>{row.question.review_mode === 'double' ? '双评' : '单评'}</Tag></Space> },
       { title: '我的进度', width: 190, render: (_, row) => <TaskProgress task={row} /> },
       { title: '操作', width: 150, render: (_, row) => <Button type="primary" onClick={() => onOpen(row.template.id, row.question.id)}>{workspace.records.some(r => r.template.id === row.template.id && r.question.id === row.question.id && r.status !== 'confirmed') ? '继续阅卷' : '进入阅卷'}</Button> },
     ]} />

@@ -3,6 +3,7 @@ import { Alert, App, Collapse, Empty, Form, Input, InputNumber, Modal, Select, S
 import { Table } from './DataTable'
 import { Button } from './Button'
 import { PlusOutlined, LeftOutlined, RightOutlined } from '@ant-design/icons'
+import {questionNumbers} from './mergeQuestions'
 import type { Question, Template } from './api'
 import { addObjective, applyAnswers, arrangeObjective, answerLetters, parseAnswer } from './objectiveLayout'
 
@@ -13,8 +14,8 @@ export function ObjectiveEditor({ value, page, readOnly, selected, onChange, onE
   const [batchForm] = Form.useForm(), [layoutForm] = Form.useForm(), keys = useRef<HTMLDivElement>(null), { message } = App.useApp()
   const current = rows[Math.min(index, rows.length - 1)]
   const active = rows.find(q=>q.id===selected)||rows[0]
-  const nextNumber = Math.max(0, ...value.questions.map(q => q.number)) + 1
-  const defaults = { columns: value.paper==='A3'&&value.sheet_columns===3?3:4, startPage: page }
+  const nextNumber = Math.max(0, ...value.questions.flatMap(questionNumbers)) + 1
+  const defaults = { columns: 0, order: 'row', startPage: page }
   function changeAnswer(q: Question, text: string) {
     try { const answer = parseAnswer(q, text); onChange(value.questions.map(item => item.id === q.id ? { ...item, answer } : item)) }
     catch (e) { message.warning((e as Error).message) }
@@ -25,9 +26,9 @@ export function ObjectiveEditor({ value, page, readOnly, selected, onChange, onE
     if (current.type === 'single') setIndex(i => Math.min(i + 1, rows.length - 1))
     keys.current?.focus()
   }
-  const layoutFields = <div className="editor-form-grid"><Form.Item name="columns" label="每栏客观题列数" rules={[{ required: true }]}><InputNumber min={1} max={10} /></Form.Item><Form.Item name="startPage" label="从哪一面开始" rules={[{ required: true }]}><Select options={Array.from({ length: value.sides }, (_, i) => ({ label: i === 0 ? '正面' : '背面', value: i + 1 }))} /></Form.Item></div>
+  const layoutFields = <div className="editor-form-grid"><Form.Item name="columns" label="每栏客观题列数" rules={[{ required: true }]}><Select options={[{label:'自动适配栏宽',value:0},...Array.from({length:10},(_,i)=>({label:(i+1)+' 列',value:i+1}))]} /></Form.Item><Form.Item name="order" label="题号顺序"><Select options={[{label:'从左到右，逐行排列',value:'row'},{label:'每组五行，逐列排列',value:'column'}]} /></Form.Item><Form.Item name="startPage" label="从哪一面开始" rules={[{ required: true }]}><Select options={Array.from({ length: value.sides }, (_, i) => ({ label: i === 0 ? '正面' : '背面', value: i + 1 }))} /></Form.Item></div>
   return <div className="editor-section">
-    <div className="section-actions"><Button type="primary" icon={<PlusOutlined />} disabled={readOnly} onClick={() => { batchForm.setFieldsValue({ ...defaults, numbers: `${nextNumber}-${nextNumber + 19}`, type: 'single', options: 4, points: 2 }); setBatchOpen(true) }}>批量添加</Button><Button disabled={!rows.length || readOnly} onClick={() => { setIndex(0); setPasted(''); setPasteError(''); setAnswerOpen(true) }}>集中录入答案</Button><Button disabled={!rows.length || readOnly} onClick={() => { layoutForm.setFieldsValue(defaults); setLayoutOpen(true) }}>重新排布</Button></div>
+    <div className="section-actions"><Button type="primary" icon={<PlusOutlined />} disabled={readOnly} onClick={() => { batchForm.setFieldsValue({ ...defaults, numbers: `${nextNumber}-${nextNumber + 19}`, type: 'single', options: 4, points: 2 }); setBatchOpen(true) }}>添加并排版</Button><Button disabled={!rows.length || readOnly} onClick={() => { setIndex(0); setPasted(''); setPasteError(''); setAnswerOpen(true) }}>集中录入答案</Button><Button disabled={!rows.length || readOnly} onClick={() => { layoutForm.setFieldsValue(defaults); setLayoutOpen(true) }}>重新排布</Button></div>
     {!!rows.length && <Text type="secondary">{rows.length} 题 · {rows.reduce((sum, q) => sum + q.points, 0)} 分 · 已录入 {rows.filter(q => q.answer.length).length} 题答案</Text>}
     {!!rows.length && <div className="objective-current"><Space wrap><Text strong>当前题目</Text><Select aria-label="选择题号" value={rows.find(q=>q.id===selected)?.id||rows[0].id} style={{width:130}} options={rows.map(q=>({label:`第${q.number}题`,value:q.id}))} onChange={onSelect}/><Text>答案：{active?.answer.join('')||'待设置'}</Text><InputNumber aria-label="当前题分值" min={0.01} precision={2} disabled={readOnly} value={active?.points} onChange={points=>{if(points!==null&&active)onChange(value.questions.map(q=>q.id===active.id?{...q,points}:q))}}/><Button onClick={()=>onEdit(active.id)}>详细设置</Button></Space><Typography.Paragraph type="secondary">在右侧图卡直接点选答案，逐题设置分值和多选给分方式。集中录入支持粘贴整组答案。</Typography.Paragraph></div>}
     <Collapse items={[{key:'questions',label:`题目明细（${rows.length}题）`,children:<Table rowKey="id" size="middle" dataSource={rows} pagination={{ defaultPageSize:50, showSizeChanger: true }} rowClassName={q => q.id === selected ? 'selected-question-row' : ''} scroll={{ x: 460 }} locale={{ emptyText: <Empty description="批量填写题号、题型和分值，自动生成答题区" /> }} columns={[

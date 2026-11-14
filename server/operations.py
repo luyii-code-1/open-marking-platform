@@ -158,7 +158,7 @@ def csv_cell(value):
 @router.get('/results/export')
 def export_results(group_id:str,room_tag_id:str|None=None,current=Depends(user)):
     rows=results(group_id,room_tag_id,current)
-    numbers=sorted({n for row in rows for n in row['scores']},key=lambda n:(len(n),n))
+    numbers=sorted({n for row in rows for n in row['scores']},key=lambda n:int(n.split('～')[0].split('、')[0]))
     output=io.StringIO(newline=''); writer=csv.writer(output)
     writer.writerow(['准考证号','姓名','班级','状态','总分','赋分']+[f'第{n}题' for n in numbers]+['年级','考场'])
     from .analysis import STATUS_NAMES

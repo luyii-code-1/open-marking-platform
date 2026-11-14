@@ -71,7 +71,7 @@ def draw(c,template):
     for index,line in enumerate(lines):text(left+2,60.5+index*leading,line,size)
     c.line(left*mm,(height-85.5)*mm,right*mm,(height-85.5)*mm)
     text(left+2,89,'填涂样例',6.5);text(left+20,89,'正确填涂',6)
-    box(right-8,86.7,4,2.3,1)
+    box(left+20+pdfmetrics.stringWidth('正确填涂',FONT,6)/mm+1.5,86.7,4,2.3,1)
     text(left+2,93.5,'错误填涂',6)
     for index in range(4):
         x=left+23+index*8;y=91
@@ -106,7 +106,7 @@ def draw_stacked(c,template,left,width,height):
     ax,ay=absent_position(template);box(ax-2,ay-1.5,4,3)
     c.setFont(FONT,6);c.drawCentredString(ax*mm,(height-92.5)*mm,'缺考标记')
     text(split+2,76,'填涂样例',7)
-    text(split+2,80.5,'正确填涂');box(right-7,78.5,4,2.3,1)
+    text(split+2,80.5,'正确填涂');box(split+2+pdfmetrics.stringWidth('正确填涂',FONT,6)/mm+1.5,78.5,4,2.3,1)
     text(split+2,84.8,'错误填涂')
     for index in range(4):
         x=split+2+index*5.4;y=88

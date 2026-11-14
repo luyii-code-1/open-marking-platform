@@ -4,9 +4,11 @@ import { SharedSession,sessionKey,type SessionLease } from './sharedSession'
 
 export type Row = Record<string, any> & { id: string }
 export type User = { id: string; username: string; name: string; role: string }
-export type Region = { page: number; x: number; y: number; width: number; height: number }
-export type Question = { id: string; number: number; type: 'single' | 'multiple' | 'subjective'; options: number; answer: string[]; points: number; step?:number; regions: Region[]; rule: Record<string, unknown>; review_mode: 'single' | 'double'; threshold: number; choice_style?: 'bracket' | 'compact'; style?:string; lines?:number; cell_size?:number; content_html?:string; image_asset_id?:string; image_height?:number }
-export type Template = { id: string; group_id: string; name: string; subtitle?:string; background_assets?:Record<string,string>; paper: 'A3' | 'A4'; sheet_columns?:number; layout_version?:number; notice_template?:'standard-v1'|'none'; notice_layout?:number; print_style?:'standard-v2'; forbidden_regions?:Region[]; sides: number; candidate_length: number; revision: number; draft_version?:number; status?: string; questions: Question[] }
+export type Region = { page: number; x: number; y: number; width: number; height: number; part_number?:number }
+export type PrintNote = Region & { id:string; html:string }
+export type QuestionPart = Pick<Question,'number'|'points'|'style'|'lines'|'cell_size'|'content_html'|'image_asset_id'|'image_height'>
+export type Question = { id: string; number: number; parts?:QuestionPart[]; type: 'single' | 'multiple' | 'subjective'; options: number; answer: string[]; points: number; step?:number; regions: Region[]; rule: Record<string, unknown>; review_mode: 'single' | 'double'; threshold: number; choice_group?:string; choice_style?: 'bracket' | 'compact'; style?:string; lines?:number; cell_size?:number; content_html?:string; image_asset_id?:string; image_height?:number }
+export type Template = { id: string; group_id: string; name: string; subtitle?:string; background_assets?:Record<string,string>; paper: 'A3' | 'A4'; sheet_columns?:number; layout_version?:number; notice_template?:'standard-v1'|'none'; notice_layout?:number; print_style?:'standard-v2'; column_frame?:boolean; uniform_subjective?:boolean; print_notes?:PrintNote[]; forbidden_regions?:Region[]; sides: number; candidate_length: number; revision: number; draft_version?:number; status?: string; questions: Question[] }
 const session=new SharedSession(localStorage,sessionStorage)
 window.addEventListener('storage',event=>{if(event.key===sessionKey||event.key===null)session.refresh()})
 export function setToken(value:string,lease?:SessionLease){if(value)session.login(value,lease);else session.clear()}

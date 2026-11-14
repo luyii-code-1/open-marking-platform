@@ -1,4 +1,5 @@
 from .paper_fonts import FONT
+import re
 from html import escape
 from html.parser import HTMLParser
 from reportlab.lib.styles import ParagraphStyle
@@ -24,15 +25,21 @@ class Parser(HTMLParser):
         if not self.blocked:self.stack[-1][2].append(data)
 
 
-def inline(node):
-    if isinstance(node,str):return escape(node)
+def inline(node,underlined=False):
+    if isinstance(node,str):
+        if underlined:
+            node=re.sub(r'[ \t]+',lambda m:'\xa0'*len(m[0]),node)
+        return re.sub(r'_(?:[ \t\xa0]*_)+',lambda m:'<u>'+'&#160;'*(2*len(m[0]))+'</u>',escape(node))
     tag,attrs,children=node
-    content=''.join(inline(child) for child in children)
+    style=attrs.get('style','').lower()
+    underline=tag=='u' or ('text-decoration' in style and 'underline' in style)
+    content=''.join(inline(child,underlined or underline) for child in children)
     if tag=='br':return '<br/>'
     if tag in ('b','strong'):content='<b>'+content+'</b>'
     if tag in ('i','em'):content='<i>'+content+'</i>'
     if tag in ('u','sup','sub'):content=f'<{tag}>'+content+f'</{tag}>'
-    style=attrs.get('style','').lower()
+    if re.search(r'vertical-align:\s*super',style):content='<sup>'+content+'</sup>'
+    if re.search(r'vertical-align:\s*sub',style):content='<sub>'+content+'</sub>'
     if 'font-weight' in style and any(v in style for v in ('bold','700','800')):content='<b>'+content+'</b>'
     if 'font-style' in style and 'italic' in style:content='<i>'+content+'</i>'
     if 'text-decoration' in style and 'underline' in style:content='<u>'+content+'</u>'
@@ -45,7 +52,7 @@ def flowables(html,width):
     style=ParagraphStyle('answer',fontName=FONT,fontSize=9,leading=13,wordWrap='CJK')
     def paragraph(content):return Paragraph(content or ' ',style)
     def visit(node):
-        if isinstance(node,str):return [paragraph(escape(node))] if node.strip() else []
+        if isinstance(node,str):return [paragraph(inline(node))] if node.strip() else []
         tag,attrs,children=node
         if tag=='table':
             rows=[]

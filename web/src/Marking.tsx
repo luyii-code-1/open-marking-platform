@@ -1,3 +1,4 @@
+import {questionLabel} from './mergeQuestions'
 import {ReviewImage} from './ReviewImage'
 import {loadReviewSheet} from './reviewImages'
 import { ArrowLeftOutlined, ArrowRightOutlined, HistoryOutlined, SettingOutlined, BarChartOutlined, ReloadOutlined, ZoomInOutlined, ZoomOutOutlined } from '@ant-design/icons'
@@ -128,7 +129,7 @@ export function Marking({ admin, groupId, initialTemplateId, initialQuestionId, 
     <header className="marking-toolbar">
       <div className="marking-selectors" hidden={!!onExit}>
         <Select aria-label="考试科目与题卡" className="marking-template-select" showSearch optionFilterProp="label" placeholder="选择考试 / 科目 / 年级 / 题卡" value={templateId||undefined} options={templates.data.map(t=>({label:groupId?t.name:`${projects.data.find(p=>p.id===subjects.data.find(s=>s.id===groups.data.find(g=>g.id===t.group_id)?.subject_id)?.project_id)?.name||''} / ${subjects.data.find(s=>s.id===groups.data.find(g=>g.id===t.group_id)?.subject_id)?.name||''} / ${groups.data.find(g=>g.id===t.group_id)?.grade_name||'待设置年级'} / ${groups.data.find(g=>g.id===t.group_id)?.name||''} / ${t.name}`,value:t.id}))} disabled={locked||workspace.offline} onChange={id=>{setTemplateId(id);setQuestionId('');setTask(null);setValue(null)}} />
-        <Select aria-label="评阅题目" className="marking-question-select" placeholder="选择主观题" value={questionId||undefined} options={template?.questions.filter(q=>q.type==='subjective').map(q=>({label:`第 ${q.number} 题 · ${q.points} 分`,value:q.id}))} disabled={locked||workspace.offline} onChange={id=>{setQuestionId(id);setTask(null);setValue(null)}} />
+        <Select aria-label="评阅题目" className="marking-question-select" placeholder="选择主观题" value={questionId||undefined} options={template?.questions.filter(q=>q.type==='subjective').map(q=>({label:`第 ${questionLabel(q)} 题 · ${q.points} 分`,value:q.id}))} disabled={locked||workspace.offline} onChange={id=>{setQuestionId(id);setTask(null);setValue(null)}} />
         <Button type="primary" disabled={!question||workspace.offline||workspace.updateLocked||!workspace.ready||busy||record?.status==='draft'||record?.status==='queued'||record?.status==='conflict'} loading={action.pending==='claim'} onClick={next}>{task?'领取下一份':'进入阅卷'}</Button>
       </div>
       <Space size={4} wrap>
@@ -141,11 +142,11 @@ export function Marking({ admin, groupId, initialTemplateId, initialQuestionId, 
       <ErrorNotice error={error||workspace.storageError||(workspace.offline?'':templates.error||assignments.error)} />
       {workspace.offline&&<Alert type="info" showIcon message="离线评阅：评分保存在本机，恢复连接后上传。"/>}
     </div>
-    <div className="marking-context"><span title={origin}>{origin||'请选择阅卷任务'}{question&&` / 第 ${question.number} 题`}{task?.grade_name&&` · ${task.grade_name}`}{task?.room_tags?.length?` · ${task.room_tags.map((t:Row)=>t.label||t.name).join('、')}`:''}</span>{record&&<Tag color={record.status==='conflict'?'orange':record.status==='confirmed'?'green':'blue'} role="status">{record.status==='queued'?'已暂存 · 等待上传':record.status==='confirmed'?'服务器已确认':record.status==='conflict'?'评分待核对':saveState}</Tag>}</div>
+    <div className="marking-context"><span title={origin}>{origin||'请选择阅卷任务'}{question&&` / 第 ${questionLabel(question)} 题`}{task?.grade_name&&` · ${task.grade_name}`}{task?.room_tags?.length?` · ${task.room_tags.map((t:Row)=>t.label||t.name).join('、')}`:''}</span>{record&&<Tag color={record.status==='conflict'?'orange':record.status==='confirmed'?'green':'blue'} role="status">{record.status==='queued'?'已暂存 · 等待上传':record.status==='confirmed'?'服务器已确认':record.status==='conflict'?'评分待核对':saveState}</Tag>}</div>
     {record?.error&&<Alert type="warning" message={record.error} showIcon/>}
     {task&&question?<main className="marking-layout">
       <section className="marking-image-panel" aria-label="作答图像区">
-        <div className="marking-image-toolbar"><strong>第 {question.number} 题</strong><Space size={4}>
+        <div className="marking-image-toolbar"><strong>第 {questionLabel(question)} 题</strong><Space size={4}>
           <Button type="text" aria-label="缩小作答" icon={<ZoomOutOutlined/>} onClick={()=>{setZoom(z=>Math.max(.5,z-.25));refocusScore()}}/>
           <Button type="text" title="适应窗口" onClick={()=>{setZoom(1);setPan({x:0,y:0});refocusScore()}}>{Math.round(zoom*100)}%</Button>
           <Button type="text" aria-label="放大作答" icon={<ZoomInOutlined/>} onClick={()=>{setZoom(z=>Math.min(4,z+.25));refocusScore()}}/>

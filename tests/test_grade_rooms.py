@@ -195,7 +195,9 @@ def test_scan_close_publication_and_absent_mark_remain_distinct(school):
 
 def test_official_layout_and_scoring_impact(school):
     f=school;r=f['request'];g=f['groups'][0];t=f['templates'][0];base='groups/'+g['id']
-    r('POST','templates',{'group_id':g['id'],'name':'第二版式','paper':'A4','sides':1},409)
+    draft=r('POST','templates',{'group_id':g['id'],'name':'第二版式','paper':'A4','sides':1})
+    assert draft['status']=='draft'
+    r('POST','templates/'+draft['id']+'/publish',{},409)
     f['pair'](f['students'][0])
     close_scanning(f['client'],g['id'],f['headers'])
     r('POST','results/publish',{'group_id':g['id'],'force_unscanned':True,'reason':'核对后发布'})
