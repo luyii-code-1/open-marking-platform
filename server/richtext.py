@@ -1,3 +1,4 @@
+from reportlab.pdfgen.canvas import Canvas
 from .paper_fonts import FONT
 import re
 from html import escape
@@ -28,9 +29,19 @@ class Parser(HTMLParser):
         if not self.blocked:self.stack[-1][2].append(data)
 
 
-# ReportLab treats inline images as indivisible layout items. The ink is a
-# local one-pixel swatch stretched to the specified physical dimensions.
+# Reserve an indivisible inline box. PaperCanvas paints its ink as a vector.
 _RULE_PIXEL=ImageReader(Image.new('RGB',(1,1),'black'))
+
+
+class PaperCanvas(Canvas):
+    def drawImage(self, image, x, y, width=None, height=None, **kwargs):
+        if image is not _RULE_PIXEL:
+            return super().drawImage(image, x, y, width, height, **kwargs)
+        self.saveState()
+        self.setFillGray(0)
+        self.rect(x, y, width, height, stroke=0, fill=1)
+        self.restoreState()
+        return width, height
 
 
 def rule_markup(length,width):
@@ -83,8 +94,9 @@ def flowables(html,width,font_size=9,leading=13):
     if len(html)>100000:raise ValueError('单题富文本过长')
     parser=Parser();parser.feed(html)
     style=ParagraphStyle('answer',fontName=FONT,fontSize=font_size,leading=leading,wordWrap='CJK')
-    def paragraph(content):
-        result=AnswerParagraph(content or ' ',style)
+    def paragraph(content,line_height=None):
+        line_style=style if line_height is None else ParagraphStyle('row',parent=style,leading=line_height)
+        result=AnswerParagraph(content or ' ',line_style)
         for i,frag in enumerate(result.frags):
             cb=getattr(frag,'cbDefn',None)
             if cb and getattr(cb,'name',None)=='answerLine':
@@ -98,9 +110,14 @@ def flowables(html,width,font_size=9,leading=13):
                 # For image fragments it uses the declared width and draws only the image.
                 frag.text='\ufffc'
         return result
-    def visit(node):
+    def visit(node,width=width):
         if isinstance(node,str):return [paragraph(inline(node,width))] if node.strip() else []
         tag,attrs,children=node
+        if tag in ('div','p') and 'data-line-leading' in attrs:
+            height=float(attrs['data-line-leading'])
+            if not font_size<=height<=72:raise ValueError('单行行距须介于字号与 72 磅之间')
+            line=paragraph(inline(node,width),height)
+            return [line,Spacer(1,3)] if tag=='p' else [line]
         if tag=='table':
             rows=[]
             def collect(n):
@@ -112,7 +129,12 @@ def flowables(html,width,font_size=9,leading=13):
             if not rows:return []
             columns=max(map(len,rows))
             if columns>30 or len(rows)>100:raise ValueError('表格过大')
-            cells=[[paragraph(inline(cell,max(1,width/columns-8))) for cell in row]+['']*(columns-len(row)) for row in rows]
+            cell_width=max(1,width/columns-8)
+            def cell_content(cell):
+                if any(not isinstance(child,str) and child[0] in ('div','p') for child in cell[2]):
+                    return visit(['root',{},cell[2]],cell_width)
+                return paragraph(inline(cell,cell_width))
+            cells=[[cell_content(cell) for cell in row]+['']*(columns-len(row)) for row in rows]
             table=Table(cells,colWidths=[width/columns]*columns)
             table.setStyle(TableStyle([('GRID',(0,0),(-1,-1),.4,'#555555'),('VALIGN',(0,0),(-1,-1),'TOP'),('LEFTPADDING',(0,0),(-1,-1),4),('RIGHTPADDING',(0,0),(-1,-1),4)]))
             return [table,Spacer(1,3)]
@@ -127,7 +149,7 @@ def flowables(html,width,font_size=9,leading=13):
                         content=''.join(run)
                         if content.strip():result.append(paragraph(content))
                         run=[]
-                    result.extend(visit(child))
+                    result.extend(visit(child,width))
                 else:run.append(inline(child,width))
             if run and ''.join(run).strip():result.append(paragraph(''.join(run)))
             return result

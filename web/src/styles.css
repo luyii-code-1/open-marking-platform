@@ -113,3 +113,6 @@
 .paper-text-editor p{margin:0 0 3pt}
 .paper-text-editor table{table-layout:fixed}
 .paper-text-editor td,.paper-text-editor th{padding:0 4pt}
+
+.paper-text-editor .rich-editor [data-line-leading]{position:relative}
+.paper-text-editor .rich-editor [data-line-leading]::after{content:'';position:absolute;inset:auto 0 0;border-bottom:1px dashed #abb8c8;pointer-events:none}

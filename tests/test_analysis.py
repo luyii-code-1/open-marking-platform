@@ -54,6 +54,13 @@ def test_analysis_statistics_rank_scope_conversion_and_exports(tmp_path,monkeypa
         with db.connect() as connection:
             group=db.get(connection,groups[0]['id']);group['frozen']=True;db.put(connection,'groups',group)
         visible=client.get(path,params=params,headers=teacher_headers).json()
+        endpoint=f"/api/v1/analysis/groups/{groups[0]['id']}/questions/"
+        details=client.get(endpoint+data['questions'][0]['id'],headers=teacher_headers).json()
+        assert len(details['rows'])==3 and details['respondents']==3
+        assert details['counts']['A']==2 and details['blank']==1
+        subjective=client.get(endpoint+data['questions'][1]['id'],headers=admin).json()
+        hidden=next(row for row in subjective['rows'] if row['class_name']=='二班')
+        assert client.get(hidden['image_url'],headers=teacher_headers).status_code==403
         assert visible['rank_scope']=='assigned_classes' and len(visible['students'])==3
         assert [r['scope_rank'] for r in visible['students']]==[1,3,1]
         assert visible['summary']['average']==8 and len(visible['classes'])==1

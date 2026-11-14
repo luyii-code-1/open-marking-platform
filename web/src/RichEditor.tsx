@@ -32,7 +32,11 @@ export function cleanHtml(value:string){
       ['text-decoration',/underline/.test(style.textDecoration+' '+style.textDecorationLine)?'underline':''],
       ['vertical-align',['super','sub'].includes(style.verticalAlign)?style.verticalAlign:''],
     ]
+    const leading=Number(element.getAttribute('data-line-leading'))
     for(const attr of Array.from(element.attributes))element.removeAttribute(attr.name)
+    if(['P','DIV'].includes(element.tagName)&&leading>=6&&leading<=72){
+      element.setAttribute('data-line-leading',String(leading));style.lineHeight=leading+'pt'
+    }
     for(const [key,css] of retained)if(css)(element as HTMLElement).style.setProperty(key,css)
   }
   const walker=doc.createTreeWalker(doc.body,NodeFilter.SHOW_TEXT)
@@ -142,6 +146,46 @@ export function RichEditor({value,onChange,readOnly=false,toolbarHost,autoFocus=
     element.append(range.extractContents());range.insertNode(element)
     range.selectNodeContents(element);select(range)
   }
+  function setLineHeight(points:string){
+    const range=rangeForEdit(),root=editor.current,sel=window.getSelection()
+    if(!range||!root||!sel)return
+    range.collapse(true)
+    sel.removeAllRanges();sel.addRange(range)
+    const anchor=range.startContainer
+    const block=(anchor.nodeType===1?anchor as Element:anchor.parentElement)?.closest<HTMLElement>('p,div,li,td,th')
+    if(!block||!root.contains(block))return
+    // Use the displayed line boundaries, including soft wraps inside Word paragraphs.
+    sel.modify('move','backward','lineboundary')
+    sel.modify('extend','forward','lineboundary')
+    const lineRange=sel.getRangeAt(0).cloneRange()
+    if(!block.contains(lineRange.commonAncestorContainer))return
+    const before=document.createRange(),after=document.createRange()
+    before.selectNodeContents(block);before.setEnd(lineRange.startContainer,lineRange.startOffset)
+    after.selectNodeContents(block);after.setStart(lineRange.endContainer,lineRange.endOffset)
+    const prefix=before.cloneContents(),suffix=after.cloneContents()
+    const line=document.createElement('div')
+    line.append(lineRange.cloneContents())
+    if(!line.hasChildNodes())line.append(document.createElement('br'))
+    if(points){line.dataset.lineLeading=points;line.style.lineHeight=points+'pt'}
+    const fragment=document.createDocumentFragment()
+    function appendSide(content:DocumentFragment,first:boolean){
+      const edge=first?content.lastChild:content.firstChild
+      if(edge instanceof HTMLBRElement)edge.remove()
+      if(!content.textContent&&!content.querySelector('br,table,[data-answer-line]'))return
+      if(block===root||['TD','TH','LI'].includes(block!.tagName)){
+        const wrapper=document.createElement('div')
+        if(content.querySelector('div,p,table'))fragment.append(content)
+        else {wrapper.append(content);fragment.append(wrapper)}
+      }else{
+        const wrapper=block!.cloneNode(false) as HTMLElement
+        wrapper.append(content);fragment.append(wrapper)
+      }
+    }
+    appendSide(prefix,true);fragment.append(line);appendSide(suffix,false)
+    if(block===root||['TD','TH','LI'].includes(block.tagName))block.replaceChildren(fragment)
+    else block.replaceWith(fragment)
+    range.selectNodeContents(line);range.collapse(false);select(range)
+  }
   function pastePlain(text:string){
     const wrapper=document.createElement('div')
     for(const line of text.split(/\r?\n/)){const p=document.createElement('p');p.textContent=line;if(!line)p.append(document.createElement('br'));wrapper.append(p)}
@@ -149,6 +193,10 @@ export function RichEditor({value,onChange,readOnly=false,toolbarHost,autoFocus=
   }
   const toolbar=<Space size={4} wrap className="rich-tools">
     {[{tag:'strong',label:'粗体',icon:<BoldOutlined/>},{tag:'em',label:'斜体',icon:<ItalicOutlined/>},{tag:'u',label:'下划线',icon:<UnderlineOutlined/>},{tag:'sup',label:'上标'},{tag:'sub',label:'下标'}].map(({tag,label,icon})=><Button size="small" key={tag} icon={icon} aria-label={label} title={label} disabled={readOnly} onMouseDown={e=>e.preventDefault()} onClick={()=>format(tag)}>{!icon&&label}</Button>)}
+    <label>当前行距 <select aria-label="当前行距" value="" disabled={readOnly} onChange={e=>setLineHeight(e.target.value==='inherit'?'':e.target.value)}>
+      <option value="" disabled>设置</option><option value="inherit">跟随整卡</option>
+      {[...new Set([parseFloat(String(textStyle?.fontSize??9)),13,16,18,20,22,24,28,32,36,42,48,60,72])].filter(n=>n>=parseFloat(String(textStyle?.fontSize??9))).sort((a,b)=>a-b).map(n=><option key={n} value={n}>{n} 磅</option>)}
+    </select></label>
     <select aria-label="答题线长度" value={length} disabled={readOnly} onChange={e=>setLength(Number(e.target.value))}>{[15,30,45,60].map(n=><option key={n} value={n}>{n} mm</option>)}</select>
     <Button size="small" disabled={readOnly} onMouseDown={e=>e.preventDefault()} onClick={()=>insert(answerLine(document,length).outerHTML)}>插入答题线</Button>
     <Button size="small" disabled={readOnly} onMouseDown={e=>e.preventDefault()} onClick={()=>insert(answerLine(document,'end').outerHTML)}>铺到行末</Button>

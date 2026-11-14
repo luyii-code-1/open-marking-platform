@@ -1,7 +1,6 @@
 import io
 import math
 import numpy as np
-from reportlab.pdfgen import canvas
 from reportlab.lib.units import mm
 from reportlab.graphics.barcode import qr
 from reportlab.graphics.shapes import Drawing
@@ -10,7 +9,7 @@ from reportlab.pdfbase import pdfmetrics
 from .paper_fonts import FONT
 from reportlab.lib.utils import ImageReader
 from . import db as database
-from .richtext import layout as rich_layout
+from .richtext import PaperCanvas,layout as rich_layout
 from . import sheet_notices, sheet_style
 
 from .omr import ABSENT_X, ABSENT_Y, dimensions, code, bubbles, decode, align, manual_align, absent_mark, recognize, manual_binding, panels, absent_position
@@ -148,7 +147,7 @@ def pdf(template):
     text_options = text_layout_options(template)
     output=io.BytesIO()
     w,h=dimensions(template)
-    c=canvas.Canvas(output,pagesize=(w*mm,h*mm))
+    c=PaperCanvas(output,pagesize=(w*mm,h*mm))
     for page in range(1,template['sides']+1):
         side='front' if page==1 else 'back'
         background_id=template.get('background_assets',{}).get(str(page)) or (template.get('background_asset_id') if page==1 else None)

@@ -150,3 +150,62 @@ def export_project(project_id:str,current=Depends(user)):
             row.append('、'.join(t.get('label',t['name']) for t in score.get('room_tags',[])))
         rows.append(row+[student.get('grade')])
     return csv_response(headers+['学生年级'],rows,'project-results')
+
+
+def detail_question(db,group_id,question_id):
+    group=require(db,group_id,'groups')
+    template=require(db,group.get('template_id'),'templates')
+    q=next((q for q in template['questions'] if q['id']==question_id),None)
+    if q is None:raise HTTPException(404,'题目不存在')
+    return q
+
+
+@router.get('/analysis/groups/{group_id}/questions/{question_id}')
+def answer_details(group_id:str,question_id:str,room_tag_id:str|None=None,include_absent:bool=False,current=Depends(user)):
+    from .room_tags import includes
+    with connect() as db:
+        db.execute('BEGIN')
+        rows=results_for(db,group_id,current,convert_scores=False)
+        q=detail_question(db,group_id,question_id)
+        subs={s['student_id']:s for s in find(db,'submissions',group_id=group_id)}
+        label=question_label(q)
+        objective=q['type']!='subjective'
+        counts={k:0 for k in 'ABCDE'[:q.get('options',4)]} if objective else {}
+        rows_out=[];respondents=0;blank=0
+        versions={}
+        for r in rows:
+            if not includes(r,room_tag_id) or (r['status']=='absent' and not include_absent):continue
+            sub=subs.get(r['student_id'])
+            item={k:r[k] for k in ('student_id','candidate_number','name','class_name','status')}
+            item['score']=r['scores'].get(label)
+            if sub and r['status']!='absent':
+                tid=sub['template_id']
+                if tid not in versions:
+                    versions[tid]={question_label(v):v for v in require(db,tid,'templates')['questions']}
+                actual=versions[tid].get(label)
+                if actual and actual['type']==q['type']:
+                    if objective:
+                        qid=actual['id'];selected=sub.get('objective_overrides',{}).get(qid)
+                        if selected is None:
+                            selected={a for pid in sub['pages'] for a in require(db,pid,'pages').get('selections',{}).get(qid,[])}
+                        item.update(selected=sorted(set(selected)),answer=actual.get('answer',[]))
+                        respondents+=1
+                        if not selected:blank+=1
+                        for a in set(selected):counts[a]=counts.get(a,0)+1
+                    else:item['image_url']=f"/api/v1/analysis/groups/{group_id}/answers/{sub['id']}/{actual['id']}/image"
+            rows_out.append(item)
+        return {'rows':rows_out,'counts':counts,'respondents':respondents,'blank':blank,'answer':q.get('answer',[])}
+
+
+@router.get('/analysis/groups/{group_id}/answers/{submission_id}/{question_id}/image')
+def detail_image(group_id:str,submission_id:str,question_id:str,current=Depends(user)):
+    from .review import render_answer_image
+    with connect() as db:
+        db.execute('BEGIN')
+        sub=require(db,submission_id,'submissions')
+        if sub['group_id']!=group_id or not any(r['student_id']==sub['student_id'] for r in results_for(db,group_id,current,convert_scores=False)):
+            raise HTTPException(403,'无权查看该答卷')
+        q=next((v for v in require(db,sub['template_id'],'templates')['questions'] if v['id']==question_id and v['type']=='subjective'),None)
+        if not q:raise HTTPException(404,'主观题不存在')
+        answer=get(db,sub.get('answer_slice_ids',{}).get(question_id),'answer-slices')
+    return render_answer_image(sub,q,answer)

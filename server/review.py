@@ -260,6 +260,10 @@ def image(identifier:str,current=Depends(user)):
         submission=require(db,task['submission_id'],'submissions')
         _,question=question_for(db,task['template_id'],task['question_id'])
         answer=get(db,task.get('answer_slice_id'),'answer-slices')
+    return render_answer_image(submission,question,answer)
+
+
+def render_answer_image(submission,question,answer):
     override=submission.get('region_overrides',{}).get(question['id'],{})
     if answer:override={'asset_id':answer.get('asset_id')}
     if override.get('asset_id'):

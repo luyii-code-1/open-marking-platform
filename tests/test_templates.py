@@ -47,7 +47,7 @@ def test_pdf_preview_matches_published_print_pixels_without_persisting_draft(tmp
             assert preview.status_code==200,preview.text
             assert preview.headers['content-type']=='image/png' and preview.headers['cache-control']=='private, no-store'
             prefix=tmp_path/f'print-{page}'
-            subprocess.run([renderer,'-r','110','-f',str(page),'-l',str(page),'-singlefile','-png',str(source),str(prefix)],capture_output=True,check=True)
+            subprocess.run([renderer,'-r','220','-f',str(page),'-l',str(page),'-singlefile','-png',str(source),str(prefix)],capture_output=True,check=True)
             with Image.open(io.BytesIO(preview.content)) as actual,Image.open(prefix.with_suffix('.png')) as expected:
                 assert actual.size==expected.size
                 assert ImageChops.difference(actual.convert('RGB'),expected.convert('RGB')).getbbox() is None

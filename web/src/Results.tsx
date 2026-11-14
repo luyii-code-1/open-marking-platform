@@ -1,3 +1,4 @@
+import {AnswerDetails} from './AnswerDetails'
 import {CardWorkflow} from './CardWorkflow'
 import { RoomTagBadges, RoomTagPicker } from './RoomTags'
 import { useState } from 'react'
@@ -16,6 +17,7 @@ const measures=[['analyzed','统计人数'],['average','平均分'],['median','�
 export function Results({admin,groupId,projectId,projectOnly=false}:{admin:boolean;groupId?:string;projectId?:string;projectOnly?:boolean}) {
   const groups=useResource<Row[]>('/groups',[]),projects=useResource<Row[]>('/projects',[]),subjects=useResource<Row[]>('/subjects',[])
   const [selectedGroupId,setGroup]=useState(groupId || ''),group=groupId || selectedGroupId,[selectedProject,setProject]=useState(projectId || ''),project=projectId || selectedProject,[metric,setMetric]=useState('raw'),[includeAbsent,setIncludeAbsent]=useState(false),[pass,setPass]=useState(60),[excellent,setExcellent]=useState(85),[cutoffs,setCutoffs]=useState({pass:60,excellent:85}),[view,setView]=useState('classes'),{message}=App.useApp()
+  const [detail,setDetail]=useState<{group:string;q:Row}|null>(null)
   const [roomTag,setRoomTag]=useState<string|undefined>()
   const query=new URLSearchParams({group_id:group,metric,include_absent:String(includeAbsent),pass_ratio:String(cutoffs.pass/100),excellent_ratio:String(cutoffs.excellent/100),...roomTag?{room_tag_id:roomTag}:{}})
   const resource=useResource<any>(group?`/analysis/group?${query}`:null,null),crossResource=useResource<any>(project?`/analysis/project?project_id=${project}`:null,null)
@@ -33,7 +35,7 @@ export function Results({admin,groupId,projectId,projectOnly=false}:{admin:boole
       <Alert type="info" message={`${metric==='raw'?'原始分':'赋分'}满分 ${data.full_score} · ${includeAbsent?'缺考按0分计入':'缺考单列'} · 未扫描及未结总分不计入总分均值和排名 · ${data.rank_scope==='group'?'题卡内排名':'仅在任教班级范围内排名'}`} description="单题分析按该题已评作答统计，可能包含尚未完成整卷的考生。相同分数并列，后续名次跳号。"/>
       <Card loading={resource.loading}><Tabs activeKey={view} onChange={setView} items={[
         {key:'classes',label:'班级统计',children:<Table rowKey="id" scroll={{x:'max-content'}} dataSource={data.classes} columns={[{title:'班级',dataIndex:'name'},{title:'记录人数',dataIndex:'records'},{title:'缺考',dataIndex:'absent'},{title:'待结分',dataIndex:'pending'},{title:'未扫描',dataIndex:'unscanned'},...measures]}/>},
-        {key:'questions',label:'单题分析',children:<Table rowKey="id" scroll={{x:'max-content'}} dataSource={data.questions} columns={[{title:'题号',dataIndex:'number'},{title:'题型',dataIndex:'type',render:value=>value==='subjective'?'主观题':'客观题'},{title:'满分',dataIndex:'points'},...measures]}/>},
+        {key:'questions',label:'单题分析',children:<Table rowKey="id" scroll={{x:'max-content'}} dataSource={data.questions} columns={[{title:'题号',dataIndex:'number',render:(n,r)=><Button type="link" title="查看答题详情" onClick={()=>setDetail({group,q:r})}>第 {n} 题</Button>},{title:'题型',dataIndex:'type',render:value=>value==='subjective'?'主观题':'客观题'},{title:'满分',dataIndex:'points'},...measures]}/>},
         {key:'distribution',label:'分数分布',children:<Space direction="vertical" style={{width:'100%'}}>{data.distribution.map((bin:any,i:number)=><div key={i}><Typography.Text>{bin.lower} ≤ 分数 {bin.upper_inclusive?'≤':'<'} {bin.upper} · {bin.count} 人</Typography.Text><Progress percent={100*bin.count/Math.max(1,...data.distribution.map((b:any)=>b.count))} showInfo={false}/></div>)}</Space>},
         {key:'students',label:'考生成绩与排名',children:<Table rowKey="student_id" scroll={{x:'max-content'}} dataSource={data.students} columns={[{title:'考号',dataIndex:'candidate_number'},{title:'姓名',dataIndex:'name'},{title:'考场',render:(_:unknown,row:Row)=><RoomTagBadges tags={row.room_tags}/>},{title:'年级',dataIndex:'grade'},{title:'班级',dataIndex:'class_name'},{title:'原始分',dataIndex:'total',render:number,sorter:(a,b)=>numeric(a,b,'total')},{title:'赋分',dataIndex:'converted_score',render:number},{title:'可见范围排名',dataIndex:'scope_rank',render:number},{title:'班级排名',dataIndex:'class_rank',render:number},{title:'状态',dataIndex:'status',render:value=><Tag>{statusName[value]||value}</Tag>}]}/>},
       ]}/></Card></>:<Card loading={resource.loading}><Empty description="选择题卡查看成绩分析"/></Card>}
@@ -51,5 +53,5 @@ export function Results({admin,groupId,projectId,projectOnly=false}:{admin:boole
       return {key:col.id,title,children:[raw,{key:col.id+'-converted',title:'赋分',render:(_:unknown,row:any)=>number(row.scores[col.id]?.converted)}]}
     }),{title:'已记录原始分合计',dataIndex:'recorded_raw_sum',render:number},{title:'已记录采用分合计',dataIndex:'recorded_effective_sum',render:number}]}/></Card>:<Card loading={crossResource.loading}><Empty description="选择考试查看跨科汇总"/></Card>}
   </Space>
-  return <><Space direction="vertical" style={{width:'100%'}}>{(groups.error||projects.error||subjects.error)&&<Alert type="error" message={groups.error||projects.error||subjects.error}/>}{groupId ? groupView : projectOnly ? projectView : <Tabs items={[{key:'group',label:'科目与班级分析',children:groupView},{key:'project',label:'跨科汇总',children:projectView}]}/>}</Space></>
+  return <>{detail?.group===group&&detail&&<AnswerDetails key={[group,detail.q.id,roomTag,includeAbsent].join(':')} group={group} q={detail.q} room={roomTag} absent={includeAbsent} onClose={()=>setDetail(null)}/>}<Space direction="vertical" style={{width:'100%'}}>{(groups.error||projects.error||subjects.error)&&<Alert type="error" message={groups.error||projects.error||subjects.error}/>}{groupId ? groupView : projectOnly ? projectView : <Tabs items={[{key:'group',label:'科目与班级分析',children:groupView},{key:'project',label:'跨科汇总',children:projectView}]}/>}</Space></>
 }

@@ -179,7 +179,7 @@ def preview_template(body:dict,page:int=1,current=Depends(admin)):
             try:source.write_bytes(paper.pdf(template))
             except (ValueError,TypeError,KeyError,OverflowError) as error:raise HTTPException(422,str(error))
             try:
-                rendered=subprocess.run([renderer,'-r','110','-f',str(page),'-l',str(page),'-singlefile','-png',str(source),str(root/'preview')],capture_output=True,timeout=15,creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess,'CREATE_NO_WINDOW') else 0)
+                rendered=subprocess.run([renderer,'-r','220','-f',str(page),'-l',str(page),'-singlefile','-png',str(source),str(root/'preview')],capture_output=True,timeout=15,creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess,'CREATE_NO_WINDOW') else 0)
             except subprocess.TimeoutExpired:raise HTTPException(503,'PDF预览生成超时，请稍后更新')
             if rendered.returncode or not (root/'preview.png').exists():raise HTTPException(503,'PDF预览生成失败，请检查服务器的PDF渲染工具')
             return Response((root/'preview.png').read_bytes(),media_type='image/png',headers={'Cache-Control':'private, no-store'})
