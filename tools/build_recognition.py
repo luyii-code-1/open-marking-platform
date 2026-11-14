@@ -18,7 +18,7 @@ def build(destination):
         stage=Path(temporary)
         subprocess.run([sys.executable,'-m','PyInstaller','--noconfirm','--onedir','--noupx',
                         '--name','OMP.RecognitionWorker','--distpath',str(stage/'dist'),'--workpath',str(stage/'work'),
-                        '--specpath',str(stage),'--paths',str(ROOT),'--exclude-module','tkinter','--exclude-module','pytest',
+                        '--specpath',str(stage),'--add-data',str(ROOT/'server/fonts')+os.pathsep+'server/fonts','--paths',str(ROOT),'--exclude-module','tkinter','--exclude-module','pytest',
                         str(ROOT/'scanner_engine/main.py')],cwd=ROOT,env={**os.environ,'PYTHONPATH':str(ROOT),'PYTHONNOUSERSITE':'1'},check=True)
         built=stage/'dist/OMP.RecognitionWorker'
         if not (built/'OMP.RecognitionWorker.exe').is_file():raise RuntimeError('识读引擎未生成Windows可执行文件')
