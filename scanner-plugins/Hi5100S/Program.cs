@@ -33,17 +33,24 @@ internal static class Program
         if (command == "devices")
         {
             var devices = await Discover(scanner);
-            Emit(new { type = "devices", devices = devices.Select(d => new { id = Id(d), name = $"{d.Name} ({d.Driver})" }) });
+            Emit(new { type = "devices", devices = devices.SelectMany(d => new[] {
+                new { id = Id(d), name = $"{d.Name} ({d.Driver} · 输稿器)" },
+                new { id = "flatbed/" + Id(d), name = $"{d.Name} ({d.Driver} · 平板)" }
+            }) });
         }
         else if (command == "scan")
         {
             var id = request.GetProperty("device_id").GetString() ?? "";
+            bool feeder = !id.StartsWith("flatbed/", StringComparison.Ordinal);
+            if (!feeder) id = id["flatbed/".Length..];
+            bool duplex = request.GetProperty("duplex").GetBoolean();
+            if (!feeder && duplex) throw new InvalidOperationException("平板请使用单面或手动翻面，自动双面请选择输稿器。");
             var driver = id.StartsWith("Twain:", StringComparison.Ordinal) ? Driver.Twain : Driver.Wia;
             var device = (await scanner.Devices(driver)).FirstOrDefault(d => Id(d) == id)
                 ?? throw new IOException("未找到上次选择的设备，请检查 USB 连接并重新发现扫描仪。");
             var folder = request.GetProperty("directory").GetString()!;
             var settings = new ScanCaptureSettings(request.GetProperty("dpi").GetInt32(), request.GetProperty("color").GetString()!);
-            await scanner.Acquire(device, request.GetProperty("paper").GetString()!, true, async image =>
+            await scanner.Acquire(device, request.GetProperty("paper").GetString()!, feeder, async image =>
             {
                 var file = $"{Guid.NewGuid():N}.png";
                 image.Save(Path.Combine(folder, file), ImageFormat.Png);
@@ -51,7 +58,7 @@ internal static class Program
                 using var ack = JsonDocument.Parse(await Console.In.ReadLineAsync() ?? "{}");
                 if (!ack.RootElement.TryGetProperty("continue", out var next) || next.ValueKind != JsonValueKind.True)
                     throw new OperationCanceledException();
-            }, CancellationToken.None, request.GetProperty("duplex").GetBoolean(), settings);
+            }, CancellationToken.None, duplex, settings);
         }
         else throw new InvalidDataException("未知设备命令。");
         Emit(new { type = "done" });
@@ -63,12 +70,15 @@ internal static class Program
         if (devices.Count == 0) throw new IOException("未发现扫描仪，请检查 USB 和厂商驱动。");
         for (int i = 0; i < devices.Count; i++)
             Console.WriteLine($"{i + 1}. {devices[i].Name} ({devices[i].Driver})");
-        Console.Write("请输入 Hi-5100S 对应的设备序号：");
+        Console.Write("请输入要测试的扫描仪序号：");
         if (!int.TryParse(Console.ReadLine(), out int index) || index < 1 || index > devices.Count)
             throw new ArgumentException("设备序号无效。");
         var selected = devices[index - 1];
-        Console.Write("将测试纸放入输稿器。输入 1 测单面，回车测双面：");
-        bool duplex = Console.ReadLine() != "1";
+        Console.Write("选择纸源：0 平板，1 输稿器单面，回车输稿器双面：");
+        var source = Console.ReadLine()?.Trim();
+        if (source is not ("0" or "1" or "")) throw new ArgumentException("纸源选项无效。");
+        bool feeder = source != "0";
+        bool duplex = source == "";
         Console.Write("纸型默认 A4，使用 A3 请输入 A3：");
         var paper = Console.ReadLine()?.Trim().ToUpperInvariant() == "A3" ? "A3" : "A4";
         void Log(string line)
@@ -76,9 +86,9 @@ internal static class Program
             Console.WriteLine(line);
             File.AppendAllText(Path.Combine(directory, "scan.log"), line + Environment.NewLine);
         }
-        Log($"{selected.Name} / {selected.Driver} / {paper} / ADF / {(duplex ? "双面" : "单面")} / 300 DPI 灰度");
+        Log($"{selected.Name} / {selected.Driver} / {paper} / {(feeder ? "输稿器" : "平板")} / {(duplex ? "双面" : "单面")} / 300 DPI 灰度");
         int pages = 0;
-        await scanner.Acquire(selected, paper, true, image =>
+        await scanner.Acquire(selected, paper, feeder, image =>
         {
             var name = $"page-{++pages:D4}.png";
             image.Save(Path.Combine(directory, name), ImageFormat.Png);

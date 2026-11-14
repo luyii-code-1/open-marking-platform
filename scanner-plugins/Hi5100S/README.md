@@ -9,3 +9,5 @@
 dotnet publish scanner-plugins/Hi5100S -c Release -r win-x64 --self-contained true -o dist/hi5100s-plugin
 ```
 交互启动为独立测试模式，标准输入重定向时使用 omp-device-1 协议。详见 scanner/DEVICE-PLUGIN.md。
+
+三星等 WIA/TWAIN 平板设备在独立测试中选择纸源 0。在客户端发现设备后选择带「平板」的条目，单面扫描或手动翻面。纸源条目用于明确请求的模式，实际支持范围由设备驱动决定。
