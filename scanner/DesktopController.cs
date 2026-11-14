@@ -110,8 +110,12 @@ public sealed class DesktopController : IDisposable
         return new{device_preferences=new{driver=_driver,plugins=_prefs.Plugins.Select(p=>new{id=p.Id,name=Path.GetFileName(p.Path),available=File.Exists(p.Path)}),plugin_id=_prefs.PluginId,device=_prefs.Device,devices=_devices},review_edit=true,room_review=true,manual_room_upload=true,device_protocol=DevicePlugin.Protocol,scan_settings=new{dpi=ScanSettings.Dpi,color=ScanSettings.Color},protocol=Protocol,server_url=_server,storage_path=_queue.Root,online=_online,capturing=Capturing,syncing=_uploadGate.CurrentCount==0,message=_message,project_id=_project,
             projects,catalog=File.Exists(catalogPath)?Json(File.ReadAllText(catalogPath)):Json("{\"projects\":[]}"),
             package=_packages.TryGetValue(_project,out var package)?package:Json("null"),
-            batches=batches.Select(b=>new{id=b.Id,name=b.Label,subject_id=b.SubjectId,group_id=b.GroupId,room=b.Room,room_tags=JsonSerializer.Deserialize<JsonElement>(b.RoomTagsJson),status=b.Status,error=b.Error,capture_mode=b.CaptureMode,back_order=b.BackOrder,paper=b.Paper,sides=b.Sides,created_at=b.CreatedAt,
-                total=_queue.Pages(b.Id).Count,front_count=_queue.Pages(b.Id).Count(p=>p.Side=="front"),back_count=_queue.Pages(b.Id).Count(p=>p.Side=="back"),pending=_queue.Pages(b.Id).Count(p=>p.Status=="pending"),blocked=_queue.Pages(b.Id).Count(p=>p.Status=="blocked"),uploaded=_queue.Pages(b.Id).Count(p=>p.Status=="uploaded")}),
+            batches=batches.Select(b=>{
+                var captured=b.Id==selected?pages:_queue.Pages(b.Id);
+                return new{id=b.Id,name=b.Label,subject_id=b.SubjectId,group_id=b.GroupId,room=b.Room,room_tags=JsonSerializer.Deserialize<JsonElement>(b.RoomTagsJson),status=b.Status,error=b.Error,capture_mode=b.CaptureMode,back_order=b.BackOrder,paper=b.Paper,sides=b.Sides,created_at=b.CreatedAt,
+                    scanned_sheets=captured.Count(p=>p.Side=="front"&&p.Status!="excluded"),paired_sheets=Json(b.LocalPairsJson).GetArrayLength(),
+                    total=captured.Count,front_count=captured.Count(p=>p.Side=="front"),back_count=captured.Count(p=>p.Side=="back"),pending=captured.Count(p=>p.Status=="pending"),blocked=captured.Count(p=>p.Status=="blocked"),uploaded=captured.Count(p=>p.Status=="uploaded")};
+            }),
             page_total=pages.Count,pages=pages.Skip(offset).Take(50).Select(p=>new{id=p.CaptureId,sequence=p.Sequence,side=p.Side,status=p.Status,error=p.Error,candidate=p.RecognitionJson=="{}"?"":Text(Json(p.RecognitionJson),"candidate_number"),quality=p.QualitySummary,recognized=p.RecognitionJson!="{}",local_cut_available=File.Exists(Path.Combine(_queue.Root,"processed",p.CaptureId,"cuts.zip"))})};
     }
 
@@ -162,10 +166,6 @@ public sealed class DesktopController : IDisposable
             case "openProject":
                 if(Capturing)throw new InvalidOperationException("请先停止扫描再切换项目。");
                 id=Text(args,"project_id");if(!_packages.ContainsKey(id))throw new InvalidOperationException("请先联网下载项目配置。");_project=id;SaveSettings();return State(Json("{}"));
-            case "assignRoom":
-                if(!_online||_api==null)throw new InvalidOperationException("补选考场需要联网");
-                await _api.Post($"scanner/submissions/{Guid.Parse(Text(args,"submission_id"))}/room",new{room_id=Text(args,"room_id")},_lifetime.Token);
-                return await Invoke("downloadProject",JsonSerializer.SerializeToElement(new{project_id=_project}));
             case "createBatch":
                 if(_revoked)throw new InvalidOperationException("设备授权已失效，请重新连接并核查授权。");
                 if(!_packages.TryGetValue(_project,out var project))throw new InvalidOperationException("请先打开已下载的考试项目。");

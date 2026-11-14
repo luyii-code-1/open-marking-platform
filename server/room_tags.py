@@ -34,7 +34,8 @@ def progress(db,tag):
     pages=[p for p in objects(db,'pages') if p.get('batch_id') in batches and not p.get('excluded')]
     confirmed_pages={p for s in submissions for p in s.get('pages',[])}
     expected=tag.get('expected_students')
-    return {'scanned_students':scanned,'confirmed_absent':absent,'expected_students':expected,
+    return {'confirmed_sheets':sum(bool(s.get('pages')) for s in submissions),
+            'scanned_students':scanned,'confirmed_absent':absent,'expected_students':expected,
             'remaining_students':max(0,expected-scanned-absent) if expected is not None else None,
             'over_expected':max(0,scanned+absent-expected) if expected is not None else 0,
             'pending_pages':sum(p['id'] not in confirmed_pages and not p.get('linked_submission_id') for p in pages),

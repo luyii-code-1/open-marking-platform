@@ -29,7 +29,7 @@ def school(tmp_path,monkeypatch):
             templates.append(post('templates/'+template['id']+'/publish'))
         rooms=[post('projects/'+project['id']+'/room-tags',{'name':'01','group_id':g['id'],'expected_students':2},201) for g in groups]
         def pair(student,room=rooms[0],group=groups[0],template=templates[0]):
-            batch=post('scan-batches',{'group_id':group['id'],'room_tag_ids':[room['id']]})
+            batch=post('scan-batches',{'group_id':group['id'],'room_tag_ids':[room['id']] if room else []})
             with db.connect() as connection:
                 page=db.put(connection,'pages',{'batch_id':batch['id'],'template_id':template['id'],'side':'front','sequence':1,'status':'recognized','candidate_number':student['candidate_number'],'selections':{template['questions'][0]['id']:['A']}})
             result=post('scan-batches/'+batch['id']+'/pair')
@@ -213,17 +213,18 @@ def test_official_layout_and_scoring_impact(school):
     r('POST','scan-batches/'+empty['id']+'/finish-empty',{'confirm':True})
     assert next(b for b in r('GET','scan-batches') if b['id']==empty['id'])['completed_empty']
 
-def test_optional_room_can_be_assigned_after_scan(school):
+def test_card_rooms_count_scans_without_a_student_assignment(school):
     f=school
-    batch,page,result=f['pair'](f['students'][0])
-    group=f['groups'][0]
-    answer=f['request']('GET','submissions?group_id='+group['id'])[0]
-    with db.connect() as connection:
-        db.put(connection,'submissions',{**answer,'room_tags':[]})
-    route='scanner/submissions/'+answer['id']+'/room'
-    f['request']('POST',route,{'room_id':f['rooms'][1]['id']},422)
-    f['post'](route,{'room_id':f['rooms'][0]['id']})
-    assert f['request']('GET','room-tags?group_id='+group['id'])[0]['scanned_students']==1
+    group=f['groups'][0]['id']
+    second=f['post']('projects/'+f['project']['id']+'/room-tags',{'name':'02','group_id':group,'expected_students':0},201)
+    f['pair'](f['students'][0],room=second)
+    f['pair'](f['students'][1],room=None)
+    package=f['request']('GET','scanner/projects/'+f['project']['id']+'/package')
+    rooms={r['id']:r for r in package['room_tags']}
+    assert rooms[second['id']]['confirmed_sheets']==1 and rooms[f['rooms'][0]['id']]['confirmed_sheets']==0
+    card=next(g for g in package['groups'] if g['id']==group)
+    assert card['confirmed_sheets']==2 and card['unassigned_sheets']==1 and 'unassigned' not in card
+    assert len(card['roster'])==3
 
 def test_catalog_exam_creation_and_roster_snapshot(school):
     f=school;r=f['request'];grade=f['grade']['id'];students=[s['id'] for s in f['students']]

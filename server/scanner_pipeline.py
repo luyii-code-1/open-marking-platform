@@ -57,7 +57,8 @@ def project_package(identifier: str, current=Depends(scan_admin)):
                              'template': {**configuration(template), 'notice_layout':template.get('notice_layout',1), 'notice_template':template.get('notice_template')}, 'config_sha256': config_hash(template),
                              'confirmed_candidates':sorted({s['candidate_number'] for s in valid}),
                              'confirmed_students':len({s['student_id'] for s in valid}),
-                             'unassigned':[{'id':s['id'],'candidate_number':s['candidate_number']} for s in valid if not s.get('room_tags')],
+                             'confirmed_sheets':sum(bool(s.get('pages')) for s in valid),
+                             'unassigned_sheets':sum(bool(s.get('pages')) and not s.get('room_tags') for s in valid),
                              'roster': [{'id':s['id'],'candidate_number': s['candidate_number'], 'name': s['name']} for s in roster] if roster is not None else None})
         from .room_tags import view,progress
         rooms=[{**view(db,[t])[0],**progress(db,t)} for t in find(db,'room-tags',project_id=identifier)]
@@ -252,18 +253,3 @@ def local_piece(page_id, question_id, region, normalized_sha256=None):
     with zipfile.ZipFile(materialize('pages/' + page_id + '.cuts.zip')) as package: content = package.read(entry['entry'])
     if checksum(content) != entry['sha256']: raise HTTPException(409, '本地切题图校验失败，请核查扫描归档')
     return content
-
-
-@router.post('/submissions/{identifier}/room')
-def assign_room(identifier:str,body:dict,current=Depends(scan_admin)):
-    from .room_tags import snapshot,project_for_group
-    with connect() as db:
-        db.execute('BEGIN IMMEDIATE')
-        answer=require(db,identifier,'submissions')
-        group=require(db,answer['group_id'],'groups')
-        writable(db,'groups',group)
-        if group.get('frozen'):raise HTTPException(409,'成绩已冻结')
-        tags=snapshot(db,project_for_group(db,group['id']),[body.get('room_id')],group)
-        if answer.get('room_tags') and answer['room_tags'][0]['id']!=tags[0]['id']:
-            raise HTTPException(409,'该答卷已分配考场，请刷新')
-        return put(db,'submissions',{**answer,'room_tags':tags},current['id'])
