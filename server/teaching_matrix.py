@@ -2,7 +2,7 @@ import re
 from collections import defaultdict
 
 
-def matrix_import(db, tables, commit, actor):
+def matrix_import(db, tables, commit, actor, choices=None):
     from .teaching import save, Relation
     from .db import objects
     from fastapi import HTTPException
@@ -15,9 +15,16 @@ def matrix_import(db, tables, commit, actor):
     cols = [i for i in range(len(sub)-1) if sub[i:i+2] == ['姓名','班级'] and i < len(labels) and labels[i]]
     if not cols:
         raise HTTPException(422, '未找到第3、4行的学科、姓名和班级表头')
-    users = defaultdict(list)
-    for u in db.execute("SELECT id,name FROM users WHERE role='teacher'"):
-        users[u['name'].strip()].append(u['id'])
+    from .teaching_accounts import resolve_accounts
+    entries = []
+    grade = ''
+    for line, row in records:
+        if line < 5: continue
+        grade = row[0] or grade
+        for i in cols:
+            if i+1 < len(row) and row[i].strip() and row[i+1].strip():
+                entries.append((f'{line}:{i}',row[i].strip(),f'{grade} {labels[i]} · {row[i+1]}'))
+    resolved,pending,credentials,planned = resolve_accounts(db,entries,choices or {},commit,actor)
     classes = defaultdict(list)
     grades = {g['id']:g['name'] for g in objects(db,'grades')}
     for cls in objects(db,'classes'):
@@ -41,10 +48,8 @@ def matrix_import(db, tables, commit, actor):
             if subject == '体育16节': subject = '体育'
             if subject == '音乐（心理高一）': subject = '心理' if grade=='高一' else '音乐'
             ref = f'第{line}行 {grade} {subject} {teacher}'
-            if len(users[teacher]) != 1:
-                skipped.append(ref + '：姓名未唯一匹配到教师账号')
-                continue
-            uid = users[teacher][0]
+            uid = resolved.get(f'{line}:{i}')
+            if uid is None: continue
             for token in re.split(r'[、，,]',raw):
                 token = token.strip()
                 if not token: continue
@@ -67,4 +72,4 @@ def matrix_import(db, tables, commit, actor):
                     if subject not in item.subjects: item.subjects.append(subject)
     if commit:
         for item in pairs.values(): save(db,item,actor)
-    return {'relations':[r.model_dump() for r in pairs.values()], 'count':len(pairs),'errors':[] if pairs else ['没有可导入的行政班关系'],'skipped':skipped,'saved':bool(commit and pairs)}
+    return {'pending':pending,'created':credentials,'planned':planned,'relations':[r.model_dump() for r in pairs.values()], 'count':len(pairs),'errors':[] if pairs or planned or pending else ['没有可导入的行政班关系'],'skipped':skipped,'saved':bool(commit and (pairs or credentials))}

@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+import json
+from fastapi import Form, APIRouter, Depends, File, HTTPException, UploadFile
 from pathlib import Path
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
@@ -67,12 +68,16 @@ def template(current=Depends(admin)):
 
 
 @router.post('/import')
-def import_relations(file: UploadFile = File(), commit: bool = False, current=Depends(admin)):
+def import_relations(file: UploadFile = File(), commit: bool = False, decisions:str=Form("{}"), current=Depends(admin)):
     sheets = read_file(file)
     with connect() as db:
         db.execute('BEGIN IMMEDIATE' if commit else 'BEGIN')
         from .teaching_matrix import matrix_import
-        matrix = matrix_import(db, sheets, commit, current["id"])
+        try:
+            choices=json.loads(decisions)
+            if not isinstance(choices,dict) or not all(isinstance(v,str) for v in choices.values()):raise ValueError
+        except ValueError:raise HTTPException(422,'教师匹配选项无效')
+        matrix = matrix_import(db, sheets, commit, current["id"],choices)
         if matrix is not None:
             return matrix
         users = {u['username']:u['id'] for u in db.execute("SELECT id,username FROM users WHERE role='teacher'")}

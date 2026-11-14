@@ -42,3 +42,17 @@ def test_teacher_import(school):
         assert response.status_code==200 and response.json()['count']==1
     with db.connect() as c:
         assert db.get(c,cls['id'])['teaching'][teacher['id']]=={'subjects':['物理'],'homeroom':True}
+
+def test_new_accounts_and_duplicate_confirmation(school):
+    f=school
+    table={'任课任职表':([],[(3,['级段','数学','']), (4,['','姓名','班级']), (5,['高一','教师甲','1']), (6,['','教师乙','1']), (7,['','教师乙','2'])])}
+    f['post']('classes',{'name':'1班','grade_id':f['grade']['id']})
+    with db.connect() as c:
+        preview=matrix_import(c,table,False,'admin')
+        assert len(preview['pending'])==2 and len(preview['planned'])==1
+        assert not c.execute("SELECT id FROM users WHERE role='teacher'").fetchone()
+        result=matrix_import(c,table,True,'admin',{'6:1':'new','7:1':'new'})
+        assert len(result['created'])==2 and result['count']==2
+        uid=c.execute("SELECT id FROM users WHERE name='教师乙'").fetchone()[0]
+        again=matrix_import(c,table,True,'admin',{'6:1':uid,'7:1':uid})
+        assert not again['created'] and not again['pending']
