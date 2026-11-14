@@ -1,25 +1,50 @@
 import { useEffect, useState } from 'react'
-import { Alert, App, Card, Form, Input, Radio, Space, Typography } from 'antd'
+import { Alert, App, Card, Form, Input, Divider, Typography } from 'antd'
 import { Button } from './Button'
-import { ArrowLeftOutlined, AuditOutlined, SettingOutlined } from '@ant-design/icons'
-import { send, setToken, type User,type AuthSession } from './api'
+import { ArrowLeftOutlined, KeyOutlined, AuditOutlined, SettingOutlined } from '@ant-design/icons'
+import { ApiError, request, send, setToken, type User,type AuthSession } from './api'
 import { loginPasskey } from './passkeys'
 import { Brand } from './Brand'
 
 export type Portal = 'marking' | 'admin'
-const { Title, Text, Paragraph } = Typography
+const { Title, Paragraph } = Typography
 export function Login({ portal, onPortal, onLogin }: { portal?: Portal; onPortal: (portal?: Portal) => void; onLogin: (user: User, portal: Portal) => void }) {
   const [mode, setMode] = useState<'password' | 'passkey' | 'forgot' | 'bootstrap'>('password'), [loading, setLoading] = useState(false), [error, setError] = useState('')
   const [loginForm] = Form.useForm(), [resetForm] = Form.useForm(), [bootstrapForm] = Form.useForm(), { message } = App.useApp()
   useEffect(() => { setMode('password'); setError('') }, [portal])
+  const [canCreate, setCanCreate] = useState(false)
+  useEffect(() => {
+    setCanCreate(false)
+    if (portal !== 'admin') return
+    const controller = new AbortController()
+    const refresh = async () => {
+      try {
+        const state = await request<{available:boolean}>('/auth/bootstrap-status', {cache:'no-store', signal:controller.signal})
+        if (!controller.signal.aborted) {
+          setCanCreate(state.available)
+          if (!state.available) setMode(current => current === 'bootstrap' ? 'password' : current)
+        }
+      } catch { if (!controller.signal.aborted) setCanCreate(false) }
+    }
+    void refresh()
+    window.addEventListener('focus',refresh)
+    return () => { controller.abort(); window.removeEventListener('focus',refresh) }
+  }, [portal])
   async function login(values: Record<string, string>) {
     if (!portal) return
     setLoading(true); setError('')
     try {
-      if (mode === 'bootstrap') await send('/auth/bootstrap', values)
+      if (mode === 'bootstrap') {
+        await send('/auth/bootstrap', values)
+        setCanCreate(false); setMode('password')
+        loginForm.setFieldsValue({username:values.username})
+      }
       const result = mode === 'passkey' ? await loginPasskey(values.username, portal) : await send<AuthSession&{token:string}>('/auth/login', { username: values.username, password: values.password, portal })
       setToken(result.token,result); onLogin(result.user, portal)
-    } catch (e) { setError((e as Error).message) }
+    } catch (e) {
+      if (mode === 'bootstrap' && e instanceof ApiError && e.status === 409) { setCanCreate(false); setMode('password') }
+      setError((e as Error).message)
+    }
     finally { setLoading(false) }
   }
   async function reset(values: Record<string, string>) {
@@ -35,8 +60,9 @@ export function Login({ portal, onPortal, onLogin }: { portal?: Portal; onPortal
     <Card><AuditOutlined className="portal-icon" /><Title level={3}>阅卷台</Title><Button type="primary" size="large" block onClick={() => onPortal('marking')}>登录阅卷台</Button></Card>
     <Card><SettingOutlined className="portal-icon" /><Title level={3}>管理后台</Title><Button size="large" block onClick={() => onPortal('admin')}>登录管理后台</Button></Card>
   </div></div></div>
-  return <div className="login-screen"><Card className="login-card"><Brand login />
+  return <div className="login-screen"><Card className="login-card">
     <Button type="text" className="login-back" icon={<ArrowLeftOutlined />} disabled={loading} onClick={() => { if (mode === 'forgot' || mode === 'bootstrap') { setMode('password'); setError('') } else onPortal() }}>{mode === 'forgot' || mode === 'bootstrap' ? '返回登录' : '选择登录入口'}</Button>
+    <Brand login />
     <Title level={3}>{mode === 'forgot' ? '重置密码' : mode === 'bootstrap' ? '创建管理员' : portal === 'admin' ? '登录管理后台' : '登录阅卷台'}</Title>
     {error && <Alert type="error" showIcon message={error} className="login-error" />}
     {mode === 'forgot' ? <>
@@ -56,13 +82,14 @@ export function Login({ portal, onPortal, onLogin }: { portal?: Portal; onPortal
         <Button type="primary" htmlType="submit" size="large" block loading={loading}>创建并登录</Button>
       </Form>
     </> : <>
-      <Radio.Group className="login-methods" value={mode} onChange={event => { setMode(event.target.value); setError('') }} options={[{ label: '密码登录', value: 'password' }, { label: '通行密钥', value: 'passkey' }]} />
       <Form form={loginForm} layout="vertical" requiredMark={false} onFinish={login}>
         <Form.Item name="username" label="账号" rules={[{ required: true }]}><Input size="large" autoComplete="username" /></Form.Item>
         {mode === 'password' && <Form.Item name="password" label="密码" rules={[{ required: true, message: '请输入密码' }]}><Input.Password size="large" autoComplete="current-password" /></Form.Item>}
         <Button type="primary" htmlType="submit" size="large" block loading={loading}>{mode === 'passkey' ? '使用通行密钥登录' : '登录'}</Button>
       </Form>
-      <div className="login-links"><Button type="link" onClick={() => { resetForm.setFieldsValue({ username: loginForm.getFieldValue('username') || '' }); setMode('forgot'); setError('') }}>忘记密码</Button>{portal === 'admin' && <Button type="link" onClick={() => { setMode('bootstrap'); setError('') }}>首次部署创建管理员</Button>}</div>
+      <div className="login-links"><Button type="link" onClick={() => { resetForm.setFieldsValue({ username: loginForm.getFieldValue('username') || '' }); setMode('forgot'); setError('') }}>忘记密码</Button>{portal === 'admin' && canCreate && <Button type="link" onClick={() => { setMode('bootstrap'); setError('') }}>首次部署创建管理员</Button>}</div>
+      <Divider plain>其他登录方式</Divider>
+      <Button block size="large" disabled={loading} icon={mode==='password'?<KeyOutlined/>:undefined} onClick={()=>{setMode(mode==='password'?'passkey':'password');setError('')}}>{mode==='password'?'使用通行密钥':'使用密码登录'}</Button>
     </>}
   </Card></div>
 }

@@ -19,7 +19,9 @@ def test_auth_and_persistence(tmp_path,monkeypatch):
     with TestClient(app) as client:
         assert client.get('/api/v1/projects').status_code==401
         account={'username':'admin','password':'test-password-123','name':'管理员'}
+        assert client.get('/api/v1/auth/bootstrap-status').json()=={'available':True}
         assert client.post('/api/v1/auth/bootstrap',json=account).status_code==200
+        assert client.get('/api/v1/auth/bootstrap-status').json()=={'available':False}
         assert client.post('/api/v1/auth/bootstrap',json=account).status_code==409
         token=client.post('/api/v1/auth/login',json=account).json()['token']
         headers={'Authorization':'Bearer '+token}

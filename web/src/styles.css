@@ -84,3 +84,5 @@
 @media(max-width:1000px){.template-design-page .template-workbench{grid-template-columns:1fr}.template-design-page .template-preview{position:static}.template-fullscreen{padding:16px}.template-design-page .template-action-bar{position:static}}
 
 .review-sheet{display:block;width:100%;max-width:100%;transform-origin:center;user-select:none}.answer-viewport>.review-sheet{height:100%;max-height:100%}
+
+.login-card{max-width:420px;border-radius:12px}.login-card>.ant-card-body{padding:28px clamp(20px,5vw,36px) 32px}.login-card .brand-login{display:flex;justify-content:center;margin:0 auto 10px}.login-card .brand-login img{width:120px;height:auto}.login-card h3{text-align:center;margin:0 0 24px}.login-card .ant-divider{color:#667085;margin:20px 0 14px}.login-card .login-links{align-items:center}.login-card .login-back{color:#526174}.workspace-heading .hierarchy-back{background:transparent;border:0;box-shadow:none;color:#526174;width:32px;height:32px}.workspace-heading .hierarchy-back:hover{background:#e7edf4}.workspace-heading .hierarchy-back:focus-visible{outline:2px solid #1769d5;outline-offset:2px}

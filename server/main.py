@@ -78,6 +78,13 @@ class Account(Login):
     role: str = 'teacher'
 
 
+@app.get('/api/v1/auth/bootstrap-status')
+def bootstrap_status():
+    with connect() as db:
+        available = db.execute('SELECT 1 FROM users LIMIT 1').fetchone() is None
+    return JSONResponse({'available': available}, headers={'Cache-Control': 'no-store'})
+
+
 @app.post('/api/v1/auth/bootstrap')
 def bootstrap(body: Account,request:Request=None):
     if len(body.password)<10:
