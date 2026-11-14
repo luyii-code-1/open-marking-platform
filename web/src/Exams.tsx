@@ -11,7 +11,7 @@ import { ArchiveManager } from './ArchiveManager'
 import { Roster } from './Roster'
 import { TemplateEditor } from './TemplateEditor'
 import { Scans } from './Management'
-import { Marking } from './Marking'
+import { ReviewAllocation } from './ReviewAllocation'
 import { Exceptions } from './Exceptions'
 import { Results } from './Results'
 import { ProjectStorage } from './StorageConnections'
@@ -100,7 +100,7 @@ function GroupWorkspace({group,project,section,onSection,onRooms}:{group:Row;pro
     key==='overview'?<GroupOverview group={group} onSection={onSection}/>:
     (key==='scans'||key==='marking')&&!group.template_id?<Card><Empty description={key==='scans'?'发布题卡后即可建立扫描批次':'发布题卡后即可分配教师与阅卷'}><Button type="primary" onClick={()=>onSection('template')}>设计题卡</Button></Empty></Card>:
     key==='template'?<TemplateEditor groupId={group.id}/>:key==='roster'?<Roster groupId={group.id}/>:
-    key==='scans'?<Space direction="vertical" size={24} style={{width:'100%'}}><div><Button onClick={onRooms}>考场设置</Button></div><Scans groupId={group.id}/></Space>:key==='marking'?<Marking admin groupId={group.id}/>:
+    key==='scans'?<Space direction="vertical" size={24} style={{width:'100%'}}><div><Button onClick={onRooms}>考场设置</Button></div><Scans groupId={group.id}/></Space>:key==='marking'?<ReviewAllocation templateId={group.template_id} frozen={!!group.frozen}/>:
     key==='exceptions'?<Exceptions groupId={group.id}/>:<Results admin groupId={group.id} projectId={project.id}/>,
   }))}/>
 }
@@ -112,7 +112,7 @@ function GroupOverview({group,onSection}:{group:Row;onSection:(section:string)=>
     {key:'template',label:'题卡设计',detail:template?`${template.name} · 已发布`:drafts.length?`${drafts.length} 份草稿待发布`:'创建或从题卡库选用版式'},
     {key:'roster',label:'应考名单',detail:roster.data?.configured?`${roster.data.students.length} 名学生 · ${roster.data.mode==='selected'?'指定名单':'年级全体'}`:'设置年级或导入名单'},
     {key:'scans',label:'扫描与补扫',detail:workflow.data.group_id?`考场预期 ${workflow.data.room_expected} 人 · 已入库实考 ${workflow.data.scanned} 人 · ${workflow.data.open_batches} 个批次待完成`:'按考场查看批次、页面与配对情况'},
-    {key:'marking',label:'阅卷',detail:workflow.data.results?`${workflow.data.results.pending} 份答卷待结分`:'分配教师、评阅作答与查看进度'},
+    {key:'marking',label:'阅卷分配',detail:workflow.data.results?`${workflow.data.results.pending} 份答卷待结分`:'管理阅卷池与仲裁池'},
     {key:'exceptions',label:'异常核查',detail:workflow.data.group_id?`${workflow.data.open_exceptions} 项待核查`:'核查识别与评阅中的待处理事项'},
     {key:'results',label:'成绩',detail:group.frozen?'成绩已发布':'检查统计并确认发布'},
   ]

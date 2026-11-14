@@ -1,3 +1,4 @@
+import {examPath} from './examNavigation'
 import {questionLabel} from './mergeQuestions'
 import {ReviewImage} from './ReviewImage'
 import {loadReviewSheet} from './reviewImages'
@@ -5,7 +6,7 @@ import { ArrowLeftOutlined, ArrowRightOutlined, HistoryOutlined, SettingOutlined
 import { Button } from './Button'
 import { useAction } from './useAction'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { Alert, App, Checkbox, Drawer, Empty, Form, Input, InputNumber, Modal, Progress, Select, Space, Tag, Typography } from 'antd'
+import { Alert, App, Checkbox, Drawer, Empty, Input, InputNumber, Modal, Progress, Select, Space, Tag, Typography } from 'antd'
 import { Table } from './DataTable'
 import { focusScoreInput, previousReview, scorePresets } from './reviewInteraction'
 import { useReviewWorkspace } from './ReviewWorkspace'
@@ -17,13 +18,11 @@ import { ErrorNotice } from './Management'
 export function Marking({ admin, groupId, initialTemplateId, initialQuestionId, onExit }: { admin: boolean; groupId?: string; initialTemplateId?: string; initialQuestionId?: string; onExit?: () => void }) {
   const workspace=useReviewWorkspace()
   const action=useAction(),busy=action.busy
-  const templateResource = useResource<Template[]>('/templates', []), templates = {...templateResource, data: [...new Map([...workspace.records.map(r=>({...r.template,questions:[r.question]} as Template)),...templateResource.data].map(t=>[t.id,t])).values()].filter(t => !groupId || t.group_id === groupId)}, groups=useResource<Row[]>('/groups',[]), subjects=useResource<Row[]>('/subjects',[]), projects=useResource<Row[]>('/projects',[]), assignments = useResource<Row[]>('/assignments', []), users = useResource<Row[]>(admin ? '/users' : null, [])
+  const templateResource = useResource<Template[]>('/templates', []), templates = {...templateResource, data: [...new Map([...workspace.records.map(r=>({...r.template,questions:[r.question]} as Template)),...templateResource.data].map(t=>[t.id,t])).values()].filter(t => !groupId || t.group_id === groupId)}, groups=useResource<Row[]>('/groups',[]), subjects=useResource<Row[]>('/subjects',[]), projects=useResource<Row[]>('/projects',[]), assignments = useResource<Row[]>('/assignments', [])
   const [templateId, setTemplateId] = useState(initialTemplateId || ''), [questionId, setQuestionId] = useState(initialQuestionId || ''), [task, setTask] = useState<Row | null>(null), [history, setHistory] = useState<Row[]>([])
-  const [value, setValue] = useState<number | null>(null), [step, setStep] = useState(.5), [error, setError] = useState(''), [skipWarn, setSkipWarn] = useState(false), [automatic, setAutomatic] = useState(true), [osd, setOsd] = useState(''), [zoom, setZoom] = useState(1), [contrast, setContrast] = useState(1), [assignOpen, setAssignOpen] = useState(false), [assignForm] = Form.useForm()
+  const [value, setValue] = useState<number | null>(null), [step, setStep] = useState(.5), [error, setError] = useState(''), [skipWarn, setSkipWarn] = useState(false), [automatic, setAutomatic] = useState(true), [osd, setOsd] = useState(''), [zoom, setZoom] = useState(1), [contrast, setContrast] = useState(1)
   const started = useRef(Date.now()), [count, setCount] = useState(0), [seconds, setSeconds] = useState(0), { message } = App.useApp()
   const historyVersion=useRef(0),historyContext=useRef('');historyContext.current=`${templateId}:${questionId}`
-  const selectedTeachers: string[]=Form.useWatch('user_ids',assignForm)||[]
-  const arbitrationMode=Form.useWatch('arbitration_mode',assignForm)||'random'
   const progress=useResource<Row>(templateId&&questionId?`/review-progress?template_id=${templateId}&question_id=${questionId}`:null,{} as Row)
   useEffect(() => { if(groupId && !templateId) { const published=templates.data.find(t=>t.id===groups.data.find(g=>g.id===groupId)?.template_id); if(published)setTemplateId(published.id) } },[groupId,templateId,templateResource.data,groups.data])
   const record=workspace.records.find(r=>r.task.id===task?.id)
@@ -33,7 +32,7 @@ export function Marking({ admin, groupId, initialTemplateId, initialQuestionId, 
   const editable=record?.status==='draft'&&!locked
   const pageRef=useRef<HTMLDivElement>(null),scoreRef=useRef<HTMLDivElement>(null)
   const [historyOpen,setHistoryOpen]=useState(false),[settingsOpen,setSettingsOpen]=useState(false),[progressOpen,setProgressOpen]=useState(false)
-  const overlayOpen=historyOpen||settingsOpen||progressOpen||assignOpen
+  const overlayOpen=historyOpen||settingsOpen||progressOpen
   function refocusScore(){requestAnimationFrame(()=>{if(!overlayOpen)focusScoreInput(scoreRef.current)})}
   useLayoutEffect(()=>{
     const page=pageRef.current;if(!page)return
@@ -193,8 +192,7 @@ export function Marking({ admin, groupId, initialTemplateId, initialQuestionId, 
     <Drawer title="阅卷设置" width={360} open={settingsOpen} onClose={()=>setSettingsOpen(false)}>
       <Space direction="vertical" size={20} style={{width:'100%'}}><label>评分步进 <InputNumber aria-label="评分步进" min={.01} max={10} value={step} onChange={n=>setStep(n||.5)}/></label><Typography.Text type="secondary">预设分值只填入给分框，按 Enter 或“评分”后提交。</Typography.Text>
       {task&&question&&<div className="marking-report-actions">{(['exception','excellent'] as const).map(kind=><Button size="small" type="text" key={kind} disabled={workspace.offline||locked} onClick={()=>Modal.confirm({title:kind==='exception'?'报告异常卷':'标记优秀卷',content:'将当前作答交由管理员查看。',afterClose:refocusScore,onOk:async()=>{await send(`/tasks/${task.id}/report`,{kind,reason:''});message.success('已报告')}})}>{kind==='exception'?'报告异常卷':'标记优秀卷'}</Button>)}</div>}
-      {admin&&<Button disabled={!question||workspace.offline||locked} onClick={()=>{const existing=assignments.data.find(a=>a.question_id===questionId);assignForm.setFieldsValue({user_ids:existing?.user_ids||[],weights:existing?.weights||{},arbitration_mode:existing?.arbitration_mode||(existing?.arbitrator_ids?.length?'designated_random':'random'),arbitrator_ids:existing?.arbitrator_ids||[]});setSettingsOpen(false);setAssignOpen(true)}}>分配本题教师</Button>}</Space>
+      {admin&&group&&subject&&project&&<Button href={examPath({projectId:project.id,subjectId:subject.id,gradeId:group.grade_id,groupId:group.id,section:'marking'})}>阅卷分配</Button>}</Space>
     </Drawer>
-    <Modal title="分配本题教师" open={assignOpen} onCancel={() => setAssignOpen(false)} onOk={() => assignForm.submit()}><Form form={assignForm} layout="vertical" onFinish={async values => { try { await send('/assignments', { ...values,weights:Object.fromEntries((values.user_ids as string[]).map(id=>[id,values.weights?.[id]??1])),arbitrator_ids:values.arbitration_mode==='random'?[]:values.arbitrator_ids||[], template_id: templateId, question_id: questionId }); setAssignOpen(false); await assignments.reload(); await progress.reload(); message.success('任务分配已保存') } catch (e) { message.error((e as Error).message) } }}><Form.Item name="user_ids" label="阅卷教师" rules={[{ required: true }]}><Select mode="multiple" options={users.data.map(u => ({ label: u.name, value: u.id }))} /></Form.Item>{selectedTeachers.map(id=><Form.Item key={id} name={['weights',id]} label={`${users.data.find(u=>u.id===id)?.name||id} · 分配权重`}><InputNumber min={0} max={255} placeholder="1" /></Form.Item>)}{question?.review_mode==='double'&&<><Form.Item name="arbitration_mode" label="仲裁方式"><Select options={[{label:'从阅卷教师中随机选取',value:'random'},{label:'从指定教师中随机选取',value:'designated_random'},{label:'固定仲裁教师',value:'fixed'}]}/></Form.Item>{arbitrationMode!=='random'&&<Form.Item name="arbitrator_ids" label="仲裁教师" rules={[{required:true,message:'请选择仲裁教师'}]}><Select mode="multiple" maxCount={arbitrationMode==='fixed'?1:undefined} options={users.data.map(u=>({label:u.name,value:u.id}))}/></Form.Item>}</>}</Form><Alert type="info" message="权重默认1，0表示暂停普通评阅。任务按比例分配；同一作答的双评与仲裁由不同教师完成。" /></Modal>
   </div>
 }

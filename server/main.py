@@ -220,6 +220,9 @@ def create_route(kind):
                 if not isinstance(weights,dict) or any(k not in ids or not isinstance(w,(int,float)) or not 0<=w<=255 for k,w in weights.items()): raise HTTPException(422,'教师权重应在0至255之间')
                 arbitrators=value.get('arbitrator_ids',[])
                 if not isinstance(arbitrators,list) or any(not db.execute('SELECT 1 FROM users WHERE id=?',(identifier,)).fetchone() for identifier in arbitrators):raise HTTPException(422,'仲裁教师无效')
+                arb_weights=value.get('arbitrator_weights',{})
+                if not isinstance(arb_weights,dict) or any(k not in arbitrators or type(w) not in (int,float) or not 0<=w<=255 for k,w in arb_weights.items()):
+                    raise HTTPException(422,'仲裁权重应在0至255之间')
                 from .allocation import validate as validate_assignment
                 question=next(q for q in template['questions'] if q['id']==value['question_id'])
                 if question['type']!='subjective':raise HTTPException(422,'客观题无需分配教师')

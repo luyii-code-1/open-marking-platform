@@ -15,13 +15,13 @@ def pools(assignment):
     ordinary = [u for u in assignment['user_ids'] if assignment.get('weights', {}).get(u, 1) > 0]
     mode = assignment.get('arbitration_mode', 'designated_random' if assignment.get('arbitrator_ids') else 'random')
     arbiters = assignment.get('arbitrator_ids', []) if mode != 'random' else ordinary
-    return ordinary, list(dict.fromkeys(arbiters))
+    return ordinary, [u for u in dict.fromkeys(arbiters) if assignment.get('arbitrator_weights', {}).get(u, 1) > 0]
 
 
 def validate(assignment, question):
     ordinary, arbiters = pools(assignment)
     mode = assignment.get('arbitration_mode', 'designated_random' if assignment.get('arbitrator_ids') else 'random')
-    if mode not in ('random', 'designated_random', 'fixed'):
+    if mode not in ('random', 'designated_random', 'fixed', 'weighted'):
         raise HTTPException(422, '仲裁方式无效')
     if mode == 'fixed' and len(arbiters) != 1:
         raise HTTPException(422, '固定仲裁需要指定一名教师')
@@ -86,6 +86,8 @@ def allocate_arbitration(db, template, question, assignment):
         WHERE r.question_id=? AND r.final_cents IS NULL AND s.deleted=0
         AND json_extract(s.body,'$.template_id')=? AND json_extract(s.body,'$.status')='ready'
         AND NOT EXISTS(SELECT 1 FROM review_allocations a WHERE a.submission_id=r.submission_id AND a.question_id=r.question_id AND a.round=3)''', (question['id'], template['id'])).fetchall()
+    if not rows:return
+    counts=dict(db.execute('SELECT user_id,COUNT(*) FROM review_allocations WHERE question_id=? AND round=3 GROUP BY user_id',(question['id'],)))
     for row in rows:
         done = find(db, 'tasks', submission_id=row[0], question_id=question['id'], status='completed')
         if len(done) != 2:
@@ -94,5 +96,10 @@ def allocate_arbitration(db, template, question, assignment):
         eligible = set(arbiters) - used
         if not eligible:
             raise HTTPException(409, '仲裁教师均参与了前两评，请管理员调整分配')
-        selected = min(eligible, key=lambda u: hashlib.sha256((row[0]+question['id']+u).encode()).digest())
+        if assignment.get('arbitration_mode')=='weighted':
+            weights=assignment.get('arbitrator_weights',{})
+            selected=min(eligible,key=lambda u: ((counts.get(u,0)+1)/weights.get(u,1),u))
+            counts[selected]=counts.get(selected,0)+1
+        else:
+            selected = min(eligible, key=lambda u: hashlib.sha256((row[0]+question['id']+u).encode()).digest())
         db.execute('INSERT INTO review_allocations VALUES(?,?,?,?,?)', (template['id'], question['id'], row[0], 3, selected))

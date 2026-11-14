@@ -106,3 +106,22 @@ def test_fixed_arbiter_has_access_and_cannot_mark_first(tmp_path,monkeypatch):
         assert client.post('/api/v1/tasks/'+first['id']+'/regrade-from',json={'reason':'再次检查'},headers=teachers[0][1]).status_code==409
         invalid={**assignment,'arbitrator_ids':[teachers[0][0]]}
         assert client.post('/api/v1/assignments',json=invalid,headers=admin).status_code==422
+
+def test_weighted_arbitration_pool(tmp_path,monkeypatch):
+    monkeypatch.setattr(db,'ROOT',tmp_path)
+    with TestClient(app) as client:
+        admin,teachers=setup(client,4)
+        scope=seed(8,'double')
+        ids=[u for u,_ in teachers]
+        assignment={**scope,'user_ids':ids[:2],'arbitration_mode':'weighted',
+                    'arbitrator_ids':ids,'arbitrator_weights':dict(zip(ids,[10,10,3,1]))}
+        response=client.post('/api/v1/assignments',json=assignment,headers=admin)
+        assert response.status_code==200,response.text
+        for teacher,score in zip(teachers[:2],[5,15]):
+            for _ in range(8):
+                task=client.post('/api/v1/tasks/claim',json=scope,headers=teacher[1]).json()
+                result=client.post('/api/v1/tasks/'+task['id']+'/score',json={'score':score,'idempotency_key':str(uuid.uuid4())},headers=teacher[1])
+                assert result.status_code==200,result.text
+        for teacher,expected in zip(teachers[2:],[6,2]):
+            progress=client.get('/api/v1/review-progress',params=scope,headers=teacher[1]).json()
+            assert progress['my_total']==expected
