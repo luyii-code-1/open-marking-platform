@@ -230,9 +230,11 @@ def test_catalog_exam_creation_and_roster_snapshot(school):
     body={'grade_id':grade,'subject':'物理','kind':'elective','student_ids':students[:1]}
     item=r('PUT','electives',body)
     other=r('PUT','electives',{**body,'grade_id':f['other_grade']['id'],'kind':'required','student_ids':[]})
-    project=r('POST','projects',{'name':'期中','catalog_ids':[item['id'],other['id']]})
+    tags=[t for t in r('GET','subject-tags') if t['name']=='物理']
+    assert len(tags)==1
+    project=r('POST','projects',{'name':'期中','catalog_ids':[tags[0]['id']]})
     subjects=[s for s in r('GET','subjects') if s['project_id']==project['id']]
-    assert len(subjects)==1 and len(subjects[0]['grade_ids'])==2
+    assert len(subjects)==1 and not subjects[0].get('grade_ids') and subjects[0]['subject_tag_id']==tags[0]['id']
     assert not any(g['subject_id']==subjects[0]['id'] for g in r('GET','groups'))
     card=r('POST','groups',{'name':'物理题卡','subject_id':subjects[0]['id'],'grade_id':grade})
     base='groups/'+card['id']+'/roster'

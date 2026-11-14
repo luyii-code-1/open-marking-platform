@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, File, UploadFile, HTTPException
 from typing import Literal
 from pydantic import BaseModel
-from .db import connect, objects, find, put
+from .db import connect, objects, find, put, get
 from .dependencies import admin, require
 from .roster_import import read_rows, match_rows
 
@@ -45,6 +45,7 @@ def store(body:Selection,current=Depends(admin)):
         require(db,body.grade_id,'grades')
         subject=body.subject.strip()
         if not subject: raise HTTPException(422,'请填写科目')
+        subject_tag(db,subject,current['id'])
         ids=set(body.student_ids)
         if len(members(db,body.grade_id,ids))!=len(ids): raise HTTPException(422,'请选择该年级的学生')
         old=find(db,'electives',grade_id=body.grade_id,subject=subject)
@@ -71,7 +72,8 @@ def card_catalog(db,group):
     subject=require(db,group['subject_id'],'subjects')
     linked=subject.get('catalog_by_grade',{}).get(group.get('grade_id'))
     if linked:return require(db,linked,'electives')
-    matches=find(db,'electives',grade_id=group.get('grade_id'),subject=subject['name'].strip())
+    tag=get(db,subject.get('subject_tag_id'),'subject-tags') or subject
+    matches=find(db,'electives',grade_id=group.get('grade_id'),subject=tag['name'].strip())
     return matches[0] if matches else None
 
 
@@ -103,41 +105,64 @@ def supplement(identifier:str,body:dict,current=Depends(admin)):
         return save_members(db,group,list(students.values()),old.get('source','manual'),extra,current['id'])
 
 
-def create_exam_subjects(db,project,ids,actor):
-    if not isinstance(ids,list) or any(not isinstance(i,str) for i in ids):raise HTTPException(422,'科目选择无效')
-    by_name={}
-    for identifier in dict.fromkeys(ids):
-        entry=require(db,identifier,'electives')
-        grade=require(db,entry['grade_id'],'grades')
-        if grade.get('archived'):raise HTTPException(422,'年级已停用')
-        by_name.setdefault(entry['subject'],{})[grade['id']]=entry['id']
-    for name,links in by_name.items():
-        put(db,'subjects',{'project_id':project['id'],'name':name,'grade_ids':list(links),'catalog_by_grade':links,'group_mode':'custom'},actor)
+class SubjectTag(BaseModel):
+    name: str
 
-@router.post('/electives/import-catalog')
-def import_catalog(file:UploadFile=File(),current=Depends(admin)):
-    from .roster_import import table_rows
-    data=file.file.read(8*1024*1024+1)
-    if len(data)>8*1024*1024:raise HTTPException(413,'文件超过8 MB')
-    rows=table_rows(data,file.filename)
-    if len(rows)<2:raise HTTPException(422,'请填写科目数据')
-    headers=rows[0][1]
-    columns=['年级','科目','类型']
-    if any(headers.count(k)!=1 for k in columns):raise HTTPException(422,'表头需要年级、科目、类型三列')
-    indices=[headers.index(k) for k in columns]
+
+def subject_tag(db, name, actor=None):
+    name = name.strip()
+    if not name:
+        raise HTTPException(422, '请填写科目名称')
+    existing = find(db, 'subject-tags', name=name)
+    return existing[0] if existing else put(db, 'subject-tags', {'name': name}, actor)
+
+
+@router.get('/subject-tags')
+def list_tags(current=Depends(admin)):
+    with connect() as db:
+        return sorted(objects(db, 'subject-tags'), key=lambda tag: tag['name'])
+
+
+@router.post('/subject-tags')
+def add_tag(body: SubjectTag, current=Depends(admin)):
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
-        grades={g['name']:g['id'] for g in objects(db,'grades') if not g.get('archived')}
-        existing={(s['grade_id'],s['subject']):s for s in objects(db,'electives')}
+        return subject_tag(db, body.name, current['id'])
+
+
+def create_exam_subjects(db, project, ids, actor):
+    if not isinstance(ids, list) or any(not isinstance(i, str) for i in ids):
+        raise HTTPException(422, '科目选择无效')
+    seen = set()
+    for identifier in ids:
+        tag = get(db, identifier, 'subject-tags')
+        if not tag:
+            legacy = require(db, identifier, 'electives')
+            tag = subject_tag(db, legacy['subject'], actor)
+        if tag['id'] not in seen:
+            put(db, 'subjects', {'project_id': project['id'], 'name': tag['name'],
+                'subject_tag_id': tag['id'], 'group_mode': 'custom'}, actor)
+            seen.add(tag['id'])
+
+
+@router.post('/subject-tags/import')
+def import_tags(file:UploadFile=File(),current=Depends(admin)):
+    from .roster_import import table_rows
+    data=file.file.read(8*1024*1024+1)
+    if len(data)>8*1024*1024: raise HTTPException(413,'文件超过8 MB')
+    rows=table_rows(data,file.filename)
+    if len(rows)<2 or rows[0][1].count('科目')!=1:
+        raise HTTPException(422,'表格需要“科目”列和至少一行科目名称')
+    column=rows[0][1].index('科目')
+    with connect() as db:
+        db.execute('BEGIN IMMEDIATE')
+        existing={tag['name'] for tag in objects(db,'subject-tags')}
         created=0
-        for n,row in rows[1:]:
-            grade,name,label=[row[i] if i<len(row) else '' for i in indices]
-            kind={'必考':'required','选考':'elective'}.get(label)
-            if grade not in grades or not name or not kind:raise HTTPException(422,f'第{n}行请填写已有年级、科目名称和必考或选考')
-            key=(grades[grade],name)
-            if key in existing:
-                if existing[key].get('kind_of_subject','elective')!=kind:raise HTTPException(409,f'第{n}行科目类型与已有记录不同，请单独编辑')
-                continue
-            existing[key]=put(db,'electives',{'grade_id':key[0],'subject':name,'kind_of_subject':kind,'student_ids':[]},current['id'])
-            created+=1
+        for number,row in rows[1:]:
+            if column>=len(row) or not row[column]:
+                raise HTTPException(422,f'第{number}行缺少科目名称')
+            if row[column] not in existing:
+                subject_tag(db,row[column],current['id'])
+                existing.add(row[column])
+                created+=1
         return {'created':created}

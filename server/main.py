@@ -254,6 +254,10 @@ def create_route(kind):
                     raise HTTPException(422,'请先发布题卡')
                 template=require(db,group['template_id'],'templates')
                 value.update(status='front',template_id=template['id'],template_revision=template['revision'])
+            if kind=='subjects':
+                from .electives import subject_tag
+                tag=subject_tag(db,value['name'],current['id'])
+                value.update(name=tag['name'],subject_tag_id=tag['id'])
             catalog_ids=value.pop('catalog_ids',[]) if kind=='projects' else []
             result=put(db,kind,value,current['id'])
             if kind=='projects' and catalog_ids:

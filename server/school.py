@@ -27,6 +27,11 @@ def assign_class(db,value,body,actor=None):
 def migrate():
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
+        from .electives import subject_tag
+        existing={tag['name'] for tag in objects(db,'subject-tags')}
+        names={s['subject'].strip() for s in objects(db,'electives')} | {s['name'].strip() for s in objects(db,'subjects')}
+        for name in sorted(names-existing):
+            if name: subject_tag(db,name)
         for cls in objects(db,'classes'):
             if not cls.get('grade_id') and str(cls.get('grade','')).strip():
                 assign_class(db,cls,{'grade':cls['grade']});put(db,'classes',cls)
