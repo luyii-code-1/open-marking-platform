@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { App, Card, Progress, Space, Table, Tag, Typography } from 'antd'
+import { App, Card, Progress, Space, Tag, Typography } from 'antd'
+import { Table } from './DataTable'
 import { Button } from './Button'
 import { downloadArchive,send,useResource,type Row } from './api'
 

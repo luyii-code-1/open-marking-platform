@@ -505,6 +505,11 @@ app.include_router(scoring_changes_router)
 from .workflow import router as workflow_router
 app.include_router(workflow_router)
 
+from .teaching import router as teaching_router
+app.include_router(teaching_router)
+from .electives import router as electives_router
+app.include_router(electives_router)
+
 web_distribution=Path(__file__).resolve().parents[1]/'web'/'dist'
 if web_distribution.exists():
     app.mount('/',StaticFiles(directory=web_distribution,html=True),name='web')

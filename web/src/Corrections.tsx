@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { App, Card, Collapse, Form, Input, Modal, Popconfirm, Select, Space, Table, Upload } from 'antd'
+import { App, Card, Collapse, Form, Input, Modal, Popconfirm, Select, Space, Upload } from 'antd'
+import { Table } from './DataTable'
 import { Button } from './Button'
 import { request,send,useResource,type Row,type Template } from './api'
 import { AssetImage } from './components'

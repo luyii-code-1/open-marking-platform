@@ -112,7 +112,7 @@ def test_live_teacher_scope_and_unscanned_force_publication(school):
     f=school;r=f['request'];group=f['groups'][0];f['pair'](f['students'][0])
     account={'username':'teacher','password':'teacher-password-long','name':'教师','role':'teacher'}
     teacher=f['post']('users',account);auth={'Authorization':'Bearer '+f['client'].post('/api/v1/auth/login',json=account).json()['token']}
-    r('PUT','classes/'+f['cls']['id'],{'teacher_ids':[teacher['id']]})
+    r('PUT','teaching/relation',{'class_id':f['cls']['id'],'teacher_id':teacher['id'],'subjects':[],'homeroom':True})
     r('GET','groups/'+group['id']+'/workflow',status=403,auth=auth)
     r('POST','groups/'+group['id']+'/scan-close',{'confirm':True},403,auth=auth)
     r('POST','results/publish',{'group_id':group['id']},409)

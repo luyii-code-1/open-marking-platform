@@ -61,9 +61,12 @@ def bind_conversion(identifier:str,body:dict,current=Depends(admin)):
 @router.put('/classes/{identifier}')
 def edit_class(identifier:str,body:dict,current=Depends(admin)):
     with connect() as db:
+        db.execute('BEGIN IMMEDIATE')
         item=require(db,identifier,'classes')
         for key in ('name','teacher_ids'):
             if key in body: item[key]=body[key]
+        if 'teacher_ids' in body and 'teaching' in item:
+            item['teaching']={uid:r for uid,r in item['teaching'].items() if uid in item['teacher_ids']}
         from .school import assign_class
         assign_class(db,item,body,current['id'])
         if not str(item.get('name','')).strip(): raise HTTPException(422,'班级名称不能为空')

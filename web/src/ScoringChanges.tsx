@@ -1,5 +1,6 @@
 import {useState} from 'react'
-import {Alert,App,Checkbox,Collapse,Form,Input,InputNumber,Modal,Select,Space,Table,Typography} from 'antd'
+import {Alert,App,Checkbox,Collapse,Form,Input,InputNumber,Modal,Select,Space,Typography} from 'antd'
+import { Table } from './DataTable'
 import {Button} from './Button'
 import {send,type Row,type Template} from './api'
 

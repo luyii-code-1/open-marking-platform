@@ -1,5 +1,6 @@
 import { useEffect,useState } from 'react'
-import { Alert,App,Card,Checkbox,Form,Modal,Popconfirm,Select,Space,Statistic,Table,Tag,Typography,Upload } from 'antd'
+import { Alert,App,Card,Checkbox,Form,Modal,Popconfirm,Select,Space,Statistic,Tag,Typography,Upload } from 'antd'
+import { Table } from './DataTable'
 import { DownloadOutlined,UploadOutlined } from '@ant-design/icons'
 import { Button } from './Button'
 import { download,request,send,useResource,type Row } from './api'
@@ -36,7 +37,7 @@ export function Roster({groupId}:{groupId?:string}){
     {group&&<><Card title="应考名单" extra={<Button disabled={busy} onClick={refresh}>刷新</Button>}>
       <Space direction="vertical" size={24} style={{width:'100%'}}>
         <div className="roster-summary"><Statistic title="应考学生" value={data?.students.length||0}/><div><Tag>{selected?'指定名单':data?.dynamic?'年级全体':'待设置'}</Tag><Typography.Paragraph type="secondary" style={{marginTop:8,marginBottom:0}}>{selected?'名单成员按导入结果确定，学生资料实时关联。':'默认使用所属年级当前全体学生，走班科目可导入指定名单。'}</Typography.Paragraph></div></div>
-        <Space wrap size={16}><Button type="primary" icon={<UploadOutlined/>} disabled={busy||frozen||!current?.grade_id} onClick={()=>{setFile(undefined);setReport(undefined);setImportError('');setConfirmed(false);setOpen(true)}}>{selected?'重新导入名单':'导入指定名单'}</Button><Button icon={<DownloadOutlined/>} disabled={busy} onClick={()=>download(`/groups/${group}/roster/template`,'应考名单模板.xlsx').catch(e=>message.error(e.message))}>下载Excel模板</Button>{selected&&<Popconfirm title="改用所属年级全体学生？" description="现有答卷和成绩继续保留，应考范围改为该年级当前所有学生。" onConfirm={useGrade}><Button disabled={busy||frozen}>使用年级全体学生</Button></Popconfirm>}</Space>
+        <Space wrap size={16}><Popconfirm title="使用该年级、科目的当前选科名单？" description="替换本题卡的应考名单。选科调整后可再次引用。" onConfirm={async()=>{setBusy(true);try{const r=await send('/groups/'+group+'/roster/elective');await refresh();message.success('已引用 '+r.count+' 名学生')}catch(e){message.error((e as Error).message)}finally{setBusy(false)}}}><Button disabled={busy||frozen||!current?.grade_id}>引用选科名单</Button></Popconfirm><Button type="primary" icon={<UploadOutlined/>} disabled={busy||frozen||!current?.grade_id} onClick={()=>{setFile(undefined);setReport(undefined);setImportError('');setConfirmed(false);setOpen(true)}}>{selected?'重新导入名单':'导入指定名单'}</Button><Button icon={<DownloadOutlined/>} disabled={busy} onClick={()=>download(`/groups/${group}/roster/template`,'应考名单模板.xlsx').catch(e=>message.error(e.message))}>下载Excel模板</Button>{selected&&<Popconfirm title="改用所属年级全体学生？" description="现有答卷和成绩继续保留，应考范围改为该年级当前所有学生。" onConfirm={useGrade}><Button disabled={busy||frozen}>使用年级全体学生</Button></Popconfirm>}</Space>
         {!current?.grade_id&&<Alert type="info" showIcon message="请先设置所属年级，再导入名单。"/>}
         {frozen&&<Alert type="info" message="成绩已发布，发起复核后可调整应考名单。"/>}
       </Space>

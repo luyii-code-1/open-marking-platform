@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { ReactNode } from 'react'
-import { Alert, App, Card, Dropdown, Form, Input, InputNumber, Modal, Progress, Select, Space, Table, Tag, Typography, Upload } from 'antd'
+import { Alert, App, Card, Dropdown, Form, Input, InputNumber, Modal, Progress, Select, Space, Tag, Typography, Upload } from 'antd'
+import { Table } from './DataTable'
 import { Button } from './Button'
 import { MoreOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons'
 import type { TableColumnsType } from 'antd'

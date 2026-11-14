@@ -1,6 +1,7 @@
 import {CardWorkflow} from './CardWorkflow'
 import {useEffect,useState} from 'react'
-import {App,Card,Empty,Form,Input,InputNumber,Modal,Popconfirm,Select,Space,Statistic,Table,Tag,Typography,Upload} from 'antd'
+import {App,Card,Empty,Form,Input,InputNumber,Modal,Popconfirm,Select,Space,Statistic,Tag,Typography,Upload} from 'antd'
+import { Table } from './DataTable'
 import {ArrowLeftOutlined,PlusOutlined,ReloadOutlined,UploadOutlined} from '@ant-design/icons'
 import {Button} from './Button'
 import {describeStatus,download,request,send,useResource,type Row} from './api'

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Alert, App, Collapse, Select, Table } from 'antd'
+import { Alert, App, Collapse, Select} from 'antd'
+import { Table } from './DataTable'
 import { Button } from './Button'
 import { send, useResource, type Row } from './api'
 

@@ -1,4 +1,5 @@
-import { Card, Progress, Space, Table, Tag, Typography } from 'antd'
+import { Card, Progress, Space, Tag, Typography } from 'antd'
+import { Table } from './DataTable'
 import { Button } from './Button'
 import { ErrorNotice } from './Management'
 import { useResource, type Row, type Template, type Question } from './api'

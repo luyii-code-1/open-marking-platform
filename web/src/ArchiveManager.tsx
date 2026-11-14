@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Alert, App, Card, Descriptions, Modal, Popconfirm, Select, Space, Table, Typography } from 'antd'
+import { Alert, App, Card, Descriptions, Modal, Popconfirm, Select, Space, Typography } from 'antd'
+import { Table } from './DataTable'
 import { Button } from './Button'
 import { downloadArchive,request,send,useResource,type Row } from './api'
 

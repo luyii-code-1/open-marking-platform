@@ -18,7 +18,7 @@ def test_analysis_statistics_rank_scope_conversion_and_exports(tmp_path,monkeypa
         teacher_headers={'Authorization':'Bearer '+client.post('/api/v1/auth/login',json=account).json()['token']}
         with db.connect() as connection:
             project=db.put(connection,'projects',{'name':'期中考试'})
-            cls1=db.put(connection,'classes',{'name':'一班','teacher_ids':[teacher['id']]})
+            cls1=db.put(connection,'classes',{'name':'一班','teacher_ids':[teacher['id']],'teaching':{teacher['id']:{'homeroom':True}}})
             cls2=db.put(connection,'classes',{'name':'二班','teacher_ids':[]})
             conversion=db.put(connection,'score-conversions',{'mode':'segments','segments':[{'min':0,'max':10,'target_min':40,'target_max':100}]})
             students=[db.put(connection,'students',{'name':name,'class_id':cls1['id'] if i in (0,1,4) else cls2['id'],'candidate_number':f'{i:03}'}) for i,name in enumerate(('=公式名字','乙','丙','丁','戊','己'))]

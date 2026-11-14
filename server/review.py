@@ -383,9 +383,9 @@ def results_for(db,group_id,current,convert_scores=True):
                 'grade':student.get('grade',label.get('grade',cls.get('grade')))}
     allowed_classes=None
     if current['role'] not in ('admin','manager'):
-        from .visibility import taught_classes,result_groups
-        allowed_classes=taught_classes(db,current['id'])
-        if group_id not in result_groups(db,current['id'],allowed_classes): raise HTTPException(403,'成绩尚未发布或不属于任教班级')
+        from .visibility import class_scope,groups_for_classes
+        allowed_classes=class_scope(db,current['id'],group.get('subject_id'))
+        if group_id not in groups_for_classes(db,allowed_classes): raise HTTPException(403,'成绩尚未发布或不属于任教班级')
     output=[]
     for submission in objects(db,'submissions'):
         if submission['group_id']!=group_id: continue

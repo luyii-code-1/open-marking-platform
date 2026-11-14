@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
-import { Alert, App, Collapse, Empty, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd'
+import { Alert, App, Collapse, Empty, Form, Input, InputNumber, Modal, Select, Space, Tag, Typography } from 'antd'
+import { Table } from './DataTable'
 import { Button } from './Button'
 import { PlusOutlined, LeftOutlined, RightOutlined } from '@ant-design/icons'
 import type { Question, Template } from './api'

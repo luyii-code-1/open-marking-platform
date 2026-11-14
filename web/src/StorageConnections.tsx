@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Alert, App, Card, Collapse, Drawer, Form, Input, Select, Space, Switch, Table, Tag, Typography, Popconfirm } from 'antd'
+import { Alert, App, Card, Collapse, Drawer, Form, Input, Select, Space, Switch, Tag, Typography, Popconfirm } from 'antd'
+import { Table } from './DataTable'
 import { Button } from './Button'
 import { announceChanges, send, useResource, type Row } from './api'
 import { ErrorNotice } from './EntityTable'

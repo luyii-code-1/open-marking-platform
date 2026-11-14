@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { Alert, App, Checkbox, Descriptions, Dropdown, Input, Modal, Progress, Space, Table, Typography } from 'antd'
+import { Alert, App, Checkbox, Descriptions, Dropdown, Input, Modal, Progress, Space, Typography } from 'antd'
+import { Table } from './DataTable'
 import { Button } from './Button'
 import { MoreOutlined } from '@ant-design/icons'
 import { announceChanges, download, request, send, type Row } from './api'

@@ -1,6 +1,7 @@
 import { RoomTagManager } from './RoomTags'
 import { useEffect,useState } from 'react'
-import { App,Breadcrumb,Card,Empty,Form,Input,Modal,Popconfirm,Select,Tooltip,Space,Spin,Table,Tabs,Tag,Typography } from 'antd'
+import { App,Breadcrumb,Card,Empty,Form,Input,Modal,Popconfirm,Select,Tooltip,Space,Spin,Tabs,Tag,Typography } from 'antd'
+import { Table } from './DataTable'
 import { Button } from './Button'
 import { ArrowLeftOutlined,RightOutlined,PlusOutlined } from '@ant-design/icons'
 import { send,useResource,type Row,type Template } from './api'

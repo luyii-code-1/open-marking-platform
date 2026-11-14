@@ -1,12 +1,31 @@
-"""Published result scope from the teacher's current class assignments."""
+"""Published results scoped by class and school subject name."""
+from .db import objects, get
 
 
-def taught_classes(db,user_id):
-    return {r[0] for r in db.execute("SELECT id FROM objects WHERE kind='classes' AND deleted=0 AND EXISTS(SELECT 1 FROM json_each(body,'$.teacher_ids') WHERE value=?)",(user_id,))}
+def class_scope(db, user_id, subject_id):
+    subject = get(db, subject_id, 'subjects') or {}
+    return {cls['id'] for cls in objects(db, 'classes')
+            if permits(cls, user_id, subject.get('name', '').strip())}
 
 
-def result_groups(db,user_id,classes=None):
-    classes=taught_classes(db,user_id) if classes is None else classes
+def permits(cls, user_id, subject):
+    role = cls.get('teaching', {}).get(user_id, {})
+    return user_id in cls.get('teacher_ids', []) and (
+        role.get('homeroom') is True or subject in role.get('subjects', []))
+
+
+def result_groups(db, user_id):
+    classes = [c for c in objects(db, 'classes') if user_id in c.get('teacher_ids', [])
+               and user_id in c.get('teaching', {})]
+    names = {s['id']: s['name'].strip() for s in objects(db, 'subjects')}
+    groups = {g['id']: names.get(g.get('subject_id'), '') for g in objects(db, 'groups')}
+    visible = set()
+    for cls in classes:
+        visible.update(g for g in groups_for_classes(db, [cls['id']]) if permits(cls, user_id, groups.get(g, '')))
+    return visible
+
+
+def groups_for_classes(db, classes):
     if not classes:return set()
     placeholders=','.join('?' for _ in classes);parameters=list(classes)
     scanned=db.execute('''SELECT DISTINCT json_extract(s.body,'$.group_id') FROM objects s
@@ -21,6 +40,6 @@ def result_groups(db,user_id,classes=None):
         WHERE json_extract(g.body,'$.grade_id') IS NULL AND r.kind='rosters' AND r.deleted=0 AND json_extract(g.body,'$.frozen')=1
         AND json_extract(student.value,'$.class_id') IN ('''+placeholders+')',parameters)
     groups.update(r[0] for r in rosters)
-    dynamic=db.execute('''SELECT DISTINCT g.id FROM objects g JOIN objects c ON c.kind='classes' AND c.deleted=0 AND json_extract(c.body,'$.grade_id')=json_extract(g.body,'$.grade_id') JOIN objects s ON s.kind='students' AND s.deleted=0 AND json_extract(s.body,'$.class_id')=c.id WHERE g.kind='groups' AND g.deleted=0 AND json_extract(g.body,'$.frozen')=1 AND c.id IN ('''+placeholders+')',parameters)
+    dynamic=db.execute('''SELECT DISTINCT g.id FROM objects g JOIN objects c ON c.kind='classes' AND c.deleted=0 AND json_extract(c.body,'$.grade_id')=json_extract(g.body,'$.grade_id') JOIN objects s ON s.kind='students' AND s.deleted=0 AND json_extract(s.body,'$.class_id')=c.id WHERE g.kind='groups' AND g.deleted=0 AND json_extract(g.body,'$.frozen')=1 AND (COALESCE(json_extract(g.body,'$.roster_mode'),'grade')!='selected' OR EXISTS (SELECT 1 FROM objects r, json_each(r.body,'$.student_ids') m WHERE r.id=json_extract(g.body,'$.roster_id') AND r.deleted=0 AND m.value=s.id)) AND c.id IN ('''+placeholders+')',parameters)
     groups.update(r[0] for r in dynamic)
     return groups

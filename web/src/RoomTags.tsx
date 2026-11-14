@@ -1,5 +1,6 @@
 import { useEffect,useState } from 'react'
-import { App,Card,Form,Input,InputNumber,Modal,Select,Space,Table,Tag,Typography } from 'antd'
+import { App,Card,Form,Input,InputNumber,Modal,Select,Space,Tag,Typography } from 'antd'
+import { Table } from './DataTable'
 import { Button } from './Button'
 import { send,useResource,type Row } from './api'
 import { ErrorNotice } from './EntityTable'

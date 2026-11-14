@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { Alert, Button, Modal, Popconfirm, Space, Table, Tag } from 'antd'
+import { Alert, Button, Modal, Popconfirm, Space, Tag } from 'antd'
+import { Table } from './DataTable'
 import { currentToken, type User } from './api'
 import { forgetReview, isReviewUpdateLocked, listReviews, watchReviewChanges, type ReviewRecord } from './reviewStore'
 import { reviewTransport, syncReviewRecords, type SyncReport } from './reviewSync'

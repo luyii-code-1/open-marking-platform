@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { Alert, App, Card, Form, Input, InputNumber, Modal, Select, Space, Table, Tabs, Tag, Typography, Upload } from 'antd'
+import { Alert, App, Card, Form, Input, InputNumber, Modal, Select, Space, Tabs, Tag, Typography, Upload } from 'antd'
+import { Table } from './DataTable'
 import { Button } from './Button'
 import { request,send,useResource,type Row } from './api'
 

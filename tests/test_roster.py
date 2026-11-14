@@ -22,7 +22,7 @@ def test_roster_unscanned_force_publication_and_class_privacy(tmp_path,monkeypat
             subject=db.put(connection,'subjects',{'project_id':project['id'],'name':'语文'})
             group=db.put(connection,'groups',{'subject_id':subject['id'],'name':'高一组'})
             cls1=db.put(connection,'classes',{'name':'一班'})
-            cls2=db.put(connection,'classes',{'name':'二班','teacher_ids':[teacher['id']]})
+            cls2=db.put(connection,'classes',{'name':'二班','teacher_ids':[teacher['id']],'teaching':{teacher['id']:{'homeroom':True}}})
             students=[db.put(connection,'students',{'name':f'学生{i}','candidate_number':f'{i:03}','class_id':cls1['id'] if i<2 else cls2['id']}) for i in range(4)]
             q={'id':str(uuid4()),'number':1,'type':'subjective','points':10,'review_mode':'single'}
             template=db.put(connection,'templates',{'name':'语文卷','group_id':group['id'],'questions':[q]})

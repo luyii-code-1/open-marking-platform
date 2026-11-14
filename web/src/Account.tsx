@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { App, Card, Form, Input, Modal, Space, Table, Typography } from 'antd'
+import { App, Card, Form, Input, Modal, Space, Typography } from 'antd'
+import { Table } from './DataTable'
 import { Button } from './Button'
 import { send, useResource, type Row, type User } from './api'
 import { registerPasskey } from './passkeys'
@@ -7,6 +8,7 @@ import { useAction } from './useAction'
 
 export function Account({user,onProfile,onLogout}:{user:User;onProfile:(user:User)=>void;onLogout:()=>void}) {
   const [password,setPassword]=useState(''),[codes,setCodes]=useState<string[]>([])
+  const teaching=useResource<Row[]>(user.role==='teacher'?'/teaching/mine':null,[])
   const passkeys=useResource<Row[]>('/auth/passkeys',[]),profileAction=useAction(),passwordAction=useAction(),action=useAction(),{message}=App.useApp()
   async function act(key:string,callback:()=>Promise<void>) {
     const owner=key==='profile'?profileAction:key==='password'?passwordAction:action
@@ -17,6 +19,7 @@ export function Account({user,onProfile,onLogout}:{user:User;onProfile:(user:Use
       <Form.Item name="name" label="姓名" rules={[{required:true}]}><Input maxLength={100}/></Form.Item>
       <Button htmlType="submit" loading={profileAction.pending==='profile'}>保存资料</Button>
     </Form></Card>
+    {user.role==='teacher'&&<Card title="我的任教关系"><Table rowKey={r=>r.class_id} dataSource={teaching.data} columns={[{title:'年级',dataIndex:'grade'},{title:'行政班',dataIndex:'class_name'},{title:'任教学科',render:(_,r)=>r.subjects?.join('、')||(r.homeroom?'—':'待补全')},{title:'班主任',render:(_,r)=>r.homeroom?'是':'—'}]}/></Card>}
     <Card title="账号安全"><Form layout="vertical" disabled={passwordAction.busy||action.busy} onFinish={values=>act('password',async()=>{await send('/auth/password',values);message.success('密码已修改，请重新登录');onLogout()})}>
       <Form.Item name="password" label="当前密码" rules={[{required:true}]}><Input.Password autoComplete="current-password"/></Form.Item>
       <Form.Item name="new_password" label="新密码" rules={[{required:true,min:10}]}><Input.Password autoComplete="new-password"/></Form.Item>

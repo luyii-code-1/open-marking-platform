@@ -14,7 +14,7 @@ def test_class_teacher_has_published_hierarchy_but_no_unrelated_results(tmp_path
         person=client.post('/api/v1/users',json=account,headers=headers).json()
         teacher={'Authorization':'Bearer '+client.post('/api/v1/auth/login',json=account).json()['token']}
         with db.connect() as connection:
-            cls=db.put(connection,'classes',{'name':'任教班','teacher_ids':[person['id']]})
+            cls=db.put(connection,'classes',{'name':'任教班','teacher_ids':[person['id']],'teaching':{person['id']:{'homeroom':True}}})
             other=db.put(connection,'classes',{'name':'无关班','teacher_ids':[]})
             own=db.put(connection,'students',{'name':'自己的学生','candidate_number':'001','class_id':cls['id']})
             foreign=db.put(connection,'students',{'name':'其他学生','candidate_number':'002','class_id':other['id']})
