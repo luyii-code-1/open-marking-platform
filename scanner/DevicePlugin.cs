@@ -28,12 +28,14 @@ internal static class DevicePlugin
             {
                 var device=devices.Single(d=>d.ID==r.GetProperty("device_id").GetString());
                 var folder=r.GetProperty("directory").GetString()!;
-                await scanner.Acquire(device,r.GetProperty("paper").GetString()!,true,async image=>{
+                var duplex=r.GetProperty("duplex").GetBoolean();
+                var feeder=await scanner.UseFeeder(device,duplex);
+                await scanner.Acquire(device,r.GetProperty("paper").GetString()!,feeder,async image=>{
                     var name=Guid.NewGuid().ToString("N")+".png";
                     image.Save(Path.Combine(folder,name),System.Drawing.Imaging.ImageFormat.Png);
                     Emit(new{type="page",file=name});
                     if(await Console.In.ReadLineAsync()!="{\"continue\":true}")throw new OperationCanceledException();
-                },CancellationToken.None,r.GetProperty("duplex").GetBoolean(),new ScanCaptureSettings(r.GetProperty("dpi").GetInt32(),r.GetProperty("color").GetString()!));
+                },CancellationToken.None,duplex,new ScanCaptureSettings(r.GetProperty("dpi").GetInt32(),r.GetProperty("color").GetString()!));
             }
             Emit(new{type="done"});return 0;
         }

@@ -31,6 +31,16 @@ public sealed class ScannerService : IDisposable
 
     public Task<List<ScanDevice>> Devices(Driver driver) => _controller.GetDeviceList(DiscoveryOptions(driver));
 
+    internal async Task<bool> UseFeeder(ScanDevice device, bool duplex)
+    {
+        if (device.Driver != Driver.Wia) return true;
+        var caps = (await _controller.GetCaps(device, CancellationToken.None))?.PaperSourceCaps;
+        if (caps == null) return true;
+        if (duplex && caps.SupportsFlatbed && !caps.SupportsDuplex)
+            throw new InvalidOperationException("当前 WIA 设备无法自动双面，请选择单面或手动翻面。");
+        return caps.SupportsFeeder || !caps.SupportsFlatbed;
+    }
+
     internal static ScanOptions CaptureOptions(ScanDevice device,string paper,bool feeder,bool duplex,ScanCaptureSettings? settings=null)
     {
         var selected=(settings??new()).Validate();
