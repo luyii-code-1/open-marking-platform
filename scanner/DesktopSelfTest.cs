@@ -68,7 +68,10 @@ internal static class DesktopSelfTest
             using(var resumed=new DesktopController(new LocalQueue(root),Worker(),selfTest:true))
             {
                 Check(queue.Batches().Single(b=>b.Id==batchId).Status=="local_paired","Restart lost the local pairing state.");
-                await resumed.Tick(true);Check(queue.Batches().Single(b=>b.Id==batchId).Status=="paired","Resumed batch was not committed: "+queue.Batches().Single(b=>b.Id==batchId).Error);
+                await resumed.Tick();Check(queue.Pages(batchId).All(p=>p.Status=="pending"),"Connection uploaded local pages without confirmation.");
+                await resumed.Invoke("upload",Json(new{batch_id=batchId}));
+                for(var i=0;i<300&&queue.Batches().Single(b=>b.Id==batchId).Status=="local_paired";i++)await Task.Delay(100);
+                Check(queue.Batches().Single(b=>b.Id==batchId).Status=="paired","Resumed batch was not committed: "+queue.Batches().Single(b=>b.Id==batchId).Error);
                 Check(queue.Pages(batchId).All(p=>p.Status=="uploaded"),"Upload acknowledgement was lost.");await resumed.Close();
             }
             Checkpoint("passed",new{batch_id=batchId,scope="offline restart, local TCP recognition, durable queue, native signed upload and server pairing"});

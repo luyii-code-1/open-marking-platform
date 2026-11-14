@@ -81,7 +81,7 @@ public sealed class DesktopController : IDisposable
         var offset=args.TryGetProperty("offset",out var start)?Math.Max(0,start.GetInt32()):0;
         var projects=_packages.Values.Select(p=>new{id=Text(p.GetProperty("project"),"id"),name=Text(p.GetProperty("project"),"name"),downloaded_at=Text(p,"downloaded_at")}).ToArray();
         var catalogPath=Path.Combine(_queue.Root,"workspaces",Partition,"catalog.json");
-        return new{device_protocol=DevicePlugin.Protocol,scan_settings=new{dpi=ScanSettings.Dpi,color=ScanSettings.Color},protocol=Protocol,server_url=_server,storage_path=_queue.Root,online=_online,capturing=Capturing,syncing=_tickRunning,message=_message,project_id=_project,
+        return new{manual_room_upload=true,device_protocol=DevicePlugin.Protocol,scan_settings=new{dpi=ScanSettings.Dpi,color=ScanSettings.Color},protocol=Protocol,server_url=_server,storage_path=_queue.Root,online=_online,capturing=Capturing,syncing=_uploadGate.CurrentCount==0,message=_message,project_id=_project,
             projects,catalog=File.Exists(catalogPath)?Json(File.ReadAllText(catalogPath)):Json("{\"projects\":[]}"),
             package=_packages.TryGetValue(_project,out var package)?package:Json("null"),
             batches=batches.Select(b=>new{id=b.Id,name=b.Label,subject_id=b.SubjectId,group_id=b.GroupId,room=b.Room,room_tags=JsonSerializer.Deserialize<JsonElement>(b.RoomTagsJson),status=b.Status,error=b.Error,capture_mode=b.CaptureMode,back_order=b.BackOrder,paper=b.Paper,sides=b.Sides,created_at=b.CreatedAt,
@@ -201,8 +201,16 @@ public sealed class DesktopController : IDisposable
                         for(var i=0;i<image.GetFrameCount(frame);i++){_captureCancel.Token.ThrowIfCancellationRequested();image.SelectActiveFrame(frame,i);await receive(image);}
                     }
                 },importSide);return new{started=true};
-            case "pair":var pairBatch=Batch(Text(args,"batch_id"));if(Capturing)throw new InvalidOperationException("请先停止采集再确认批次。");_queue.PairLocally(pairBatch);Notify("本地配页完成，剩余文件将继续上传。");return new{paired=true};
-            case "upload":_ = ManualUpload();return new{started=true};
+            case "pair":var pairBatch=Batch(Text(args,"batch_id"));if(Capturing)throw new InvalidOperationException("请先停止采集再确认批次。");_queue.PairLocally(pairBatch);Notify("本地配页完成，等待上传。");return new{paired=true};
+            case "upload":
+                var scope=Batch(Text(args,"batch_id"));
+                if(Capturing||_connecting||_tickRunning)throw new InvalidOperationException("请等待当前操作完成。");
+                var roomSheets=_queue.Batches().Where(b=>b.ServerUrl==_server&&b.ProjectId==scope.ProjectId&&b.GroupId==scope.GroupId&&RoomKey(b)==RoomKey(scope)).ToArray();
+                if(roomSheets.Any(b=>b.Status=="frozen"||b.Status=="open"&&_queue.Pages(b.Id).Any(p=>p.Status!="excluded")))
+                    throw new InvalidOperationException("请先核对本考场的异常或未完成答卷。");
+                var ready=roomSheets.Where(b=>b.Status=="local_paired").ToArray();
+                if(ready.Length==0)throw new InvalidOperationException("本考场暂无待上传答卷。");
+                _ = UploadRoom(ready);return new{started=true};
             case "refreshBatch":
                 if(Capturing)throw new InvalidOperationException("请先停止采集再核查批次状态。");
                 var refresh=Batch(Text(args,"batch_id"));await RefreshBatch(refresh);return State(args);
@@ -298,14 +306,22 @@ public sealed class DesktopController : IDisposable
                 }
                 Notify();_captureCancel!.Token.ThrowIfCancellationRequested();
             });
-            Notify("采集完成，已识读答卷进入上传队列。");
+            Notify("采集完成，答卷已保存在本机。");
         }
         catch(OperationCanceledException){Notify("采集已暂停，已落盘页面保留。");}
         catch(Exception error)when(error is not OutOfMemoryException){Notify(error.Message);}
         finally{if(collected>0&&collected<expected&&_queue.Batches().First(b=>b.Id==session.Id).Status=="open")_queue.BatchStatus(session.Id,"frozen","双面缺页，请核对原图");_captureCancel?.Dispose();_captureCancel=null;_captureBatchId="";Changed?.Invoke();}
     }
 
-    public async Task Tick(bool manual=false)
+    private async Task UploadRoom(BatchRow[] sheets)
+    {
+        try{await Tick(sheets);}
+        catch(Exception error)when(error is not OutOfMemoryException){Notify("上传暂停："+error.Message);}
+    }
+
+    private static string RoomKey(BatchRow sheet)=>string.Join(",",Json(sheet.RoomTagsJson).EnumerateArray().Select(tag=>Text(tag,"id")).OrderBy(id=>id));
+    public Task Tick()=>Tick(null);
+    private async Task Tick(BatchRow[]? requested)
     {
         if(_connecting||_tickRunning||_disposed||string.IsNullOrEmpty(_server))return;_tickRunning=true;
         try
@@ -314,13 +330,15 @@ public sealed class DesktopController : IDisposable
             {
                 _api??=Api(_server);using var timeout=CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);timeout.CancelAfter(TimeSpan.FromSeconds(6));
                 try{await _api.ConnectDevice(timeout.Token);_online=true;_revoked=false;}
-                catch(ApiException error)when(error.StatusCode==403){_revoked=true;_online=false;_captureCancel?.Cancel();if(manual)throw;return;}
-                catch(Exception error)when(error is not OutOfMemoryException){_online=false;if(manual)throw new InvalidOperationException("暂时无法连接服务器，本地数据保留。",error);return;}
+                catch(ApiException error)when(error.StatusCode==403){_revoked=true;_online=false;_captureCancel?.Cancel();if(requested is not null)throw;return;}
+                catch(Exception error)when(error is not OutOfMemoryException){_online=false;if(requested is not null)throw new InvalidOperationException("暂时无法连接服务器，本地数据保留。",error);return;}
             }
+            if(requested is null)return;
             if(!await _uploadGate.WaitAsync(0,_lifetime.Token))return;
             try
             {
-                foreach(var batch in _queue.Batches().Where(b=>b.ServerUrl==_server&&b.TemplateJson!="{}"&&b.Status is "open" or "local_paired"))
+                Notify("正在上传已核对的答卷。");
+                foreach(var batch in requested)
                 {
                     var pages=_queue.Pages(batch.Id);
                     if(!pages.Any(p=>p.Status=="pending"&&p.RecognitionJson!="{}")&&batch.Status!="local_paired")continue;
@@ -339,17 +357,16 @@ public sealed class DesktopController : IDisposable
                             await _api.Post($"scan-batches/{batch.Id}/pair",new{local_pairs=Json(batch.LocalPairsJson)},_lifetime.Token);_queue.BatchStatus(batch.Id,"paired");Notify("批次已同步并由服务器确认。");
                         }
                     }
-                    catch(ApiException error)when(error.StatusCode is 403 or 404 or 409 or 422){if(error.StatusCode==403){_revoked=true;_captureCancel?.Cancel();}Freeze(batch,"同步被服务器拒绝："+error.Message);}
+                    catch(ApiException error)when(error.StatusCode is 403 or 404 or 409 or 422){if(error.StatusCode==403){_revoked=true;_captureCancel?.Cancel();}Freeze(batch,"同步被服务器拒绝："+error.Message);throw;}
                 }
             }
             finally{_uploadGate.Release();}
         }
         catch(OperationCanceledException)when(_lifetime.IsCancellationRequested){ }
-        catch(Exception error)when(error is not OutOfMemoryException){_online=false;Notify("上传暂停，本地队列保留："+error.Message);if(manual)throw;}
+        catch(Exception error)when(error is not OutOfMemoryException){_online=false;Notify("上传暂停，本地队列保留："+error.Message);if(requested is not null)throw;}
         finally{_tickRunning=false;Changed?.Invoke();}
     }
 
-    private async Task ManualUpload(){try{await Tick(true);}catch(Exception error)when(error is not OutOfMemoryException){Notify(error.Message);}}
     private void ApplyRemote(PageRow page,JsonElement remote)
     {
         if(remote.TryGetProperty("excluded",out var excluded)&&excluded.ValueKind==JsonValueKind.True){_queue.PageExcluded(page.CaptureId);return;}
