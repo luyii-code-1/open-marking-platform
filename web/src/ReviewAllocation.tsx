@@ -18,21 +18,22 @@ export function ReviewAllocation({templateId,frozen}:{templateId:string;frozen:b
   const grades=useResource<Row[]>(editing?'/grades':null,[])
   const [filter,setFilter]=useState<TeacherFilter>(emptyTeacherFilter)
   const candidates=matchingTeachers(users.data,classes.data,filter)
+  const [picker,setPicker]=useState(false),[checked,setChecked]=useState<string[]>([]),[onlyChecked,setOnlyChecked]=useState(false)
   const teacherLabel=(u:Row)=>u.name+'（'+u.username+'）'
   const poolOptions=(selected:string[])=>users.data.filter(u=>selected.includes(u.id)||candidateIds.has(u.id)).map(u=>({label:teacherLabel(u),value:u.id}))
   const candidateIds=new Set(candidates.map(u=>u.id))
   const gradeNames=new Map(grades.data.map(g=>[g.id,g.name]))
   const availableGrades=new Map(classes.data.map(c=>[c.grade_id||c.grade,gradeNames.get(c.grade_id)||c.grade||c.grade_name]))
   const availableSubjects=new Set<string>(classes.data.flatMap(c=>Object.values(c.teaching||{}).flatMap(r=>(r as {subjects?:string[]}).subjects||[])))
-  function addCandidates(field:'user_ids'|'arbitrator_ids'){
+  function addCandidates(field:'user_ids'|'arbitrator_ids',ids:Iterable<string>){
     const selected:string[]=form.getFieldValue(field)||[]
-    form.setFieldValue(field,[...new Set([...selected,...candidateIds])])
+    form.setFieldValue(field,[...new Set([...selected,...ids])])
   }
   const assignment=(q:Question)=>assignments.data.find(a=>a.template_id===templateId&&a.question_id===q.id)
   const names=(ids:string[]=[])=>ids.length?ids.map(id=><Tag key={id}>{users.data.find(u=>u.id===id)?.name||id}</Tag>):'待分配'
   function edit(q:Question){
     const a=assignment(q)
-    setFilter(emptyTeacherFilter)
+    setPicker(false);setChecked([]);setOnlyChecked(false);setFilter(emptyTeacherFilter)
     form.resetFields()
     form.setFieldsValue({user_ids:a?.user_ids||[],weights:a?.weights||{},arbitrator_ids:a&&(a.arbitration_mode==='random'||(!a.arbitration_mode&&!a.arbitrator_ids?.length))&&q.review_mode==='double'?a.user_ids:a?.arbitrator_ids||[],arbitrator_weights:a?.arbitrator_weights||{}})
     setEditing(q)
@@ -68,13 +69,26 @@ export function ReviewAllocation({templateId,frozen}:{templateId:string;frozen:b
         </Form.Item>
         {(classes.error||grades.error)&&<Alert type="error" message={classes.error||grades.error}/>}
         <Form.Item><Space wrap><span>匹配 {candidates.length} 人</span>
-          <Button disabled={!candidates.length||!classes.loaded||!!classes.error} onClick={()=>addCandidates('user_ids')}>加入阅卷池</Button>
-          <Button disabled={!candidates.length||!classes.loaded||!!classes.error} onClick={()=>addCandidates('arbitrator_ids')}>加入仲裁池</Button>
+          <Button disabled={!candidates.length||!classes.loaded||!!classes.error} onClick={()=>{setChecked([]);setOnlyChecked(false);setPicker(true)}}>查看并勾选教师</Button>
         </Space></Form.Item>
         <Form.Item name="user_ids" label="阅卷池" rules={[{required:true,message:'请选择阅卷教师'}]}><Select mode="multiple" optionFilterProp="label" options={poolOptions(graders)}/></Form.Item>
         {graders.map(id=><Form.Item key={id} name={['weights',id]} label={(users.data.find(u=>u.id===id)?.name||'教师')+' · 分配权重'}><InputNumber min={0} max={255} placeholder="1"/></Form.Item>)}
         <Form.Item name="arbitrator_ids" label="仲裁池" rules={[{required:editing?.review_mode==='double',message:'请选择仲裁教师'}]}><Select mode="multiple" optionFilterProp="label" options={poolOptions(arbiters)}/></Form.Item>
         {arbiters.map(id=><Form.Item key={id} name={['arbitrator_weights',id]} label={(users.data.find(u=>u.id===id)?.name||'教师')+' · 仲裁权重'}><InputNumber min={0} max={255} placeholder="1"/></Form.Item>)}
       </Form>
+    </Modal>
+    <Modal title="筛选结果" width={720} open={picker&&!!editing} destroyOnHidden onCancel={()=>setPicker(false)} footer={<Space wrap>
+      <Button onClick={()=>setPicker(false)}>取消</Button>
+      <Button disabled={!checked.some(id=>candidateIds.has(id))} onClick={()=>{addCandidates('arbitrator_ids',checked.filter(id=>candidateIds.has(id)));setPicker(false)}}>加入仲裁池</Button>
+      <Button type="primary" disabled={!checked.some(id=>candidateIds.has(id))} onClick={()=>{addCandidates('user_ids',checked.filter(id=>candidateIds.has(id)));setPicker(false)}}>加入阅卷池</Button>
+    </Space>}>
+      <Space wrap><Checkbox checked={onlyChecked} onChange={e=>setOnlyChecked(e.target.checked)}>只看已勾选（{checked.filter(id=>candidateIds.has(id)).length}）</Checkbox>
+        <Button type="link" onClick={()=>setChecked([...candidateIds])}>勾选全部匹配教师（{candidates.length}）</Button>
+        <Button type="link" disabled={!checked.length} onClick={()=>setChecked([])}>清空勾选</Button>
+      </Space>
+      <Table<Row> rowKey="id" dataSource={onlyChecked?candidates.filter(u=>checked.includes(u.id)):candidates}
+        pagination={{defaultPageSize:50}} scroll={{y:360}}
+        rowSelection={{selectedRowKeys:checked,onChange:keys=>setChecked(keys.map(String))}}
+        columns={[{title:'姓名',dataIndex:'name'},{title:'账号',dataIndex:'username'},{title:'任教科目',render:(_,u)=>[...new Set(classes.data.flatMap(c=>c.teaching?.[u.id]?.subjects||[]))].join('、')||'—'}]}/>
     </Modal></>
 }
