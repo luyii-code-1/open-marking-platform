@@ -113,13 +113,8 @@ public sealed partial class LocalQueue
         var folder = System.IO.Path.Combine(Root, "pages", batch.Id);
         Directory.CreateDirectory(folder);
         var original = System.IO.Path.Combine(folder, captureId + ".png");
-        var upload = System.IO.Path.Combine(folder, captureId + ".jpg");
         SaveDurably(original, stream => image.Save(stream, ImageFormat.Png));
-        var codec = ImageCodecInfo.GetImageEncoders().Single(x => x.FormatID == ImageFormat.Jpeg.Guid);
-        using var settings = new EncoderParameters(1);
-        settings.Param[0] = new EncoderParameter(System.Drawing.Imaging.Encoder.Quality, 95L);
-        SaveDurably(upload, stream => image.Save(stream, codec, settings));
-        using var file = File.OpenRead(upload);
+        using var file = File.OpenRead(original);
         var sha = Convert.ToHexString(SHA256.HashData(file)).ToLowerInvariant();
         using var db = Open();
         using var transaction = db.BeginTransaction();
@@ -141,7 +136,7 @@ public sealed partial class LocalQueue
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         { report = new QualityReport(["inspection_failed"], 0, 0, 0, new QualityOptions()); }
-        if (file.Length > 30 * 1024 * 1024) report = report with { Issues = [.. report.Issues, "too_large"] };
+        if (file.Length > 160 * 1024 * 1024) report = report with { Issues = [.. report.Issues, "too_large"] };
         if (sideReadFailed || slot?.InvalidState == true) report = report with { Issues = [.. report.Issues, "inspection_failed"] };
         var quality = System.Text.Json.JsonSerializer.Serialize(report, new System.Text.Json.JsonSerializerOptions { PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase });
         using var cmd = db.CreateCommand();
@@ -153,7 +148,7 @@ public sealed partial class LocalQueue
         cmd.CommandText = "INSERT INTO pages(capture_id,batch_id,side,sequence,path,sha256,status,error,quality_report) VALUES($id,$batch,$side,$sequence,$path,$sha,$status,$error,$quality)";
         cmd.Parameters.AddWithValue("$id", captureId);
         cmd.Parameters.AddWithValue("$sequence", sequence);
-        cmd.Parameters.AddWithValue("$path", upload);
+        cmd.Parameters.AddWithValue("$path", original);
         cmd.Parameters.AddWithValue("$sha", sha);
         cmd.Parameters.AddWithValue("$status", report.Passed ? "pending" : "blocked");
         cmd.Parameters.AddWithValue("$error", report.Passed ? "" : report.Summary);
@@ -170,7 +165,7 @@ public sealed partial class LocalQueue
         }
         transaction.Commit();
         if (!report.Passed) { batch.Status = "frozen"; batch.Error = report.Summary; }
-        return new PageRow { CaptureId = captureId, BatchId = batch.Id, Side = side, Sequence = sequence, Path = upload, Sha256 = sha, QualityJson = quality, Status = report.Passed ? "pending" : "blocked", Error = report.Passed ? "" : report.Summary };
+        return new PageRow { CaptureId = captureId, BatchId = batch.Id, Side = side, Sequence = sequence, Path = original, Sha256 = sha, QualityJson = quality, Status = report.Passed ? "pending" : "blocked", Error = report.Passed ? "" : report.Summary };
     }
 
     private static void SaveDurably(string path, Action<FileStream> write)

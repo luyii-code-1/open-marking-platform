@@ -14,7 +14,7 @@ public sealed partial class ApiClient
     {
         await EnsureIdentity(cancel);using var form=new MultipartFormDataContent();using var manifest=JsonDocument.Parse(page.RecognitionJson);
         var derived=Path.Combine(queueRoot,"processed",page.CaptureId);
-        foreach(var (field,path,hash,mime) in new[]{("file",page.Path,"source_sha256","image/jpeg"),("normalized",Path.Combine(derived,"normalized.png"),"normalized_sha256","image/png"),("cuts",Path.Combine(derived,"cuts.zip"),"local_cuts_sha256","application/zip")})
+        foreach(var (field,path,hash,mime) in new[]{("normalized",Path.Combine(derived,"normalized.png"),"normalized_sha256","image/png"),("cuts",Path.Combine(derived,"cuts.zip"),"local_cuts_sha256","application/zip")})
         {
             var stream=File.OpenRead(path);
             try
@@ -25,7 +25,16 @@ public sealed partial class ApiClient
             }
             catch{stream.Dispose();throw;}
         }
-        form.Add(new StringContent(page.CaptureId),"capture_id");form.Add(new StringContent(page.Side),"side");form.Add(new StringContent(page.Sequence.ToString(System.Globalization.CultureInfo.InvariantCulture)),"sequence");form.Add(new StringContent(page.RecognitionJson),"manifest");
+        var uploadManifest=System.Text.Json.Nodes.JsonNode.Parse(page.RecognitionJson)!.AsObject();
+        if(page.Sha256!=manifest.RootElement.GetProperty("source_sha256").GetString())
+            throw new InvalidDataException("本地原图与识读清单不一致。");
+        using var jpeg=await VerifiedJpeg(page,cancel);
+        uploadManifest["source_sha256"]=Convert.ToHexString(await SHA256.HashDataAsync(jpeg,cancel)).ToLowerInvariant();
+        jpeg.Position=0;
+        var original=new StreamContent(jpeg);
+        original.Headers.ContentType=new MediaTypeHeaderValue("image/jpeg");
+        form.Add(original,"file",page.CaptureId+".jpg");
+        form.Add(new StringContent(page.CaptureId),"capture_id");form.Add(new StringContent(page.Side),"side");form.Add(new StringContent(page.Sequence.ToString(System.Globalization.CultureInfo.InvariantCulture)),"sequence");form.Add(new StringContent(uploadManifest.ToJsonString()),"manifest");
         using var response=await _http.PostAsync($"scanner/batches/{page.BatchId}/pages",form,cancel);return await Read(response,cancel);
     }
 }

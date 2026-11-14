@@ -109,14 +109,34 @@ public sealed partial class ApiClient : IDisposable
         return await Read(response, cancel);
     }
 
+    private static async Task<Stream> VerifiedJpeg(PageRow page,CancellationToken cancel)
+    {
+        using var source=File.OpenRead(page.Path);
+        var digest=Convert.ToHexString(await System.Security.Cryptography.SHA256.HashDataAsync(source,cancel)).ToLowerInvariant();
+        if(digest!=page.Sha256)throw new InvalidDataException("本地原图校验失败。");
+        source.Position=0;
+        var result=new MemoryStream();
+        try{
+            if(Path.GetExtension(page.Path).Equals(".jpg",StringComparison.OrdinalIgnoreCase))
+                await source.CopyToAsync(result,cancel);
+            else{
+                using var image=System.Drawing.Image.FromStream(source);
+                var codec=System.Drawing.Imaging.ImageCodecInfo.GetImageEncoders().Single(c=>c.FormatID==System.Drawing.Imaging.ImageFormat.Jpeg.Guid);
+                using var settings=new System.Drawing.Imaging.EncoderParameters(1);
+                settings.Param[0]=new System.Drawing.Imaging.EncoderParameter(System.Drawing.Imaging.Encoder.Quality,90L);
+                image.Save(result,codec,settings);
+            }
+            if(result.Length>30*1024*1024)throw new InvalidDataException("压缩后的扫描页超过 30 MB。");
+            result.Position=0;
+            return result;
+        }catch{result.Dispose();throw;}
+    }
+
     public async Task<JsonElement> Upload(PageRow page, CancellationToken cancel = default)
     {
         await EnsureIdentity(cancel);
         using var content = new MultipartFormDataContent();
-        await using var stream = File.OpenRead(page.Path);
-        var digest = Convert.ToHexString(await System.Security.Cryptography.SHA256.HashDataAsync(stream, cancel)).ToLowerInvariant();
-        if (digest != page.Sha256) throw new InvalidDataException("本地队列文件校验失败，请保留该批次并检查磁盘。");
-        stream.Position = 0;
+        using var stream = await VerifiedJpeg(page,cancel);
         var file = new StreamContent(stream);
         file.Headers.ContentType = new MediaTypeHeaderValue("image/jpeg");
         content.Add(file, "file", page.CaptureId + ".jpg");

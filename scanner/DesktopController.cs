@@ -20,6 +20,7 @@ public sealed class DesktopController : IDisposable
     private Preferences _prefs = new("Twain",null,[],null);
     private string? Executable()
     {
+        if(_driver=="Hi5100S")return Path.Combine(AppContext.BaseDirectory,"Hi5100S.exe");
         if(_driver!="external")return null;
         var plugin=_prefs.Plugins.Find(p=>p.Id==_prefs.PluginId);
         if(plugin==null || !File.Exists(plugin.Path))throw new IOException("请重新选择扫描插件程序，当前文件不可用。");
@@ -28,7 +29,7 @@ public sealed class DesktopController : IDisposable
     private void PersistDevices()=>Save(Path.Combine(_queue.Root,"device-plugins.json"),JsonSerializer.Serialize(_prefs));
     private void Switch(string driver,string? id)
     {
-        if(driver is not ("Twain" or "Wia" or "Escl" or "external"))throw new ArgumentException("驱动接口无效");
+        if(driver is not ("Twain" or "Wia" or "Escl" or "Hi5100S" or "external"))throw new ArgumentException("驱动接口无效");
         if(driver==_driver && id==_prefs.PluginId)return;
         _driver=driver;
         _devices=[];
@@ -295,7 +296,8 @@ public sealed class DesktopController : IDisposable
                 _queue.BatchStatus(excludeBatch.Id,"open");Notify("原图已保留，请整张重扫。");return State(args);
             case "originalPage":
                 var original=_queue.Pages(Batch(Text(args,"batch_id")).Id).Single(p=>p.CaptureId==Text(args,"page_id"));
-                return new{url="data:image/jpeg;base64,"+Convert.ToBase64String(await File.ReadAllBytesAsync(original.Path))};
+                var mime=Path.GetExtension(original.Path)==".png"?"image/png":"image/jpeg";
+                return new{url=$"data:{mime};base64,"+Convert.ToBase64String(await File.ReadAllBytesAsync(original.Path))};
             case "preview":return Preview(Text(args,"batch_id"),Text(args,"page_id"),Text(args,"question_id"));
             case "onlinePage":return new{page_url=PageUrl()};
             default:throw new InvalidOperationException("不支持的客户端命令。");

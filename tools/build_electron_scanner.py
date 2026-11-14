@@ -73,7 +73,7 @@ def build(args):
         for name in ('LICENSE','NOTICE.md'):shutil.copy2(ROOT/name,publish/name)
         shutil.copy2(ROOT/'scanner-electron/README.md',publish/'README.md')
         tracked=subprocess.check_output(['git','-c','core.quotepath=false','ls-files','-z'],cwd=ROOT).decode('utf-8').split('\0')
-        paths={Path(name) for name in tracked if name and name.split('/')[0] in ('scanner','scanner_engine','server','web','tools')}
+        paths={Path(name) for name in tracked if name and name.split('/')[0] in ('scanner','scanner-plugins','scanner_engine','server','web','tools')}
         paths.update(Path('scanner-electron')/name for name in ('package.json','package-lock.json','main.cjs','preload.cjs','policy.cjs','test.cjs','test-runtime.cjs','ScannerElectron.iss','README.md'))
         paths.update([Path('scanner/ElectronHost.cs'),Path('scanner/ScannerBridgeSelfTest.cs'),Path('scanner/ScanCaptureSettings.cs'),Path('tools/build_electron_scanner.py'),Path('LICENSE'),Path('NOTICE.md')])
         with ZipFile(publish/'SOURCE.zip','w',ZIP_DEFLATED) as archive:

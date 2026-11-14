@@ -35,4 +35,15 @@
     <PackageReference Include="NAPS2.Sdk.Worker.Win32" Version="1.2.1" />
     <PackageReference Include="ZXing.Net.Bindings.Windows.Compatibility" Version="0.16.16" />
   </ItemGroup>
+  <Target Name="PublishDevicePlugin" AfterTargets="Publish" Condition="'$(RuntimeIdentifier)' == 'win-x64'">
+    <PropertyGroup>
+      <DevicePluginProject>$(MSBuildThisFileDirectory)..\scanner-plugins\Hi5100S\Hi5100S.csproj</DevicePluginProject>
+    </PropertyGroup>
+    <MSBuild Projects="$(DevicePluginProject)" Targets="Restore;Publish" RemoveProperties="ElectronHost;PublishDir" Properties="Configuration=$(Configuration);RuntimeIdentifier=win-x64;SelfContained=true" />
+    <ItemGroup>
+      <DevicePluginFiles Include="$(MSBuildThisFileDirectory)../scanner-plugins/Hi5100S/bin/$(Configuration)/net10.0-windows/win-x64/publish/Hi5100S.*" />
+    </ItemGroup>
+    <Error Condition="'@(DevicePluginFiles)' == ''" Text="内置扫描插件构建失败" />
+    <Copy SourceFiles="@(DevicePluginFiles)" DestinationFolder="$(PublishDir)" />
+  </Target>
 </Project>
