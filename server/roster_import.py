@@ -12,7 +12,7 @@ HEADERS={'准考证号':'candidate_number','考号':'candidate_number','candidat
 MAX_ROWS=20000
 
 
-def read_rows(content,filename):
+def table_rows(content,filename):
     suffix=filename.lower().rsplit('.',1)[-1]
     try:
         if suffix=='csv':
@@ -48,6 +48,11 @@ def read_rows(content,filename):
     if len(raw)>MAX_ROWS+1:raise HTTPException(422,f'名单最多支持{MAX_ROWS}行')
     while raw and not any(str(v).strip() for v in raw[-1]):raw.pop()
     rows=[(i+1,[str(v).strip() for v in row]) for i,row in enumerate(raw) if any(str(v).strip() for v in row)]
+    return rows
+
+
+def read_rows(content,filename):
+    rows=table_rows(content,filename)
     if len(rows)<2:raise HTTPException(422,'请在表头下填写至少一名学生')
     _,head=rows.pop(0);mapped=[HEADERS.get(h) for h in head]
     if mapped.count('candidate_number')!=1 or mapped.count('name')>1:raise HTTPException(422,'表头需包含一列“准考证号”，可选一列“姓名”')

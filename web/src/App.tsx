@@ -1,3 +1,4 @@
+import {SubjectCatalog} from './Electives'
 import { SessionActivity } from './SessionActivity'
 import { Button } from './Button'
 import { Brand } from './Brand'
@@ -56,7 +57,7 @@ export function App() {
   const items = [
     { key: 'dashboard', icon: <ApartmentOutlined />, label: '工作概览' },
     { type: 'group' as const, key: 'work', label: '考试工作', children: [
-      ...(management ? [{key:'scanner',icon:<ScanOutlined/>,label:'扫描台'},{ key: 'exams', icon: <BookOutlined />, label: '考试项目' }] : []),
+      ...(management ? [{key:'scanner',icon:<ScanOutlined/>,label:'扫描台'},{ key: 'exams', icon: <BookOutlined />, label: '考试项目' },{key:'subject-catalog',icon:<BookOutlined/>,label:'科目管理'}] : []),
       { key: 'marking', icon: <AuditOutlined />, label: '阅卷中心' },
       ...(management ? [{ key: 'exceptions', icon: <FileSearchOutlined />, label: '异常总览' }] : []),
       { key: 'results', icon: <ReadOutlined />, label: '成绩总览' },
@@ -79,6 +80,7 @@ export function App() {
       <Layout.Header className="topbar"><Space className="topbar-left"><Button type="text" aria-label={collapsed?'展开导航':'收起导航'} icon={collapsed?<MenuUnfoldOutlined />:<MenuFoldOutlined />} onClick={() => setCollapsed(!collapsed)} /><span className="breadcrumb">{management ? '管理后台' : '阅卷台'} <span>/</span> {title}</span></Space><Space size={8} className="topbar-actions"><RealtimeStatus key={authToken} user={user} onProfile={acceptUser} onExpired={endSession}/>{admin && <Button type="text" onClick={()=>{if(!confirmLeaving())return;const next:Portal=management?'marking':'admin';setPortal(next);sessionStorage.setItem('omp-portal',next);navigate(next==='admin'?'#/scanner':'#/marking')}}>{management?'进入阅卷台':'进入管理后台'}</Button>}<Avatar size="small">{user.name.slice(0, 1)}</Avatar><Text className="account-name" ellipsis>{user.name}</Text><Button type="text" icon={<LogoutOutlined />} onClick={async () => { if(!confirmLeaving())return; const signedToken=authToken;await settleReviewWrites();await request('/auth/logout',{method:'POST',headers:{Authorization:'Bearer '+signedToken}}).catch(()=>{});endSession() }}>退出</Button></Space></Layout.Header>
       <Layout.Content className={page==='marking'?'page-content marking-content':'page-content'}><div className="page-heading" hidden={page==='marking'||(page === 'exams' && !!location.projectId)}><div><Title level={2}>{title}</Title></div><Tag className="account-tag">{user.role==='admin'?'系统管理员':user.role==='manager'?'管理教师':'阅卷教师'} · {user.username}</Tag></div>
         {page === 'dashboard' && <Dashboard onNavigate={setPage} admin={management} />}
+        {page === 'subject-catalog'&&management&&<SubjectCatalog/>}
         {page === 'exams' && <Exams location={location} navigate={navigate} />}
         {page === 'marking' && <ReviewTasks onOpen={(templateId, questionId) => navigate(`#/marking/review/${encodeURIComponent(templateId)}/${encodeURIComponent(questionId)}`)} />}
         {page === 'exceptions' && <Exceptions />}

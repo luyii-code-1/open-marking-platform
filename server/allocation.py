@@ -38,7 +38,7 @@ def ensure(db, template, question, assignment):
     """Build once per configuration or ready-submission change, preserving live work."""
     tid, qid = template['id'], question['id']
     ready = db.execute("SELECT COUNT(*),MAX(rowid) FROM objects INDEXED BY object_submission WHERE kind='submissions' AND deleted=0 AND json_extract(body,'$.template_id')=? AND json_extract(body,'$.status')='ready'", (tid,)).fetchone()
-    signature = hashlib.sha256(json.dumps([assignment, list(ready), question.get('review_mode', 'single')], sort_keys=True).encode()).hexdigest()
+    signature = hashlib.sha256(json.dumps(['equal-v1',assignment, list(ready), question.get('review_mode', 'single')], sort_keys=True).encode()).hexdigest()
     old = db.execute('SELECT signature FROM allocation_state WHERE question_id=?', (qid,)).fetchone()
     if old and old[0] == signature:
         return
@@ -69,7 +69,7 @@ def ensure(db, template, question, assignment):
             eligible = [u for u in ordinary if u not in chosen and (slots == 1 or set(arbiters) - set(chosen) - {u})]
             if not eligible:
                 raise HTTPException(409, '现有评分与仲裁配置冲突，请调整教师范围')
-            selected = min(eligible, key=lambda u: ((counts[u]+1)/assignment.get('weights', {}).get(u, 1), ordinary.index(u)))
+            selected = min(eligible, key=lambda u: (counts[u],ordinary.index(u)))
             chosen.append(selected)
             counts[selected] += 1
         db.executemany('INSERT INTO review_allocations VALUES(?,?,?,?,?)', [(tid, qid, sid, i+1, u) for i, u in enumerate(chosen)])
@@ -96,10 +96,6 @@ def allocate_arbitration(db, template, question, assignment):
         eligible = set(arbiters) - used
         if not eligible:
             raise HTTPException(409, '仲裁教师均参与了前两评，请管理员调整分配')
-        if assignment.get('arbitration_mode')=='weighted':
-            weights=assignment.get('arbitrator_weights',{})
-            selected=min(eligible,key=lambda u: ((counts.get(u,0)+1)/weights.get(u,1),u))
-            counts[selected]=counts.get(selected,0)+1
-        else:
-            selected = min(eligible, key=lambda u: hashlib.sha256((row[0]+question['id']+u).encode()).digest())
+        selected=min(eligible,key=lambda u:(counts.get(u,0),u))
+        counts[selected]=counts.get(selected,0)+1
         db.execute('INSERT INTO review_allocations VALUES(?,?,?,?,?)', (template['id'], question['id'], row[0], 3, selected))

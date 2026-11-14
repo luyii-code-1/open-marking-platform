@@ -254,7 +254,17 @@ def create_route(kind):
                     raise HTTPException(422,'请先发布题卡')
                 template=require(db,group['template_id'],'templates')
                 value.update(status='front',template_id=template['id'],template_revision=template['revision'])
+            catalog_ids=value.pop('catalog_ids',[]) if kind=='projects' else []
             result=put(db,kind,value,current['id'])
+            if kind=='projects' and catalog_ids:
+                from .electives import create_exam_subjects
+                create_exam_subjects(db,result,catalog_ids,current['id'])
+            if kind=='groups' and result.get('grade_id'):
+                from .electives import card_catalog,members,save_members
+                entry=card_catalog(db,result)
+                if entry and entry.get('kind_of_subject','elective')=='elective':
+                    save_members(db,result,members(db,result['grade_id'],set(entry['student_ids'])),'elective',set(),current['id'])
+                    result=require(db,result['id'],'groups')
             if kind=='subjects' and value.get('group_mode')=='default':
                 from .templates import default_group
                 group=default_group(db,result['id'],current['id']);result['default_group_id']=group['id']

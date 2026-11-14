@@ -20,7 +20,7 @@ def membership(db,group):
     retained=[student_view(db,s.get('student_snapshot') or require(db,s['student_id'],'students')) for s in submissions if s['student_id'] not in current]
     return {'configured':students is not None,'students':students or [],'reviewed_at':(saved or {}).get('at'),
             'added':[s for sid,s in current.items() if saved and sid not in previous],
-            'removed':removed,'retained':retained,'needs_review':not saved or set(current)!=set(previous)}
+            'removed':removed,'retained':retained,'needs_review':False}
 
 
 def batch_progress(db,batch):
@@ -95,7 +95,7 @@ def close_scanning(identifier:str,body:dict,current=Depends(admin)):
         if group.get('frozen'):raise HTTPException(409,'成绩已发布，请先发起复核')
         state=overview(db,group,current)
         if not state['template_id']:raise HTTPException(409,'请先发布版式')
-        if not state['roster_configured'] or state['roster_needs_review']:raise HTTPException(409,'请先核对应考名单')
+        if not state['roster_configured']:raise HTTPException(409,'请先设置应考名单')
         if state['open_batches'] or state['open_exceptions']:raise HTTPException(409,'请先完成全部批次并处理异常')
         if body.get('confirm') is not True:raise HTTPException(422,'请确认全部考场、上传与入库情况已核对')
         if body.get('signature')!=state['scan_signature']:raise HTTPException(409,'扫描或名单数据已变化，请刷新后重新核对')

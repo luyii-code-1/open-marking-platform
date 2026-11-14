@@ -37,7 +37,7 @@ def test_weighted_quotas_skip_and_reallocation(tmp_path,monkeypatch):
         assignment={**scope,'user_ids':[u for u,_ in teachers],'weights':{teachers[0][0]:3,teachers[1][0]:1,teachers[2][0]:0}}
         response=client.post('/api/v1/assignments',json=assignment,headers=admin)
         assert response.status_code==200,response.text
-        for teacher,expected in zip(teachers,(9,3,0)):
+        for teacher,expected in zip(teachers,(6,6,0)):
             progress=client.get('/api/v1/review-progress',params=scope,headers=teacher[1]).json()
             assert progress['my_total']==expected
         completed=[]
@@ -69,7 +69,7 @@ def test_weighted_quotas_skip_and_reallocation(tmp_path,monkeypatch):
         scored=client.post('/api/v1/tasks/'+second['id']+'/score',json={'score':10,'idempotency_key':str(uuid.uuid4())},headers=teachers[0][1])
         assert scored.status_code==200
         progress=client.get('/api/v1/review-progress',params=scope,headers=teachers[0][1]).json()
-        assert progress['my_total']==3 and progress['my_completed']==1 and progress['my_progress']==33.3
+        assert progress['my_total']==6 and progress['my_completed']==1 and progress['my_progress']==16.7
         assert client.post('/api/v1/tasks/claim',json=scope,headers=teachers[2][1]).json() is None
 
 
@@ -122,6 +122,6 @@ def test_weighted_arbitration_pool(tmp_path,monkeypatch):
                 task=client.post('/api/v1/tasks/claim',json=scope,headers=teacher[1]).json()
                 result=client.post('/api/v1/tasks/'+task['id']+'/score',json={'score':score,'idempotency_key':str(uuid.uuid4())},headers=teacher[1])
                 assert result.status_code==200,result.text
-        for teacher,expected in zip(teachers[2:],[6,2]):
+        for teacher,expected in zip(teachers[2:],[4,4]):
             progress=client.get('/api/v1/review-progress',params=scope,headers=teacher[1]).json()
             assert progress['my_total']==expected

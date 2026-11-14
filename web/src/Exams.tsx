@@ -1,3 +1,4 @@
+import {CatalogPicker} from './Electives'
 import { RoomTagManager } from './RoomTags'
 import { useEffect,useState } from 'react'
 import { App,Breadcrumb,Card,Empty,Form,Input,Modal,Popconfirm,Select,Tooltip,Space,Spin,Tabs,Tag,Typography } from 'antd'
@@ -53,7 +54,7 @@ export function Exams({location,navigate}:{location:ExamLocation;navigate:(path:
   ]
   return <div className="exam-workspace"><ErrorNotice error={error} retry={refresh}/><Breadcrumb items={crumbs}/>
     {project&&<div className="workspace-heading"><Space align="start"><Button type="text" className="hierarchy-back" icon={<ArrowLeftOutlined/>} aria-label={group?'返回题卡列表':grade?'返回年级列表':subject?'返回科目列表':'返回考试项目'} onClick={()=>go(back)}/><div><Title level={3}>{group?cardName(group,subject):grade?.name||subject?.name||project.name}</Title><Text type="secondary">{group?`${subject!.name} · ${grade?.name} · ${group.frozen?'成绩已发布':'成绩未发布'}`:grade?`${children.length} 份题卡`:subject?`${subjectGrades(subject,groups.data).length} 个年级`:`${subjects.data.filter(s=>s.project_id===project.id).length} 门科目`}</Text></div></Space>{!grade||group?<HierarchyDelete kind={group?'groups':subject?'subjects':'projects'} target={group||subject||project} onDeleted={async()=>{navigate(examPath(back),true);await refresh()}}/>:null}</div>}
-    {!project?<EntityTable path="/projects" title="考试项目" fields={[{name:'name',label:'考试名称'}]} resource={projects} onEnter={row=>go({projectId:row.id})} onCreated={async row=>{await refresh();if(row)go({projectId:row.id})}} columns={[
+    {!project?<EntityTable path="/projects" title="考试项目" creationFields={<Form.Item name="catalog_ids" label="同时创建科目"><CatalogPicker/></Form.Item>} fields={[{name:'name',label:'考试名称'}]} resource={projects} onEnter={row=>go({projectId:row.id})} onCreated={async row=>{await refresh();if(row)go({projectId:row.id})}} columns={[
       {title:'考试名称',dataIndex:'name',render:(name:string,row:Row)=><a href={examPath({projectId:row.id})}>{name}</a>},
       {title:'科目',render:(_:unknown,row:Row)=>`${subjects.data.filter(s=>s.project_id===row.id).length} 门`},
       {title:'操作',className:'row-actions',render:(_:unknown,row:Row)=><Space><Rename kind="projects" row={row} refresh={refresh}/><HierarchyDelete kind="projects" target={row} onDeleted={refresh}/></Space>},
