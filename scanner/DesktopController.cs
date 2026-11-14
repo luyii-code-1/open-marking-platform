@@ -296,8 +296,11 @@ public sealed class DesktopController : IDisposable
                 _queue.BatchStatus(excludeBatch.Id,"open");Notify("原图已保留，请整张重扫。");return State(args);
             case "originalPage":
                 var original=_queue.Pages(Batch(Text(args,"batch_id")).Id).Single(p=>p.CaptureId==Text(args,"page_id"));
-                var mime=Path.GetExtension(original.Path)==".png"?"image/png":"image/jpeg";
-                return new{url=$"data:{mime};base64,"+Convert.ToBase64String(await File.ReadAllBytesAsync(original.Path))};
+                var correctedPath=Path.Combine(_queue.Root,"processed",original.CaptureId,"normalized.png");
+                bool corrected=Text(args,"view")=="corrected" && original.RecognitionJson!="{}" && File.Exists(correctedPath);
+                var path=corrected?correctedPath:original.Path;
+                var mime=Path.GetExtension(path)==".png"?"image/png":"image/jpeg";
+                return new{url=$"data:{mime};base64,"+Convert.ToBase64String(await File.ReadAllBytesAsync(path)),corrected};
             case "preview":return Preview(Text(args,"batch_id"),Text(args,"page_id"),Text(args,"question_id"));
             case "onlinePage":return new{page_url=PageUrl()};
             default:throw new InvalidOperationException("不支持的客户端命令。");

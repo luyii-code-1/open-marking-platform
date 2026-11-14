@@ -61,6 +61,7 @@ function Scanner() {
   const readyToUpload=pendingSheets.length>0&&!needsReview&&!state?.capturing
   const roomComplete=room?.expected_students>0&&pendingSheets.length+(room.scanned_students||0)+(room.confirmed_absent||0)>=room.expected_students
   const [review,setReview]=useState<Row[]|null>(null),[answer,setAnswer]=useState<Row|null>(null)
+  const [corrected,setCorrected]=useState(false)
   const [original,setOriginal]=useState(''),[sideIndex,setSideIndex]=useState(0),[originalError,setOriginalError]=useState('')
   const [number,setNumber]=useState(''),[absent,setAbsent]=useState<boolean|null>(null)
   const matchedName=(group?.roster||[]).find((r:Row)=>r.candidate_number===number)?.name
@@ -71,13 +72,13 @@ function Scanner() {
       setReview(rows.map(r=>({...r,name:names.get(r.candidate)||'未匹配'})))
     })
   }
-  async function openOriginal(row:Row,index:number){
+  async function openOriginal(row:Row,index:number,view="corrected"){
     const request=++imageRequest.current
     if(answer?.id!==row.id){setNumber(row.candidate||'');setAbsent(row.absent??null)}
     setAnswer(row);setSideIndex(index);setOriginal('');setOriginalError('')
     try{
-      const result=await scannerCall('originalPage',{batch_id:row.batch_id,page_id:row.sides[index].id})
-      if(request===imageRequest.current)setOriginal(result.url)
+      const result=await scannerCall('originalPage',{batch_id:row.batch_id,page_id:row.sides[index].id,view})
+      if(request===imageRequest.current){setOriginal(result.url);setCorrected(!!result.corrected)}
     }catch(e){if(request===imageRequest.current)setOriginalError((e as Error).message)}
   }
   async function saveAnswer(){
@@ -174,7 +175,7 @@ function Scanner() {
         {title:'状态',dataIndex:'status',render:v=><Status value={v}/>}
       ]}/>
     </Drawer>
-    <Drawer title={`${answer?.name||''} ${answer?.candidate||''} · 扫描原图`} open={!!answer} onClose={()=>{imageRequest.current++;setAnswer(null);setOriginal('')}} width="min(1000px,96vw)">
+    <Drawer title={`${answer?.name||''} ${answer?.candidate||''} · 答卷核对`} open={!!answer} onClose={()=>{imageRequest.current++;setAnswer(null);setOriginal('')}} width="min(1000px,96vw)">
       {answer&&<Space direction="vertical" style={{width:'100%'}}><Space>{answer.sides.map((s:Row,i:number)=><Button key={s.id} type={i===sideIndex?'primary':'default'} onClick={()=>openOriginal(answer,i)}>{s.side==='front'?'正面':'背面'}</Button>)}</Space>
       {answer.editable&&<Space wrap align="end">
         <label>准考证号<Input value={number} inputMode="numeric" onChange={e=>setNumber(e.target.value.trim())}/></label>
@@ -182,7 +183,8 @@ function Scanner() {
         <label>缺考标记<Select aria-label="缺考标记" value={absent===null?undefined:String(absent)} placeholder="请核对" options={[{value:'true',label:'缺考'},{value:'false',label:'未标缺考'}]} onChange={v=>setAbsent(v==='true')}/></label>
         <Button type="primary" disabled={locked||!matchedName||absent===null} onClick={saveAnswer}>确认更正</Button>
       </Space>}
-      {originalError?<Alert type="error" message={originalError}/>:original?<img className="scanner-preview" src={original} alt="扫描原图"/>:<Card loading/>}</Space>}
+      {original&&<Space><Tag>{corrected?'自动校正图':'扫描原图'}</Tag><Button onClick={()=>openOriginal(answer,sideIndex,corrected?'original':'corrected')}>{corrected?'查看扫描原图':'查看校正图'}</Button></Space>}
+      {originalError?<Alert type="error" message={originalError}/>:original?<img className="scanner-preview" src={original} alt={corrected?"自动校正图":"扫描原图"}/>:<Card loading/>}</Space>}
     </Drawer>
     <Drawer title="连接服务器" open={connection} onClose={() => setConnection(false)} width={420}><Form form={connectForm} layout="vertical" onFinish={values => action('connect', values, () => { connectForm.setFieldValue('pairing_code', ''); setConnection(false); setInProject(false); setSubject(''); setGrade('');setGroup(''); setBatch('') })}>
       <Form.Item name="server_url" label="服务端地址" rules={[{ required: true }]}><Input placeholder="https://服务器地址" /></Form.Item>
