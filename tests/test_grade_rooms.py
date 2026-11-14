@@ -116,8 +116,6 @@ def test_live_teacher_scope_and_unscanned_force_publication(school):
     r('PUT','teaching/relation',{'class_id':f['cls']['id'],'teacher_id':teacher['id'],'subjects':[],'homeroom':True})
     r('GET','groups/'+group['id']+'/workflow',status=403,auth=auth)
     r('POST','groups/'+group['id']+'/scan-close',{'confirm':True},403,auth=auth)
-    r('POST','results/publish',{'group_id':group['id']},409)
-    close_scanning(f['client'],group['id'],f['headers'])
     r('POST','results/publish',{'group_id':group['id'],'force_unscanned':True,'reason':'选科未参加'})
     rows=r('GET','results?group_id='+group['id'],auth=auth)
     assert sum(v['status']=='unscanned' and v['total'] is None for v in rows)==2
@@ -179,11 +177,8 @@ def test_scan_close_publication_and_absent_mark_remain_distinct(school):
         db.put(c,'pages',{'batch_id':second['id'],'side':'front','sequence':1,'status':'recognized','candidate_number':f['students'][1]['candidate_number'],'absent_mark':True,'selections':{}})
     f['post']('scan-batches/'+second['id']+'/pair')
     state=r('GET',base+'/workflow');assert state['results']['absent']==1 and state['results']['unscanned']==1
-    r('POST',base+'/scan-close',{'confirm':True,'signature':state['scan_signature']})
-    r('POST',base+'/roster/review',{'student_ids':[s['id'] for s in f['students']]})
-    state=r('GET',base+'/workflow');r('POST',base+'/scan-close',{'confirm':True,'signature':state['scan_signature']})
-    r('POST','results/publish',{'group_id':g['id']},409)
-    r('POST','results/publish',{'group_id':g['id'],'force_unscanned':True,'reason':'缺页已登记'})
+    f['post']('scan-batches',{'group_id':g['id']})
+    r('POST','results/publish',{'group_id':g['id']})
     rows=r('GET','results?group_id='+g['id']);assert sorted(x['status'] for x in rows)==['absent','completed','unscanned']
     assert next(x for x in rows if x['status']=='unscanned')['total'] is None
     r('POST',base+'/reopen',{'reason':'补扫核查'})

@@ -1,4 +1,3 @@
-import {CardWorkflow} from './CardWorkflow'
 import {useEffect,useState} from 'react'
 import {App,Card,Empty,Form,Input,InputNumber,Modal,Popconfirm,Select,Space,Statistic,Tag,Typography,Upload} from 'antd'
 import { Table } from './DataTable'
@@ -50,7 +49,7 @@ export function ScanCapture({groupId}:{groupId?:string}){
         {title:'处理状态',dataIndex:'status',render:v=><Tag>{v==='paired'?'已完成':v==='frozen'?'待核查':'接收与配页中'}</Tag>},
         {title:'操作',className:'row-actions',render:(_:unknown,row:Row)=><Button onClick={()=>setSelected(row.id)}>{row.status==='paired'?'查看记录':row.status==='frozen'?'查看异常':'续扫 / 配页'}</Button>},
       ]}/>
-    </Card>:<Card title={<Space><Button icon={<ArrowLeftOutlined/>} disabled={saving} onClick={()=>setSelected('')}>扫描记录</Button><span>记录 {selected.id.slice(0,8)}</span><Tag>{describeStatus(selected.status)}</Tag></Space>} extra={<Space><Button onClick={()=>{void pages.reload();void batches.reload()}}>刷新页面</Button><Popconfirm title="确认本批次页面数量与正反面顺序正确？" description="按本批次题卡和考场配对并关联考生。" onConfirm={pair}><Button type="primary" disabled={readOnly||!pageRows.length} loading={saving}>确认配对并入库</Button></Popconfirm>{!readOnly&&!pageRows.length&&<Popconfirm title="结束此空批次？" description="确认本地没有待上传页面。" onConfirm={async()=>{try{await send(`/scan-batches/${selectedId}/finish-empty`,{confirm:true});await batches.reload()}catch(e){message.error((e as Error).message)}}}><Button>结束空批次</Button></Popconfirm>}</Space>}>
+    </Card>:<Card title={<Space><Button icon={<ArrowLeftOutlined/>} disabled={saving} onClick={()=>setSelected('')}>扫描记录</Button><span>记录 {selected.id.slice(0,8)}</span><Tag>{describeStatus(selected.status)}</Tag></Space>} extra={<Space><Button onClick={()=>{void pages.reload();void batches.reload()}}>刷新页面</Button><Popconfirm title="确认本批次页面数量与正反面顺序正确？" description="按本批次题卡和考场配对并关联考生。" onConfirm={pair}><Button type="primary" disabled={readOnly||!pageRows.length} loading={saving}>确认配对并入库</Button></Popconfirm></Space>}>
       <Space direction="vertical" size={24} style={{width:'100%'}}>
         <Space wrap><Typography.Text>{label(selected.group_id)}</Typography.Text><RoomTagBadges tags={selected.room_tags}/><Typography.Text type="secondary">背面{selected.back_order==='reverse'?'逆序':'同序'}</Typography.Text></Space>
         <ErrorNotice error={pages.error} retry={pages.reload}/>
@@ -59,7 +58,6 @@ export function ScanCapture({groupId}:{groupId?:string}){
         <Table rowKey="id" dataSource={pageRows} loading={pages.loading} columns={[{title:'面',dataIndex:'side',render:v=>v==='back'?'背面':'正面'},{title:'序号',dataIndex:'sequence'},{title:'准考证号',dataIndex:'candidate_number'},{title:'状态',dataIndex:'status',render:v=><Tag>{describeStatus(v)}</Tag>},{title:'原图',render:(_,row)=><Button onClick={()=>setPreview(row)}>查看原图</Button>}]}/>
       </Space>
     </Card>}
-    {group&&<CardWorkflow key={group} groupId={group} onSaved={workflow.reload}/>}
 
     <Modal width={900} open={!!preview} onCancel={()=>setPreview(null)} footer={null} title="扫描原图">{preview?.image_url?<AssetImage src={preview.image_url}/>:<Empty description="服务器尚未提供此页面图像"/>}</Modal>
   </Space>

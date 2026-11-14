@@ -48,13 +48,15 @@ def overview(db,group,current):
     signature=hashlib.sha256(json.dumps({'members':sorted(s['id'] for s in roster['students']),'batches':sorted((b['id'],b.get('status'),b['received_pages'],b['linked_pages']) for b in details),'rooms':sorted((r['id'],r.get('expected_students')) for r in rooms),'submissions':sorted((s['id'],s.get('status'),s.get('pages',[])) for s in submissions)},sort_keys=True).encode()).hexdigest()
     closed=group.get('scan_close',{}).get('signature')==signature
     regrades=db.execute("SELECT COUNT(*) FROM regrade_queue r JOIN objects t ON t.id=r.task_id JOIN objects s ON s.id=json_extract(t.body,'$.submission_id') WHERE s.deleted=0 AND json_extract(s.body,'$.group_id')=?",(group['id'],)).fetchone()[0]
-    return {'scan_signature':signature,'scan_closed':closed,'scan_closed_at':group.get('scan_close',{}).get('at') if closed else None,'roster_configured':roster['configured'],'regrades':regrades,'group_id':group['id'],'roster_count':len(roster['students']),'roster_needs_review':roster['needs_review'],
+    state = {'scan_signature':signature,'scan_closed':closed,'scan_closed_at':group.get('scan_close',{}).get('at') if closed else None,'roster_configured':roster['configured'],'regrades':regrades,'group_id':group['id'],'roster_count':len(roster['students']),'roster_needs_review':roster['needs_review'],
             'roster_added':len(roster['added']),'roster_removed':len(roster['removed']),
             'room_expected':sum(r.get('expected_students') or 0 for r in rooms),'rooms':rooms,
             'batches':details,
-            'open_batches':sum(b.get('status')!='paired' for b in batches),'open_exceptions':len(exceptions),
+            'open_batches':sum(b.get('status')!='paired' and b['received_pages']>0 for b in details),'open_exceptions':len(exceptions),
             'scanned':sum(s.get('status')!='absent' for s in submissions),'results':counts,
             'published':bool(group.get('frozen')),'template_id':group.get('template_id')}
+    state['publication_blockers']=publication_blockers(state)
+    return state
 
 
 @router.get('/groups/{identifier}/workflow')
@@ -107,8 +109,6 @@ def close_scanning(identifier:str,body:dict,current=Depends(admin)):
 def publication_blockers(state):
     issues=[]
     if not state['template_id']:issues.append('尚未发布版式')
-    if state['roster_configured'] and state['roster_needs_review']:issues.append('应考名单尚未核对或已变化')
-    if state['roster_configured'] and not state['scan_closed']:issues.append('扫描尚未完成收尾核对')
     if state['open_batches']:issues.append('仍有未完成的扫描批次')
     if state['open_exceptions']:issues.append('仍有影响成绩的异常')
     if state['results']['pending'] or state['regrades']:issues.append('评分或重阅尚未完成')

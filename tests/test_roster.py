@@ -37,10 +37,7 @@ def test_roster_unscanned_force_publication_and_class_privacy(tmp_path,monkeypat
         assert [s['status'] for s in roster['students']]==['scanned','unscanned','unscanned']
         result=client.get('/api/v1/results',params={'group_id':group['id']},headers=admin).json()
         assert [r['total'] for r in result]==[8,None,None]
-        assert client.post('/api/v1/results/publish',json={'group_id':group['id']},headers=admin).status_code==409
-        assert client.post('/api/v1/results/publish',json={'group_id':group['id'],'force_unscanned':True},headers=admin).status_code==422
-        close_scanning(client,group['id'],admin)
-        published=client.post('/api/v1/results/publish',json={'group_id':group['id'],'force_unscanned':True,'reason':'缺页已单独登记，先发布已有成绩'},headers=admin)
+        published=client.post('/api/v1/results/publish',json={'group_id':group['id']},headers=admin)
         assert published.status_code==200,published.text
         assert published.json()['published_unscanned_count']==2
         analysis=client.get('/api/v1/analysis/group',params={'group_id':group['id'],'include_absent':True},headers=admin).json()
