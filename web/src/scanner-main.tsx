@@ -61,6 +61,8 @@ function Scanner() {
   const roomComplete=room?.expected_students>0&&pendingSheets.length+(room.scanned_students||0)+(room.confirmed_absent||0)>=room.expected_students
   const [review,setReview]=useState<Row[]|null>(null),[answer,setAnswer]=useState<Row|null>(null)
   const [original,setOriginal]=useState(''),[sideIndex,setSideIndex]=useState(0),[originalError,setOriginalError]=useState('')
+  const [number,setNumber]=useState(''),[absent,setAbsent]=useState<boolean|null>(null)
+  const matchedName=(group?.roster||[]).find((r:Row)=>r.candidate_number===number)?.name
   const imageRequest=useRef(0)
   async function reviewRoom(){
     await action('roomReview',{batch_id:batchId},(rows:Row[])=>{
@@ -70,11 +72,20 @@ function Scanner() {
   }
   async function openOriginal(row:Row,index:number){
     const request=++imageRequest.current
+    if(answer?.id!==row.id){setNumber(row.candidate||'');setAbsent(row.absent??null)}
     setAnswer(row);setSideIndex(index);setOriginal('');setOriginalError('')
     try{
       const result=await scannerCall('originalPage',{batch_id:row.batch_id,page_id:row.sides[index].id})
       if(request===imageRequest.current)setOriginal(result.url)
     }catch(e){if(request===imageRequest.current)setOriginalError((e as Error).message)}
+  }
+  async function saveAnswer(){
+    if(!answer||!matchedName||absent===null)return
+    const rows=await action('correctAnswer',{batch_id:answer.batch_id,page_id:answer.id,candidate_number:number,absent})
+    if(!rows)return
+    const names=new Map((group?.roster||[]).map((r:Row)=>[r.candidate_number,r.name]))
+    setReview(rows.map((r:Row)=>({...r,name:names.get(r.candidate)||'未匹配'})))
+    imageRequest.current++;setAnswer(null);setOriginal('')
   }
   const locked = busy || !!state?.capturing || !!state?.syncing
   async function openProject(id: string) { await action('openProject', { project_id: id }, () => { setInProject(true); setSubject(''); setGrade('');setGroup(''); setBatch('') }) }
@@ -104,7 +115,7 @@ function Scanner() {
     ...(inProject && group ? [{ title: <Button type="link" disabled={locked} onClick={() => setBatch('')}>{cardName(group,subject)}</Button> }] : []),
     ...(inProject && batch ? [{ title: batch.room_tags?.[0]?.name||'未指定考场' }] : []),
   ]
-  if(state&&!state.room_review)return <main className="scanner-unavailable"><Typography.Title level={3}>请更新扫描客户端</Typography.Title><p>从管理后台的扫描台下载安装包后重新打开。</p><Button onClick={()=>action('offlinePage')}>打开已安装版本的本地页面</Button></main>
+  if(state&&!state.review_edit)return <main className="scanner-unavailable"><Typography.Title level={3}>请更新扫描客户端</Typography.Title><p>从管理后台的扫描台下载安装包后重新打开。</p><Button onClick={()=>action('offlinePage')}>打开已安装版本的本地页面</Button></main>
   if (!hasScannerHost) return <main className="scanner-unavailable"><Typography.Title level={3}>扫描工作台</Typography.Title><Typography.Paragraph>请在扫描客户端打开此页面。</Typography.Paragraph></main>
   return <div className="scanner-app">
     <header className="scanner-header"><Space size={16}><Brand /><Typography.Title level={4}>扫描工作台</Typography.Title></Space><Space size={12}><Tag color={state?.online ? 'green' : undefined}>{state?.online ? '已连接' : '离线'}</Tag><Dropdown menu={{ items: [
@@ -156,6 +167,12 @@ function Scanner() {
     </Drawer>
     <Drawer title={`${answer?.name||''} ${answer?.candidate||''} · 扫描原图`} open={!!answer} onClose={()=>{imageRequest.current++;setAnswer(null);setOriginal('')}} width="min(1000px,96vw)">
       {answer&&<Space direction="vertical" style={{width:'100%'}}><Space>{answer.sides.map((s:Row,i:number)=><Button key={s.id} type={i===sideIndex?'primary':'default'} onClick={()=>openOriginal(answer,i)}>{s.side==='front'?'正面':'背面'}</Button>)}</Space>
+      {answer.editable&&<Space wrap align="end">
+        <label>准考证号<Input value={number} inputMode="numeric" onChange={e=>setNumber(e.target.value.trim())}/></label>
+        <div>姓名<div>{matchedName||'未匹配'}</div></div>
+        <label>缺考标记<Select aria-label="缺考标记" value={absent===null?undefined:String(absent)} placeholder="请核对" options={[{value:'true',label:'缺考'},{value:'false',label:'未标缺考'}]} onChange={v=>setAbsent(v==='true')}/></label>
+        <Button type="primary" disabled={locked||!matchedName||absent===null} onClick={saveAnswer}>确认更正</Button>
+      </Space>}
       {originalError?<Alert type="error" message={originalError}/>:original?<img className="scanner-preview" src={original} alt="扫描原图"/>:<Card loading/>}</Space>}
     </Drawer>
     <Drawer title="连接服务器" open={connection} onClose={() => setConnection(false)} width={420}><Form form={connectForm} layout="vertical" onFinish={values => action('connect', values, () => { connectForm.setFieldValue('pairing_code', ''); setConnection(false); setInProject(false); setSubject(''); setGrade('');setGroup(''); setBatch('') })}>

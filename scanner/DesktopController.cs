@@ -81,7 +81,7 @@ public sealed class DesktopController : IDisposable
         var offset=args.TryGetProperty("offset",out var start)?Math.Max(0,start.GetInt32()):0;
         var projects=_packages.Values.Select(p=>new{id=Text(p.GetProperty("project"),"id"),name=Text(p.GetProperty("project"),"name"),downloaded_at=Text(p,"downloaded_at")}).ToArray();
         var catalogPath=Path.Combine(_queue.Root,"workspaces",Partition,"catalog.json");
-        return new{room_review=true,manual_room_upload=true,device_protocol=DevicePlugin.Protocol,scan_settings=new{dpi=ScanSettings.Dpi,color=ScanSettings.Color},protocol=Protocol,server_url=_server,storage_path=_queue.Root,online=_online,capturing=Capturing,syncing=_uploadGate.CurrentCount==0,message=_message,project_id=_project,
+        return new{review_edit=true,room_review=true,manual_room_upload=true,device_protocol=DevicePlugin.Protocol,scan_settings=new{dpi=ScanSettings.Dpi,color=ScanSettings.Color},protocol=Protocol,server_url=_server,storage_path=_queue.Root,online=_online,capturing=Capturing,syncing=_uploadGate.CurrentCount==0,message=_message,project_id=_project,
             projects,catalog=File.Exists(catalogPath)?Json(File.ReadAllText(catalogPath)):Json("{\"projects\":[]}"),
             package=_packages.TryGetValue(_project,out var package)?package:Json("null"),
             batches=batches.Select(b=>new{id=b.Id,name=b.Label,subject_id=b.SubjectId,group_id=b.GroupId,room=b.Room,room_tags=JsonSerializer.Deserialize<JsonElement>(b.RoomTagsJson),status=b.Status,error=b.Error,capture_mode=b.CaptureMode,back_order=b.BackOrder,paper=b.Paper,sides=b.Sides,created_at=b.CreatedAt,
@@ -202,6 +202,7 @@ public sealed class DesktopController : IDisposable
                     }
                 },importSide);return new{started=true};
             case "pair":var pairBatch=Batch(Text(args,"batch_id"));if(Capturing)throw new InvalidOperationException("请先停止采集再确认批次。");_queue.PairLocally(pairBatch);Notify("本地配页完成，等待上传。");return new{paired=true};
+            case "correctAnswer":return CorrectAnswer(args);
             case "roomReview":return RoomReview(Batch(Text(args,"batch_id")));
             case "upload":
                 var scope=Batch(Text(args,"batch_id"));
@@ -324,6 +325,32 @@ public sealed class DesktopController : IDisposable
     }
 
     private BatchRow[] RoomSheets(BatchRow scope)=>_queue.Batches().Where(b=>b.ServerUrl==_server&&b.ProjectId==scope.ProjectId&&b.GroupId==scope.GroupId&&RoomKey(b)==RoomKey(scope)).ToArray();
+    private object CorrectAnswer(JsonElement args)
+    {
+        if(Capturing||_tickRunning||_revoked)throw new InvalidOperationException("当前无法编辑，请稍后再试。");
+        var sheet=Batch(Text(args,"batch_id"));
+        var page=_queue.Pages(sheet.Id).Single(p=>p.CaptureId==Text(args,"page_id")&&p.Side=="front");
+        if(sheet.Status=="paired"||page.Status is "uploaded" or "excluded"||page.RecognitionJson=="{}"||
+            sheet.Status=="frozen"&&(sheet.Error.StartsWith("同步被服务器拒绝")||sheet.Error.StartsWith("原图已送交")))
+            throw new InvalidOperationException("此页请通过异常核查处理。");
+        var group=_packages[sheet.ProjectId].GetProperty("groups").EnumerateArray().Single(g=>Text(g,"id")==sheet.GroupId);
+        var number=Text(args,"candidate_number").Trim();
+        if(group.GetProperty("frozen").GetBoolean()||number.Length!=Json(sheet.TemplateJson).GetProperty("candidate_length").GetInt32()||
+            number.Any(c=>c<'0'||c>'9')||group.GetProperty("roster").ValueKind!=JsonValueKind.Array||
+            !group.GetProperty("roster").EnumerateArray().Any(s=>Text(s,"candidate_number")==number))
+            throw new InvalidOperationException("请填写当前题卡应考名单中的准考证号。");
+        if(group.GetProperty("confirmed_candidates").EnumerateArray().Any(n=>n.GetString()==number)||
+            _queue.Batches().Where(b=>b.ServerUrl==sheet.ServerUrl&&b.GroupId==sheet.GroupId).Any(b=>_queue.Pages(b.Id).Any(p=>p.Side=="front"&&p.Status!="excluded"&&p.CaptureId!=page.CaptureId&&Text(Json(p.RecognitionJson),"candidate_number")==number)))
+            throw new InvalidOperationException("本题卡已有相同准考证号的答卷。");
+        var data=JsonSerializer.Deserialize<Dictionary<string,JsonElement>>(page.RecognitionJson)!;
+        if(!data.ContainsKey("operator_correction"))data["operator_correction"]=JsonSerializer.SerializeToElement(new{original_number=data["candidate_number"],original_absent=data["absent_mark"]});
+        data["candidate_number"]=JsonSerializer.SerializeToElement(number);
+        data["absent_mark"]=JsonSerializer.SerializeToElement(args.GetProperty("absent").GetBoolean());
+        data["absence_layout_known"]=JsonSerializer.SerializeToElement(true);
+        _queue.SaveCorrection(sheet,page,JsonSerializer.Serialize(data));Notify("更正已保存在本机。");
+        return RoomReview(sheet);
+    }
+
     private object RoomReview(BatchRow scope)
     {
         var rows=new List<object>();
@@ -337,7 +364,7 @@ public sealed class DesktopController : IDisposable
                 var front=sides.FirstOrDefault(p=>p.Side=="front");
                 var read=Json(front?.RecognitionJson??"{}");
                 bool? absent=read.TryGetProperty("absence_layout_known",out var known)&&known.ValueKind==JsonValueKind.True&&read.TryGetProperty("absent_mark",out var mark)&&mark.ValueKind is JsonValueKind.True or JsonValueKind.False?mark.GetBoolean():null;
-                rows.Add(new{id=sides[0].CaptureId,batch_id=sheet.Id,candidate=Text(read,"candidate_number"),absent,status=sheet.Status,
+                rows.Add(new{id=sides[0].CaptureId,batch_id=sheet.Id,candidate=Text(read,"candidate_number"),absent,status=sheet.Status,editable=front is not null&&front.RecognitionJson!="{}"&&front.Status is "pending" or "blocked"&&sheet.Status!="paired",
                     sides=sides.Select(p=>new{id=p.CaptureId,side=p.Side,sequence=p.Sequence,status=p.Status,error=p.Error}).ToArray()});
             }
             foreach(var pair in Json(sheet.LocalPairsJson).EnumerateArray()){

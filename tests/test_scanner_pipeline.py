@@ -138,3 +138,16 @@ def test_local_pipeline_batch_ownership_and_project_freeze(pipeline):
         group=db.get(connection,f['group_id']);group['frozen']=True;db.put(connection,'groups',group)
     assert f['upload'](f['pages'][0]).status_code==409
     with db.connect() as connection:assert not db.objects(connection,'pages')
+
+
+def test_reviewed_absence_and_replayed_upload(pipeline):
+    f=pipeline
+    page=f['pages'][0]
+    f['client'].put('/api/v1/groups/'+f['group_id']+'/grade',headers=f['headers'],json={'grade_id':f['cls']['grade_id']}).raise_for_status()
+    correction={'original_number':'?23','original_absent':False}
+    result={**page['result'],'absent_mark':True,'operator_correction':correction}
+    response=f['upload'](page,result)
+    assert response.status_code==200,response.text
+    assert response.json()['absent_mark'] and response.json()['operator_correction']==correction
+    assert f['upload'](page,result).status_code==200
+    assert f['upload'](page,{**result,'absent_mark':False}).status_code==409
