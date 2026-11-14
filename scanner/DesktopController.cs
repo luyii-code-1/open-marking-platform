@@ -15,7 +15,26 @@ public sealed class DesktopController : IDisposable
     private readonly LocalQueue _queue;
     private readonly RecognitionWorker _worker;
     private readonly bool _selfTest;
-    private string? _externalPlugin;
+    private sealed record Plugin(string Id,string Path);
+    private sealed record Preferences(string Driver,string? PluginId,List<Plugin> Plugins,JsonElement? Device);
+    private Preferences _prefs = new("Twain",null,[],null);
+    private string? Executable()
+    {
+        if(_driver!="external")return null;
+        var plugin=_prefs.Plugins.Find(p=>p.Id==_prefs.PluginId);
+        if(plugin==null || !File.Exists(plugin.Path))throw new IOException("请重新选择扫描插件程序，当前文件不可用。");
+        return plugin.Path;
+    }
+    private void PersistDevices()=>Save(Path.Combine(_queue.Root,"device-plugins.json"),JsonSerializer.Serialize(_prefs));
+    private void Switch(string driver,string? id)
+    {
+        if(driver is not ("Twain" or "Wia" or "Escl" or "external"))throw new ArgumentException("驱动接口无效");
+        if(driver==_driver && id==_prefs.PluginId)return;
+        _driver=driver;
+        _devices=[];
+        _prefs=_prefs with {Driver=driver,PluginId=id,Device=null};
+        PersistDevices();
+    }
     private string _driver="Twain";
     private readonly SemaphoreSlim _uploadGate=new(1,1);
     private readonly CancellationTokenSource _lifetime=new();
@@ -41,6 +60,12 @@ public sealed class DesktopController : IDisposable
         }
         var settings=Path.Combine(_queue.Root,"scan-capture-settings.json");
         if(File.Exists(settings))ScanSettings=(JsonSerializer.Deserialize<ScanCaptureSettings>(File.ReadAllText(settings))??new()).Validate();
+        var preferences=Path.Combine(_queue.Root,"device-plugins.json");
+        if(File.Exists(preferences)){
+            _prefs=JsonSerializer.Deserialize<Preferences>(File.ReadAllText(preferences))??_prefs;
+            _driver=_prefs.Driver;
+            if(_prefs.Device is JsonElement device)_devices=[device];
+        }
         LoadPackages();
     }
 
@@ -81,7 +106,7 @@ public sealed class DesktopController : IDisposable
         var offset=args.TryGetProperty("offset",out var start)?Math.Max(0,start.GetInt32()):0;
         var projects=_packages.Values.Select(p=>new{id=Text(p.GetProperty("project"),"id"),name=Text(p.GetProperty("project"),"name"),downloaded_at=Text(p,"downloaded_at")}).ToArray();
         var catalogPath=Path.Combine(_queue.Root,"workspaces",Partition,"catalog.json");
-        return new{review_edit=true,room_review=true,manual_room_upload=true,device_protocol=DevicePlugin.Protocol,scan_settings=new{dpi=ScanSettings.Dpi,color=ScanSettings.Color},protocol=Protocol,server_url=_server,storage_path=_queue.Root,online=_online,capturing=Capturing,syncing=_uploadGate.CurrentCount==0,message=_message,project_id=_project,
+        return new{device_preferences=new{driver=_driver,plugins=_prefs.Plugins.Select(p=>new{id=p.Id,name=Path.GetFileName(p.Path),available=File.Exists(p.Path)}),plugin_id=_prefs.PluginId,device=_prefs.Device,devices=_devices},review_edit=true,room_review=true,manual_room_upload=true,device_protocol=DevicePlugin.Protocol,scan_settings=new{dpi=ScanSettings.Dpi,color=ScanSettings.Color},protocol=Protocol,server_url=_server,storage_path=_queue.Root,online=_online,capturing=Capturing,syncing=_uploadGate.CurrentCount==0,message=_message,project_id=_project,
             projects,catalog=File.Exists(catalogPath)?Json(File.ReadAllText(catalogPath)):Json("{\"projects\":[]}"),
             package=_packages.TryGetValue(_project,out var package)?package:Json("null"),
             batches=batches.Select(b=>new{id=b.Id,name=b.Label,subject_id=b.SubjectId,group_id=b.GroupId,room=b.Room,room_tags=JsonSerializer.Deserialize<JsonElement>(b.RoomTagsJson),status=b.Status,error=b.Error,capture_mode=b.CaptureMode,back_order=b.BackOrder,paper=b.Paper,sides=b.Sides,created_at=b.CreatedAt,
@@ -166,17 +191,45 @@ public sealed class DesktopController : IDisposable
                 if(Capturing)throw new InvalidOperationException("请先停止采集");
                 var picker=new FileDialog{Filter="扫描设备插件|*.exe"};
                 if(picker.ShowDialog()!=true)return null;
-                _externalPlugin=picker.FileName;_devices=[];return new{name=Path.GetFileName(_externalPlugin)};
+                var plugin=_prefs.Plugins.Find(p=>string.Equals(p.Path,picker.FileName,StringComparison.OrdinalIgnoreCase));
+                if(plugin==null){
+                    plugin=new Plugin(Guid.NewGuid().ToString("N"),picker.FileName);
+                    _prefs.Plugins.Add(plugin);
+                }
+                Switch("external",plugin.Id);
+                return new{name=Path.GetFileName(plugin.Path)};
+            case "selectDriver":
+                if(Capturing)throw new InvalidOperationException("请先停止采集");
+                var key=Text(args,"plugin_id",_prefs.PluginId??"");
+                if(key.Length>0 && !_prefs.Plugins.Any(p=>p.Id==key))throw new ArgumentException("插件未登记");
+                Switch(Text(args,"driver"),key.Length==0?null:key);
+                return true;
+            case "forgetPlugin":
+                if(Capturing)throw new InvalidOperationException("请先停止采集");
+                _prefs.Plugins.RemoveAll(p=>p.Id==_prefs.PluginId);
+                Switch("Twain",null);
+                return true;
+            case "selectDevice":
+                if(Capturing)throw new InvalidOperationException("请先停止采集");
+                var choice=_devices.FirstOrDefault(d=>Text(d,"id")==Text(args,"id"));
+                if(choice.ValueKind!=JsonValueKind.Object)throw new ArgumentException("请选择已发现的扫描仪");
+                _prefs=_prefs with {Device=choice};PersistDevices();
+                return true;
             case "devices":
-                _driver=Text(args,"driver","Twain");
-                if(_driver=="external"&&_externalPlugin==null)throw new InvalidOperationException("请先选择插件程序");
+                if(Capturing)throw new InvalidOperationException("请先停止采集");
+                Switch(Text(args,"driver",_driver),_prefs.PluginId);
+                var executable=Executable();
                 _devices=[];
                 using(var timeout=CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token)){
                     timeout.CancelAfter(TimeSpan.FromSeconds(60));
-                    await DevicePlugin.Run(_driver=="external"?_externalPlugin:null,new{protocol=DevicePlugin.Protocol,command="devices",driver=_driver},msg=>{
+                    await DevicePlugin.Run(executable,new{protocol=DevicePlugin.Protocol,command="devices",driver=_driver},msg=>{
                         _devices=msg.GetProperty("devices").EnumerateArray().Select(d=>d.Clone()).ToArray();return Task.CompletedTask;
                     },timeout.Token);
                 }
+                var savedId=_prefs.Device is JsonElement old ? Text(old,"id") : "";
+                var match=_devices.FirstOrDefault(d=>Text(d,"id")==savedId);
+                _prefs=_prefs with {Device=match.ValueKind==JsonValueKind.Object?match:_devices.Length==1?_devices[0]:null};
+                PersistDevices();
                 return _devices;
             case "start":
                 if(Capturing)throw new InvalidOperationException("扫描正在进行。");
@@ -185,7 +238,7 @@ public sealed class DesktopController : IDisposable
                 if(!_devices.Any(d=>Text(d,"id")==deviceId))throw new InvalidOperationException("请先发现并选择扫描仪。");
                 var side=scanBatch.CaptureMode=="duplex"?"auto":Text(args,"side","front");
                 _captureCancel=CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
-                _capture=Capture(scanBatch,async receive=>await DevicePlugin.Acquire(_driver=="external"?_externalPlugin:null,_driver,deviceId,scanBatch.Paper,scanBatch.CaptureMode=="duplex",ScanSettings,receive,_captureCancel.Token),side);Notify();return new{started=true};
+                _capture=Capture(scanBatch,async receive=>await DevicePlugin.Acquire(Executable(),_driver,deviceId,scanBatch.Paper,scanBatch.CaptureMode=="duplex",ScanSettings,receive,_captureCancel.Token),side);Notify();return new{started=true};
             case "stop":_captureCancel?.Cancel();return new{stopping=true};
             case "import":
                 if(Capturing)throw new InvalidOperationException("请先停止扫描。");

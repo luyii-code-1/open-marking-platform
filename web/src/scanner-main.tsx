@@ -19,7 +19,7 @@ function Status({ value }: { value: string }) { return <Tag color={value === 'bl
 function Scanner() {
   const [state, setState] = useState<any>(null), [busyKey, setBusyKey] = useState(''), [error, setError] = useState(''), [connection, setConnection] = useState(false)
   const [inProject, setInProject] = useState(false), [subjectId, setSubject] = useState(''), [groupId, setGroup] = useState(''),[gradeId,setGrade]=useState(''), [batchId, setBatch] = useState(''), [page, setPage] = useState(1)
-  const [firstSide,setFirstSide]=useState(localStorage.getItem('duplex-first-side')||''), [driver, setDriver] = useState('Twain'), [devices, setDevices] = useState<Row[]>([]), [device, setDevice] = useState(''), [side, setSide] = useState('front')
+  const [firstSide,setFirstSide]=useState(localStorage.getItem('duplex-first-side')||''), [side, setSide] = useState('front')
   const [preview, setPreview] = useState<Row | null>(null), [image, setImage] = useState(''), [question, setQuestion] = useState(''), [previewBusy, setPreviewBusy] = useState(false)
   const [connectForm] = Form.useForm(), { message, modal } = App.useApp()
   const currentBatch = useRef(batchId), currentPage = useRef(page), reloadBusy = useRef(false), mounted = useRef(true)
@@ -48,6 +48,7 @@ function Scanner() {
     catch (e) { message.error((e as Error).message) }
     finally { if(activeAction.current===token){activeAction.current=null;setBusyKey('')} }
   }
+  const prefs = state?.device_preferences, driver = prefs?.driver || "Twain", device = prefs?.device?.id || ""
   const pack = state?.package, subject = pack?.subjects.find((s: Row) => s.id === subjectId), group = pack?.groups.find((g: Row) => g.id === groupId), batch = state?.batches.find((b: Row) => b.id === batchId)
   const cached = new Map((state?.projects || []).map((p: Row) => [p.id, p]))
   const projects: Row[] = [...new Map([...(state?.catalog.projects || []), ...(state?.projects || [])].map((p: Row) => [p.id, p])).values()] as Row[]
@@ -115,7 +116,7 @@ function Scanner() {
     ...(inProject && group ? [{ title: <Button type="link" disabled={locked} onClick={() => setBatch('')}>{cardName(group,subject)}</Button> }] : []),
     ...(inProject && batch ? [{ title: batch.room_tags?.[0]?.name||'未指定考场' }] : []),
   ]
-  if(state&&!state.review_edit)return <main className="scanner-unavailable"><Typography.Title level={3}>请更新扫描客户端</Typography.Title><p>从管理后台的扫描台下载安装包后重新打开。</p><Button onClick={()=>action('offlinePage')}>打开已安装版本的本地页面</Button></main>
+  if(state&&!state.device_preferences)return <main className="scanner-unavailable"><Typography.Title level={3}>请更新扫描客户端</Typography.Title><p>从管理后台的扫描台下载安装包后重新打开。</p><Button onClick={()=>action('offlinePage')}>打开已安装版本的本地页面</Button></main>
   if (!hasScannerHost) return <main className="scanner-unavailable"><Typography.Title level={3}>扫描工作台</Typography.Title><Typography.Paragraph>请在扫描客户端打开此页面。</Typography.Paragraph></main>
   return <div className="scanner-app">
     <header className="scanner-header"><Space size={16}><Brand /><Typography.Title level={4}>扫描工作台</Typography.Title></Space><Space size={12}><Tag color={state?.online ? 'green' : undefined}>{state?.online ? '已连接' : '离线'}</Tag><Dropdown menu={{ items: [
@@ -149,7 +150,15 @@ function Scanner() {
             </Space></div>
               {roomSheets.some(r=>r.total>0)&&<Alert type={needsReview?'warning':'info'} message={needsReview?'本考场有待核对答卷':readyToUpload&&roomComplete?'已达到考场预期人数，请核对后开始上传':`已暂存 ${pendingSheets.length} 份，请核对后开始上传`} action={<Button disabled={locked} onClick={reviewRoom}>核对答卷</Button>}/>}
               {batch.error && <Alert type="warning" message={batch.error} />}
-              <Collapse defaultActiveKey={['device']} items={[{ key: 'device', label: '设备设置', children: <Space wrap size={12}><Select aria-label="分辨率" disabled={locked} value={state.scan_settings?.dpi||300} options={[150,200,300,600].map(value=>({value,label:value+' DPI'}))} onChange={dpi=>action('scanSettings',{dpi,color:state.scan_settings?.color||'gray'})}/><Select aria-label="颜色" disabled={locked} value={state.scan_settings?.color||'gray'} options={[{value:'gray',label:'灰度'},{value:'bw',label:'黑白'},{value:'color',label:'彩色'}]} onChange={color=>action('scanSettings',{dpi:state.scan_settings?.dpi||300,color})}/><Select aria-label="驱动接口" value={driver} disabled={locked} style={{ width: 130 }} onChange={value => { setDriver(value); setDevices([]); setDevice('') }} options={[{ value: 'Twain', label: 'TWAIN' }, { value: 'Wia', label: 'WIA' }, { value: 'Escl', label: 'eSCL' },{value:'external',label:'外部插件'}]} />{driver==='external'&&<Button disabled={locked} onClick={()=>action('choosePlugin',{},()=>{setDevices([]);setDevice('')})}>选择插件程序</Button>}<Button loading={busyKey===actionKey('devices')} disabled={locked} onClick={() => action('devices', { driver }, rows => { setDevices(rows); setDevice(rows[0]?.id || '') })}>发现扫描仪</Button><Select aria-label="扫描仪" placeholder="选择扫描仪" disabled={locked} value={device || undefined} style={{ minWidth: 260 }} options={devices.map(d => ({ value: d.id, label: d.name }))} onChange={setDevice} />{batch.capture_mode !== 'duplex' && batch.sides === 2 && <Select aria-label="扫描面" disabled={locked} value={side} onChange={setSide} options={[{ value: 'front', label: '正面' }, { value: 'back', label: '背面' }]} />}</Space> }]} />
+              <Collapse defaultActiveKey={['device']} items={[{ key: 'device', label: '设备设置', children: <Space wrap size={12}><Select aria-label="分辨率" disabled={locked} value={state.scan_settings?.dpi||300} options={[150,200,300,600].map(value=>({value,label:value+' DPI'}))} onChange={dpi=>action('scanSettings',{dpi,color:state.scan_settings?.color||'gray'})}/><Select aria-label="颜色" disabled={locked} value={state.scan_settings?.color||'gray'} options={[{value:'gray',label:'灰度'},{value:'bw',label:'黑白'},{value:'color',label:'彩色'}]} onChange={color=>action('scanSettings',{dpi:state.scan_settings?.dpi||300,color})}/><Select aria-label="驱动接口" value={driver} disabled={locked} onChange={driver=>action('selectDriver',{driver})} options={[{value:'Twain',label:'TWAIN'},{value:'Wia',label:'WIA'},{value:'Escl',label:'eSCL'},{value:'external',label:'外部插件'}]} />
+                {driver==='external' && <>
+                  <Select aria-label="已添加的插件" placeholder="选择插件" value={prefs?.plugin_id||undefined} disabled={locked} options={prefs?.plugins.map((p:Row)=>({value:p.id,label:p.name+(p.available?'':'（文件缺失）')}))} onChange={plugin_id=>action('selectDriver',{driver,plugin_id})}/>
+                  <Button disabled={locked} onClick={()=>action('choosePlugin')}>添加插件</Button>
+                  {prefs?.plugin_id && <Button disabled={locked} onClick={()=>action('forgetPlugin')}>移除插件</Button>}
+                </>}
+                <Button loading={busyKey===actionKey('devices')} disabled={locked} onClick={()=>action('devices',{driver})}>发现扫描仪</Button>
+                <Select aria-label="扫描仪" placeholder="选择扫描仪" disabled={locked} value={device||undefined} style={{minWidth:260}} options={prefs?.devices.map((d:Row)=>({value:d.id,label:d.name}))} onChange={id=>action('selectDevice',{id})}/>
+                {batch.capture_mode !== 'duplex' && batch.sides === 2 && <Select aria-label="扫描面" disabled={locked} value={side} onChange={setSide} options={[{ value: 'front', label: '正面' }, { value: 'back', label: '背面' }]} />}</Space> }]} />
               <Typography.Paragraph className="scanner-progress" type="secondary" role="status" aria-live="polite">{state.message || '\u00a0'}</Typography.Paragraph>
               <Table<Row> rowKey="id" dataSource={state.pages} pagination={{ current: page, pageSize: 50, total: state.page_total, showSizeChanger: false, onChange: setPage }} columns={[
                 { title: '纸张序号', dataIndex: 'sequence', width: 100 }, { title: '扫描面', dataIndex: 'side', width: 90, render: value => value === 'front' ? '正面' : '背面' }, { title: '考号', dataIndex: 'candidate' }, { title: '状态', dataIndex: 'status', render: value => <Status value={value} /> },
