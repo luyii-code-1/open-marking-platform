@@ -1,5 +1,5 @@
 const { pathToFileURL } = require('node:url')
-const methods = new Set(['state','connect','downloadProject','openProject','createBatch','devices','start','stop','import','pair','upload','refreshBatch','sendForReview','retryPage','exclude','preview','onlinePage','offlinePage'])
+const methods = new Set(['state','connect','downloadProject','openProject','createBatch','assignRoom','choosePlugin','scanSettings','devices','start','stop','import','pair','upload','refreshBatch','sendForReview','retryPage','exclude','preview','onlinePage','offlinePage'])
 const protocol = 'omp-scanner-4'
 function serverUrl(value) {
   const url = new URL(value)
@@ -21,3 +21,4 @@ function validateRequest(value) {
   return value
 }
 module.exports = { protocol, serverUrl, pageUrl, allowed, validateRequest, localUrl: file => pathToFileURL(file).href }
+
