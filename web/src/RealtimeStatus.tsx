@@ -14,11 +14,11 @@ export function RealtimeStatus({user,onExpired,onProfile}:{user:User;onExpired:(
     function flush(){flushTimer=undefined;if(stopped)return;announceChanges(all?undefined:[...pending]);pending.clear();all=false}
     function changed(roots?:string[]){if(!roots)all=true;else roots.forEach(root=>pending.add(root));if(!flushTimer)flushTimer=setTimeout(flush,250)}
     function connect(){
-      if(stopped||!currentToken())return
+      if(stopped||!currentToken()||socket)return
       if(!navigator.onLine){return}
       const target=new URL('/api/v1/events',location.href);target.protocol=location.protocol==='https:'?'wss:':'ws:'
       const signedToken=currentToken(),active=new WebSocket(target.href);socket=active
-      active.onopen=()=>{if(!stopped)active.send(JSON.stringify({type:'auth',token:signedToken}))}
+      active.onopen=()=>{if(stopped||currentToken()!==signedToken)active.close();else active.send(JSON.stringify({type:'auth',token:signedToken}))}
       active.onmessage=event=>{
         if(stopped||socket!==active)return
         let value:{type:string;roots?:string[]};try{value=JSON.parse(event.data)}catch{return}
@@ -40,12 +40,11 @@ export function RealtimeStatus({user,onExpired,onProfile}:{user:User;onExpired:(
         const delay=Math.min(30000,1000*2**Math.min(attempt++,5))+Math.random()*500
         retryTimer=setTimeout(connect,delay)
       }
-      active.onerror=()=>active.close()
     }
     function online(){if(retryTimer)clearTimeout(retryTimer);if(!socket||socket.readyState===WebSocket.CLOSED)connect()}
     function visibility(){if(document.visibilityState==='visible'){changed();online()}}
-    window.addEventListener('online',online);document.addEventListener('visibilitychange',visibility);connect()
-    return()=>{stopped=true;if(retryTimer)clearTimeout(retryTimer);if(flushTimer)clearTimeout(flushTimer);window.removeEventListener('online',online);document.removeEventListener('visibilitychange',visibility);socket?.close()}
+    window.addEventListener('online',online);document.addEventListener('visibilitychange',visibility);retryTimer=setTimeout(connect,0)
+    return()=>{stopped=true;if(retryTimer)clearTimeout(retryTimer);if(flushTimer)clearTimeout(flushTimer);window.removeEventListener('online',online);document.removeEventListener('visibilitychange',visibility);if(socket?.readyState===WebSocket.OPEN)socket.close()}
   },[user.id])
   return null
 }

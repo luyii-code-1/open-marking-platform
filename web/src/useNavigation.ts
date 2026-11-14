@@ -2,17 +2,18 @@ import { useEffect, useRef, useState } from 'react'
 import { readLocation } from './examNavigation'
 
 const unsaved = new Set<symbol>()
-export const hasUnsavedChanges=()=>unsaved.size>0
+const guards = new Set<symbol>()
+export const hasUnsavedChanges=()=>guards.size>0
 export const confirmLeaving = () => !unsaved.size || window.confirm('当前页面有未保存修改，确认离开？')
 
-export function useUnsavedChanges(dirty: boolean) {
+export function useUnsavedChanges(dirty: boolean, unloadOnly=false) {
   useEffect(() => {
     if (!dirty) return
-    const id = Symbol(); unsaved.add(id)
-    const beforeUnload = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = '' }
+    const id = Symbol(); guards.add(id);if(!unloadOnly)unsaved.add(id)
+    const beforeUnload = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = '有未保存的内容' }
     window.addEventListener('beforeunload', beforeUnload)
-    return () => { unsaved.delete(id); window.removeEventListener('beforeunload', beforeUnload) }
-  }, [dirty])
+    return () => { guards.delete(id);unsaved.delete(id); window.removeEventListener('beforeunload', beforeUnload) }
+  }, [dirty,unloadOnly])
 }
 
 export function useNavigation() {

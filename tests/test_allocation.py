@@ -29,6 +29,30 @@ def seed(count, mode='single'):
     return {'template_id':template['id'],'question_id':question['id']}
 
 
+def test_claim_ahead_during_upload_and_regrading(tmp_path,monkeypatch):
+    monkeypatch.setattr(db,'ROOT',tmp_path)
+    with TestClient(app) as client:
+        admin,teachers=setup(client,3)
+        scope=seed(2,mode='double')
+        client.post('/api/v1/assignments',json={**scope,'user_ids':[t[0] for t in teachers[:2]],'arbitrator_ids':[teachers[2][0]],'arbitration_mode':'designated_random'},headers=admin).raise_for_status()
+        actor=teachers[0][1]
+        def claim(held=()):
+            response=client.post('/api/v1/tasks/claim',json={**scope,'pending_task_ids':list(held)},headers=actor)
+            response.raise_for_status()
+            return response.json()
+        first=claim()
+        assert claim()['id']==first['id']
+        second=claim([first['id']])
+        assert second and second['submission_id']!=first['submission_id']
+        assert claim([first['id']])['id']==second['id']
+        assert claim([first['id'],second['id']]) is None
+        for task in (second,first):
+            payload={'score':7,'idempotency_key':str(uuid.uuid4()),'base_score_revision':0,'offline_protocol':1}
+            client.post('/api/v1/tasks/'+task['id']+'/score',json=payload,headers=actor).raise_for_status()
+        client.post('/api/v1/tasks/'+first['id']+'/regrade-from',json={'reason':'复核'},headers=actor).raise_for_status()
+        assert claim()['id']==first['id'] and claim([first['id']])['id']==second['id']
+
+
 def test_weighted_quotas_skip_and_reallocation(tmp_path,monkeypatch):
     monkeypatch.setattr(db,'ROOT',tmp_path)
     with TestClient(app) as client:

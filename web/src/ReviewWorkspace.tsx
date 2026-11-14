@@ -1,10 +1,11 @@
 import {questionLabel} from './mergeQuestions'
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { Alert, Button, Modal, Popconfirm, Space, Tag } from 'antd'
+import { Alert, App, Button, Modal, Popconfirm, Space } from 'antd'
 import { Table } from './DataTable'
 import { currentToken, type User } from './api'
-import { forgetReview, isReviewUpdateLocked, listReviews, watchReviewChanges, type ReviewRecord } from './reviewStore'
+import { forgetReview, hasUnsentReview, isReviewUpdateLocked, listReviews, retryFailedReview, watchReviewChanges, type ReviewRecord } from './reviewStore'
+import {useUnsavedChanges} from './useNavigation'
 import { reviewTransport, syncReviewRecords, type SyncReport } from './reviewSync'
 
 type Workspace={user:User;offline:boolean;records:ReviewRecord[];ready:boolean;storageError:string;updateLocked:boolean;sync:()=>Promise<SyncReport>;setQueueTarget:(target:HTMLDivElement|null)=>void}
@@ -14,27 +15,48 @@ export function useReviewWorkspace(){const value=useContext(Context);if(!value)t
 export function ReviewWorkspace({user,offline,onVerified,onLoginRequired,children}:{user:User;offline:boolean;onVerified:(user:User)=>void;onLoginRequired:()=>void;children:ReactNode}){
   const [records,setRecords]=useState<ReviewRecord[]>([]),[storageError,setStorageError]=useState(''),[locked,setLocked]=useState(isReviewUpdateLocked()),[status,setStatus]=useState<SyncReport>({state:offline?'offline':'ready',sent:0})
   const [ready,setReady]=useState(false)
+  const {message}=App.useApp()
+  useUnsavedChanges(records.some(hasUnsentReview),true)
   const [queueTarget,setQueueTarget]=useState<HTMLDivElement|null>(null)
   const current=useRef({user,offline,onVerified,onLoginRequired});current.current={user,offline,onVerified,onLoginRequired}
-  const flight=useRef<Promise<SyncReport>|null>(null),mounted=useRef(true),loadVersion=useRef(0)
+  const flight=useRef<Promise<SyncReport>|null>(null),rerun=useRef(false),mounted=useRef(true),loadVersion=useRef(0)
   const reload=useCallback(async()=>{const version=++loadVersion.current;try{const rows=await listReviews(user.id);if(mounted.current&&version===loadVersion.current){setRecords(rows);setStorageError('');setReady(true)}}catch(e){if(mounted.current){setStorageError((e as Error).message);setReady(true)}}},[user.id])
-  const sync=useCallback(()=>{
-    if(flight.current)return flight.current
+  const sync=useCallback(():Promise<SyncReport>=>{
+    if(flight.current){rerun.current=true;return flight.current}
+    rerun.current=false
     const token=currentToken(),owner=current.current.user.id
     const alive=()=>mounted.current&&currentToken()===token&&current.current.user.id===owner
     if(!token)return Promise.resolve({state:'login',sent:0} as SyncReport)
-    const work=(async()=>{
-      const result=await syncReviewRecords(owner,reviewTransport(token,alive))
+    const work=(async():Promise<SyncReport>=>{
+      let result:SyncReport
+      try{
+        const upload=()=>alive()?syncReviewRecords(owner,reviewTransport(token,alive)):Promise.resolve({state:'login',sent:0} as SyncReport)
+        result=navigator.locks?await navigator.locks.request('omp-score-upload:'+owner,upload):await upload()
+      }catch(e){
+        if(alive())setStorageError('无法读写本地评分：'+(e as Error).message)
+        return {state:'ready',sent:0}
+      }
       if(alive()){
         setStatus(result)
         if(result.profile)current.current.onVerified(result.profile)
-        if(result.state==='login')current.current.onLoginRequired()
+        if(result.state==='login'){
+          if((await listReviews(owner)).some(hasUnsentReview))message.warning('评分已保存在本机，请使用原账号重新登录')
+          if(alive())current.current.onLoginRequired()
+        }
         await reload()
       }
       return result
-    })()
-    flight.current=work;void work.finally(()=>{flight.current=null});return work
-  },[reload])
+    })().catch((e):SyncReport=>{
+      if(alive())setStorageError((e as Error).message)
+      return {state:'ready',sent:0}
+    })
+    flight.current=work
+    void work.then(result=>{
+      flight.current=null
+      if(rerun.current&&alive()&&(result.state==='ready'||result.state==='offline'))void sync()
+    })
+    return work
+  },[reload,message])
   useEffect(()=>{
     mounted.current=true
     const change=()=>{setLocked(isReviewUpdateLocked());void reload()}
@@ -45,15 +67,31 @@ export function ReviewWorkspace({user,offline,onVerified,onLoginRequired,childre
     window.addEventListener('online',retry);document.addEventListener('visibilitychange',retry)
     return()=>{mounted.current=false;clearInterval(timer);unwatch();window.removeEventListener('online',retry);document.removeEventListener('visibilitychange',retry)}
   },[reload,sync])
-  useEffect(()=>{if(records.some(r=>r.status==='queued'))void sync()},[records.map(r=>r.operation?.id+':'+r.status).join(','),sync])
+  const queued=records.filter(r=>r.status==='queued'&&r.operation)
+  const nextAttempt=queued.length?Math.min(...queued.map(r=>r.retryAt??0)):null
+  const queueKey=queued.map(r=>r.operation!.id+':'+(r.failures??0)).join(',')
+  useEffect(()=>{
+    if(nextAttempt===null||status.state==='upgrade')return
+    const timer=setTimeout(()=>void sync(),Math.max(0,nextAttempt-Date.now()))
+    return()=>clearTimeout(timer)
+  },[nextAttempt,queueKey,status.state,sync])
   return <Context.Provider value={{user,offline:offline||status.state==='offline',records,ready,storageError,updateLocked:locked,sync,setQueueTarget}}>{children}<ReviewQueueStatus records={records} status={status} error={storageError} sync={sync} target={queueTarget}/></Context.Provider>
 }
 
 function ReviewQueueStatus({records,status,error,sync,target}:{records:ReviewRecord[];status:SyncReport;error:string;sync:()=>Promise<SyncReport>;target:HTMLDivElement|null}){
   const [open,setOpen]=useState(false)
-  const pending=records.filter(r=>r.status==='queued'||r.status==='conflict'),conflicts=pending.filter(r=>r.status==='conflict')
+  const pending=records.filter(r=>r.operation),failed=pending.filter(r=>r.status==='failed'),conflicts=pending.filter(r=>r.status==='conflict')
+  const {message}=App.useApp()
+  async function retry(){
+    try{await Promise.all(failed.map(retryFailedReview));await sync()}catch(e){message.error((e as Error).message)}
+  }
   function exportRecords(){const blob=new Blob([JSON.stringify(pending.map(r=>({task_id:r.task.id,template:r.template.name,question:questionLabel(r.question),score:r.operation?.score,operation_id:r.operation?.id,status:r.status,reason:r.error})),null,2)],{type:'application/json'});const url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download='阅卷待传记录.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}
-  const notice=(pending.length>0||error||status.state==='upgrade')&&<div className="review-queue-status" role="status"><Space wrap>{error?<Alert type="error" message={'本地保存不可用：'+error}/>:<Tag color={conflicts.length?'orange':'blue'}>待上传 {pending.length-conflicts.length} · 待核对 {conflicts.length}</Tag>}{status.message&&<span>{status.message}</span>}<Button size="small" onClick={()=>void sync()}>重试上传</Button>{pending.length>0&&<Button size="small" onClick={()=>setOpen(true)}>查看本地记录</Button>}</Space></div>
+  const notice=(failed.length>0||conflicts.length>0||error||status.state==='upgrade')&&<div className="review-queue-status" role="alert"><Space wrap>
+    {error&&<Alert type="error" message={'本地保存不可用：'+error}/>}
+    {failed.length>0&&<><span>{failed.length} 份评分重试 3 次后仍未上传，分数已保存在本机。</span><Button size="small" onClick={retry}>重试上传</Button></>}
+    {conflicts.length>0&&<span>{conflicts.length} 份评分需要核对</span>}
+    {status.message&&<span>{status.message}</span>}
+    {pending.length>0&&<Button size="small" onClick={()=>setOpen(true)}>查看本地记录</Button>}</Space></div>
   return <>
     {target?createPortal(notice,target):notice}
     <Modal title="本地待传评分" width={760} open={open} onCancel={()=>setOpen(false)} footer={<Space><Button onClick={exportRecords}>导出记录</Button><Button onClick={()=>setOpen(false)}>关闭</Button></Space>}>

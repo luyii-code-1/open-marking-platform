@@ -1,6 +1,8 @@
 from .merged_questions import label as question_label
 import io
+import json
 import time
+from decimal import Decimal
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -106,6 +108,10 @@ def details(identifier:str,current=Depends(user)):
 
 @router.post('/tasks/claim')
 def claim(body:dict,current=Depends(user)):
+    held=body.get('pending_task_ids',[])
+    if not isinstance(held,list) or any(not isinstance(value,str) for value in held):
+        raise HTTPException(422,'本地作答编号列表无效')
+    held=set(held)
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
         template,question=question_for(db,body.get('template_id'),body.get('question_id'))
@@ -119,18 +125,21 @@ def claim(body:dict,current=Depends(user)):
         ensure(db,template,question,assignment)
         allocate_arbitration(db,template,question,assignment)
         queued=db.execute('SELECT task_id FROM regrade_queue WHERE user_id=? AND template_id=? AND question_id=? ORDER BY position,task_id',(current['id'],template['id'],question['id'])).fetchall()
+        # Each pending ID still belongs to its teacher. Both regrades and ordinary
+        # claims must pass over these papers until their local score arrives.
         for row in queued:
+            if row[0] in held:continue
             task=require(db,row[0],'tasks')
             if task['status']=='completed':return public_task({**task,'regrading':True},db)
             db.execute('DELETE FROM regrade_queue WHERE task_id=?',(row[0],))
-        existing=find(db,'tasks',user_id=current['id'],question_id=question['id'],status='claimed')
+        existing=find(db,'tasks',user_id=current['id'],template_id=template['id'],question_id=question['id'],status='claimed')
         for task in existing:
             if task['user_id']==current['id'] and task['question_id']==question['id'] and task['status']=='claimed':
                 if task['expires_at']>time.time():
+                    if task['id'] in held:continue
                     task['expires_at']=time.time()+900
                     return public_task(put(db,'tasks',task,current['id']),db)
                 task['status']='expired';put(db,'tasks',task,current['id'])
-        import json
         # Remove TEXT column affinity on the correlated UUID so SQLite can
         # seek the JSON expression index rather than scan every task.
         rows=db.execute('''SELECT s.body FROM objects s INDEXED BY object_submission WHERE s.kind='submissions' AND s.deleted=0
@@ -140,7 +149,8 @@ def claim(body:dict,current=Depends(user)):
             AND NOT EXISTS(SELECT 1 FROM review_results r WHERE r.submission_id=s.id AND r.question_id=? AND r.final_cents IS NOT NULL)
             AND NOT EXISTS(SELECT 1 FROM objects t INDEXED BY object_task_answer WHERE t.kind='tasks' AND t.deleted=0
                 AND json_extract(t.body,'$.submission_id')=+s.id AND json_extract(t.body,'$.question_id')=?
-                AND json_extract(t.body,'$.status')='completed' AND json_extract(t.body,'$.user_id')=?)
+                AND json_extract(t.body,'$.user_id')=? AND (json_extract(t.body,'$.status')='completed'
+                  OR t.id IN (SELECT value FROM json_each(?))))
             AND (SELECT COUNT(*) FROM objects t INDEXED BY object_task_answer WHERE t.kind='tasks' AND t.deleted=0
                 AND json_extract(t.body,'$.submission_id')=+s.id AND json_extract(t.body,'$.question_id')=?
                 AND (json_extract(t.body,'$.status')='completed' OR (json_extract(t.body,'$.status')='claimed' AND json_extract(t.body,'$.expires_at')>?)))
@@ -148,7 +158,7 @@ def claim(body:dict,current=Depends(user)):
                     CASE WHEN (SELECT COUNT(*) FROM objects t INDEXED BY object_task_answer WHERE t.kind='tasks' AND t.deleted=0
                         AND json_extract(t.body,'$.submission_id')=+s.id AND json_extract(t.body,'$.question_id')=? AND json_extract(t.body,'$.status')='completed')<2 THEN 2 ELSE 3 END END
             ORDER BY COALESCE((SELECT MAX(json_extract(t.body,'$.skipped_at')) FROM objects t INDEXED BY object_task_answer WHERE t.kind='tasks' AND t.deleted=0 AND json_extract(t.body,'$.submission_id')=+s.id AND json_extract(t.body,'$.question_id')=? AND json_extract(t.body,'$.status')='skipped' AND json_extract(t.body,'$.user_id')=?),0)
-            LIMIT 1''',(template['id'],question['id'],current['id'],question['id'],question['id'],current['id'],question['id'],time.time(),question.get('review_mode','single'),question['id'],question['id'],current['id'])).fetchall()
+            LIMIT 1''',(template['id'],question['id'],current['id'],question['id'],question['id'],current['id'],json.dumps(list(held)),question['id'],time.time(),question.get('review_mode','single'),question['id'],question['id'],current['id'])).fetchall()
         for row in rows:
             submission=json.loads(row['body'])
             relevant=find(db,'tasks',submission_id=submission['id'],question_id=question['id'])
@@ -172,7 +182,9 @@ def claim(body:dict,current=Depends(user)):
 
 @router.post('/tasks/{identifier}/score')
 def score(identifier:str,body:dict,current=Depends(user)):
-    try: amount=cents(body['score'])
+    try:
+        amount=cents(body['score'])
+        if Decimal(str(body['score']))!=Decimal(amount)/100:raise ValueError
     except (KeyError,ValueError,ArithmeticError): raise HTTPException(422,'分值无效')
     key=str(body.get('idempotency_key',''))
     if not 1<=len(key)<=200: raise HTTPException(422,'需要提交幂等编号')
