@@ -15,7 +15,7 @@ from .identifiers import prepare_questions
 
 router=APIRouter(prefix='/api/v1')
 _render_slots=threading.BoundedSemaphore(2)
-DEFINITION_FIELDS=('name','subtitle','paper','sides','candidate_length','layout_version','sheet_columns','notice_template','notice_layout','print_style','column_frame','uniform_subjective','print_notes','forbidden_regions','background_assets','background_asset_id','questions')
+DEFINITION_FIELDS=('name','subtitle','font_size','leading','paper','sides','candidate_length','layout_version','sheet_columns','notice_template','notice_layout','print_style','column_frame','uniform_subjective','print_notes','forbidden_regions','background_assets','background_asset_id','questions')
 
 
 @router.put('/groups/{group_id}/drafts/{identifier}')
@@ -179,7 +179,7 @@ def preview_template(body:dict,page:int=1,current=Depends(admin)):
             try:source.write_bytes(paper.pdf(template))
             except (ValueError,TypeError,KeyError,OverflowError) as error:raise HTTPException(422,str(error))
             try:
-                rendered=subprocess.run([renderer,'-r','110','-f',str(page),'-l',str(page),'-singlefile','-png',str(source),str(root/'preview')],capture_output=True,timeout=15,creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess,'CREATE_NO_WINDOW') else 0)
+                rendered=subprocess.run([renderer,'-r','220','-f',str(page),'-l',str(page),'-singlefile','-png',str(source),str(root/'preview')],capture_output=True,timeout=15,creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess,'CREATE_NO_WINDOW') else 0)
             except subprocess.TimeoutExpired:raise HTTPException(503,'PDF预览生成超时，请稍后更新')
             if rendered.returncode or not (root/'preview.png').exists():raise HTTPException(503,'PDF预览生成失败，请检查服务器的PDF渲染工具')
             return Response((root/'preview.png').read_bytes(),media_type='image/png',headers={'Cache-Control':'private, no-store'})

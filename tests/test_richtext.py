@@ -71,3 +71,16 @@ def test_fill_to_end_uses_remaining_print_width(width):
     layout(rule+'<br/>'+rule,width,100,canvas)
     assert len(ink)==2 and ink[0][1]-ink[1][1]==pytest.approx(13)
     assert all(x==0 and w==pytest.approx(width) for x,_,w in ink)
+
+
+def test_individual_line_leading_and_vector_rules():
+    from server.richtext import PaperCanvas
+    html='<div data-line-leading="24">(1)<span data-answer-line="15"></span></div><div data-line-leading="36">(2)<span data-answer-line="30"></span></div>'
+    output=io.BytesIO()
+    canvas=PaperCanvas(output,pageCompression=0)
+    assert layout(html,300,100,canvas,10,90,font_size=13,leading=20)==60
+    canvas.save()
+    data=output.getvalue()
+    assert b'/Subtype /Image' not in data and data.count(b' re f')==2
+    with pytest.raises(ValueError):
+        layout(html.replace('"24"','"3"'),300,100,font_size=13)

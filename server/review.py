@@ -272,6 +272,10 @@ def image(identifier:str,current=Depends(user)):
         submission=require(db,task['submission_id'],'submissions')
         _,question=question_for(db,task['template_id'],task['question_id'])
         answer=get(db,task.get('answer_slice_id'),'answer-slices')
+    return render_answer_image(submission,question,answer)
+
+
+def render_answer_image(submission,question,answer):
     override=submission.get('region_overrides',{}).get(question['id'],{})
     if answer:override={'asset_id':answer.get('asset_id')}
     if override.get('asset_id'):
@@ -429,8 +433,6 @@ def publish_results(body:dict,current=Depends(admin)):
         rows=results_for(db,group_id,current)
         if not rows or any(r['status'] not in ('completed','absent','unscanned') for r in rows): raise HTTPException(409,'阅卷尚未全部完成')
         unscanned=[r['student_id'] for r in rows if r['status']=='unscanned']
-        if unscanned and body.get('force_unscanned') is not True:raise HTTPException(409,f'有{len(unscanned)}名应考学生未扫描，可明确确认后强制发布')
-        if unscanned and not str(body.get('reason','')).strip():raise HTTPException(422,'请填写强制发布原因')
         group=require(db,group_id,'groups')
         from .workflow import overview,publication_blockers
         blockers=publication_blockers(overview(db,group,current))

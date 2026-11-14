@@ -149,7 +149,7 @@ export function Paper({value,page,selected,draw,answerMode=false,forbiddenMode=f
       {editorBox&&editing&&<foreignObject key={editing.kind+editing.id+editing.index} x={editorBox.x} y={editorBox.y} width={editorBox.w} height={editorBox.h}
         onPointerDown={e=>e.stopPropagation()} onDoubleClick={e=>e.stopPropagation()} onKeyDown={e=>{e.stopPropagation();if(e.key==='Escape'&&!e.nativeEvent.isComposing)onEdit?.(null)}}>
         <div className="paper-text-editor" style={{width:editorBox.w*96/25.4,height:editorBox.h*96/25.4,transform:'scale('+25.4/96+')'}}>
-          <RichEditor autoFocus toolbarHost={toolsHost} value={editNote?.html??prompt?.content_html??''} onChange={html=>onTextChange?.(editing,html)}/>
+          <RichEditor textStyle={{fontSize:(value.font_size??9)+"pt",lineHeight:(value.leading??13)+"pt"}} autoFocus toolbarHost={toolsHost} value={editNote?.html??prompt?.content_html??''} onChange={html=>onTextChange?.(editing,html)}/>
         </div>
       </foreignObject>}
       {draft&&<rect x={draft.x} y={draft.y} width={draft.width} height={draft.height} stroke="#0866ff" fill="#0866ff20" strokeDasharray="2 1" strokeWidth={.6} pointerEvents="none"/>}

@@ -18,7 +18,7 @@ import { mergeQuestions, splitQuestions, questionNumbers, questionLabel } from '
 import { uniformSubjectiveWidths } from './sheetRegions'
 
 const { Text } = Typography
-const emptyTemplate = (groupId = ''): Template => ({ id: crypto.randomUUID(), name: '新答题卡', group_id: groupId, paper: 'A4', sides: 2, layout_version: 3, sheet_columns: 1, notice_template:'standard-v1', notice_layout:2, column_frame:true, uniform_subjective:true, print_style:'standard-v2', forbidden_regions:[], candidate_length: 9, revision: 0, questions: [] })
+const emptyTemplate = (groupId = ''): Template => ({ id: crypto.randomUUID(), name: '新答题卡', font_size:13, leading:20, group_id: groupId, paper: 'A4', sides: 2, layout_version: 3, sheet_columns: 1, notice_template:'standard-v1', notice_layout:2, column_frame:true, uniform_subjective:true, print_style:'standard-v2', forbidden_regions:[], candidate_length: 9, revision: 0, questions: [] })
 const lockedVersion=(t:Template)=>t.status==='published'||t.status==='superseded'
 const versionLabel=(t:Template)=>t.status==='superseded'?'历史版本':t.status==='published'?'已发布':'草稿'
 const editableCopy=(t:Template):Template=>lockedVersion(t)?structuredClone(t):uniformSubjectiveWidths({
@@ -142,6 +142,10 @@ export function TemplateEditor({ groupId }: { groupId?: string }) {
     <Form.Item label="副标题"><Input value={value.subtitle || ''} onChange={event => change({ subtitle: event.target.value })} /></Form.Item>
     <div className="editor-form-grid"><Form.Item label="纸张"><Select value={value.paper} options={[{ label: 'A4 纵向', value: 'A4' }, { label: 'A3 横向', value: 'A3' }]} onChange={paper => change({ paper, sheet_columns: paper==='A3'?2:1, layout_version:3 })} /></Form.Item><Form.Item label="面数"><Select value={value.sides} options={[{ label: '单面', value: 1 }, { label: '双面', value: 2 }]} onChange={sides => { if (sides === 1 && (value.questions.some(q => q.regions.some(r => r.page === 2))||notes.some(n=>n.page===2)||(value.forbidden_regions||[]).some(r=>r.page===2))) { message.warning('背面已有答题区域，请先调整后再改为单面'); return } change({ sides }); setPage(1) }} /></Form.Item></div>
     {value.paper==='A3' && <Form.Item label="题卡分栏模板"><Select value={value.sheet_columns||2} options={[{label:"2×2 · 正反面各2栏",value:2},{label:"3×3 · 正反面各3栏",value:3}]} onChange={sheet_columns=>change({sheet_columns,layout_version:3})}/><Text type="secondary">内容依次续排到下一栏、下一面。改变模板后请重新排布客观题。</Text></Form.Item>}
+    <div className="editor-form-grid">
+      <Form.Item label="题干与自定义文字字号（磅）"><InputNumber min={6} max={36} value={value.font_size??9} onChange={size=>{if(size!=null)change({font_size:size,leading:Math.max(size,value.leading??13)})}}/></Form.Item>
+      <Form.Item label="文字行距（磅）"><InputNumber min={value.font_size??9} max={72} value={value.leading??13} onChange={leading=>{if(leading!=null)change({leading})}}/></Form.Item>
+    </div>
     <Form.Item label="分栏底版"><Select value={value.column_frame?'framed':'classic'} options={[{label:'整栏圆角框与边缘提示',value:'framed'},{label:'逐题圆角框',value:'classic'}]} onChange={v=>change({column_frame:v==='framed'})}/></Form.Item>
     <Form.Item label="准考证号位数"><InputNumber min={1} max={readOnly&&value.print_style!=='standard-v2'?20:11} value={value.candidate_length} onChange={length => change({ candidate_length: length || 9 })} /></Form.Item>
     <Form.Item label="内置须知"><Select value={value.notice_template||'none'} options={[{label:'标准模板 · 考生禁填、注意事项与填涂样例',value:'standard-v1'},{label:'不添加',value:'none'}]} onChange={notice_template=>change({notice_template})}/><Text type="secondary">标准模板保留条形码核对及错区扣分说明；扣分文字用于印刷说明，不自动扣分。</Text></Form.Item>

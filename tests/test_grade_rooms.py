@@ -116,8 +116,6 @@ def test_live_teacher_scope_and_unscanned_force_publication(school):
     r('PUT','teaching/relation',{'class_id':f['cls']['id'],'teacher_id':teacher['id'],'subjects':[],'homeroom':True})
     r('GET','groups/'+group['id']+'/workflow',status=403,auth=auth)
     r('POST','groups/'+group['id']+'/scan-close',{'confirm':True},403,auth=auth)
-    r('POST','results/publish',{'group_id':group['id']},409)
-    close_scanning(f['client'],group['id'],f['headers'])
     r('POST','results/publish',{'group_id':group['id'],'force_unscanned':True,'reason':'选科未参加'})
     rows=r('GET','results?group_id='+group['id'],auth=auth)
     assert sum(v['status']=='unscanned' and v['total'] is None for v in rows)==2
@@ -179,11 +177,8 @@ def test_scan_close_publication_and_absent_mark_remain_distinct(school):
         db.put(c,'pages',{'batch_id':second['id'],'side':'front','sequence':1,'status':'recognized','candidate_number':f['students'][1]['candidate_number'],'absent_mark':True,'selections':{}})
     f['post']('scan-batches/'+second['id']+'/pair')
     state=r('GET',base+'/workflow');assert state['results']['absent']==1 and state['results']['unscanned']==1
-    r('POST',base+'/scan-close',{'confirm':True,'signature':state['scan_signature']})
-    r('POST',base+'/roster/review',{'student_ids':[s['id'] for s in f['students']]})
-    state=r('GET',base+'/workflow');r('POST',base+'/scan-close',{'confirm':True,'signature':state['scan_signature']})
-    r('POST','results/publish',{'group_id':g['id']},409)
-    r('POST','results/publish',{'group_id':g['id'],'force_unscanned':True,'reason':'缺页已登记'})
+    f['post']('scan-batches',{'group_id':g['id']})
+    r('POST','results/publish',{'group_id':g['id']})
     rows=r('GET','results?group_id='+g['id']);assert sorted(x['status'] for x in rows)==['absent','completed','unscanned']
     assert next(x for x in rows if x['status']=='unscanned')['total'] is None
     r('POST',base+'/reopen',{'reason':'补扫核查'})
@@ -226,6 +221,30 @@ def test_card_rooms_count_scans_without_a_student_assignment(school):
     assert card['confirmed_sheets']==2 and card['unassigned_sheets']==1 and 'unassigned' not in card
     assert len(card['roster'])==3
 
+
+def test_batch_rooms_and_delete_unused_records(school):
+    post,request=school['post'],school['request']
+    path='projects/'+school['project']['id']+'/room-tags/batch'
+    body={'group_id':school['groups'][0]['id'],'expected_students':30,'names':['01','02','02','03']}
+    assert post(path,body)=={'created':2,'skipped':['01','02']}
+    assert post(path,body)['created']==0
+    post(path,{**body,'names':['04','']},422)
+    with db.connect() as conn:
+        rooms={r['name']:r for r in db.find(conn,'room-tags',group_id=body['group_id'])}
+    assert '04' not in rooms
+    request('DELETE','records/room-tags/'+rooms['02']['id'])
+    grade=post('grades',{'name':'备用年级'})
+    cls=post('classes',{'name':'备用班','grade_id':grade['id']})
+    student=post('students',{'name':'测试','candidate_number':'000001234','class_id':cls['id']})
+    request('DELETE','records/grades/'+grade['id'],status=409)
+    request('DELETE','records/classes/'+cls['id'],status=409)
+    request('DELETE','records/students/'+school['students'][0]['id'],status=409)
+    for kind,row in [('students',student),('classes',cls),('grades',grade)]:
+        request('DELETE',f"records/{kind}/{row['id']}")
+    teacher=post('users',{'username':'unused-teacher','name':'测试教师','role':'teacher','password':'teacher-password'})
+    request('DELETE','records/users/'+teacher['id'])
+
+
 def test_catalog_exam_creation_and_roster_snapshot(school):
     f=school;r=f['request'];grade=f['grade']['id'];students=[s['id'] for s in f['students']]
     body={'grade_id':grade,'subject':'物理','kind':'elective','student_ids':students[:1]}
@@ -246,3 +265,35 @@ def test_catalog_exam_creation_and_roster_snapshot(school):
     assert roster()=={students[0],students[2]}
     r('POST',base+'/elective')
     assert roster()==set(students[1:])
+
+
+def test_sheet_search_and_group_progress(school):
+    f=school
+    student=f['students'][0]
+    f['pair'](student)
+    group=f['groups'][0]
+    progress=f['request']('GET','groups/'+group['id']+'/workflow')
+    assert (progress['roster_scanned'],progress['roster_count'],progress['unpaired_pages'])==(1,3,0)
+    assert progress['grading_progress']['objective']=={'done':1,'total':1}
+    path='projects/'+f['project']['id']+'/scanned-sheets?q='
+    by_name=f['request']('GET',path+student['name'])
+    item=by_name['items'][0]
+    assert by_name['total']==1 and item['candidate_number']==student['candidate_number']
+    assert item['pages'][0]['image_url'].endswith('/image')
+    assert f['request']('GET',path+student['candidate_number']+'&group_id='+f['groups'][1]['id'])['total']==0
+    other=f['post']('projects',{'name':'其他考试'})
+    assert f['request']('GET','projects/'+other['id']+'/scanned-sheets?q='+student['name'])['total']==0
+
+
+def test_subject_catalog_removal(school):
+    r=school['request']
+    tag=r('POST','subject-tags',{'name':'实验课'})
+    remove='records/subject-tags/'+tag['id']
+    elective=r('PUT','electives',{'grade_id':school['grade']['id'],'subject':tag['name'],'student_ids':[]})
+    r('DELETE',remove,status=409)
+    r('DELETE','records/electives/'+elective['id'])
+    r('DELETE',remove)
+    assert tag not in r('GET','subject-tags')
+    linked=r('POST','subject-tags',{'name':'劳动'})
+    r('POST','projects',{'name':'劳动考试','catalog_ids':[linked['id']]})
+    assert '劳动考试' in r('DELETE','records/subject-tags/'+linked['id'],status=409)['detail']
