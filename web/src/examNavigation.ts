@@ -14,7 +14,7 @@ export function subjectGrades(subject:Row,groups:Row[],grades:Row[]=[]):Row[]{
   return ids.map(id=>({id,name:id===unassignedGrade?'待设置年级':grades.find(g=>g.id===id)?.name||children.find(g=>g.grade_id===id)?.grade_name||'年级',count:children.filter(g=>(g.grade_id||unassignedGrade)===id).length}))
 }
 export type Location = ExamLocation & { page: string; templateId?: string; questionId?: string }
-const pages = new Set(['dashboard', 'scanner', 'exams', 'marking', 'exceptions', 'results', 'people', 'settings', 'account', 'login', 'archives'])
+const pages = new Set(['dashboard', 'scanner', 'exams', 'marking', 'exceptions', 'results', 'people', 'conversions', 'settings', 'account', 'login', 'archives'])
 
 export function examPath(location: ExamLocation = {}) {
   const { projectId, subjectId, gradeId,groupId, section } = location

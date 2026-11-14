@@ -7,6 +7,7 @@ import { Alert, Avatar, Card, Empty, Layout, Menu, Space, Spin, Statistic, Tag, 
 import { ScanOutlined, ApartmentOutlined, AuditOutlined, BookOutlined, FileSearchOutlined, LogoutOutlined, ReadOutlined, SettingOutlined, TeamOutlined, MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons'
 import { ApiError, clearSession, currentSession, currentToken, request, updateSession, watchSession, useResource, type AuthSession, type User } from './api'
 import { DataManagement, Exceptions, Results, Settings } from './Management'
+import { Conversions } from './Conversions'
 import { Exams } from './Exams'
 import { useNavigation, confirmLeaving } from './useNavigation'
 import { Marking } from './Marking'
@@ -59,6 +60,7 @@ export function App() {
       { key: 'marking', icon: <AuditOutlined />, label: '阅卷中心' },
       ...(management ? [{ key: 'exceptions', icon: <FileSearchOutlined />, label: '异常总览' }] : []),
       { key: 'results', icon: <ReadOutlined />, label: '成绩总览' },
+      ...(management && user.role==='admin' ? [{key:'conversions',icon:<ReadOutlined/>,label:'赋分方案'}] : []),
     ] },
     ...(management ? [{ type: 'group' as const, key: 'management', label: '基础管理', children: [
       { key: 'people', icon: <TeamOutlined />, label: '人员与班级' },
@@ -81,6 +83,7 @@ export function App() {
         {page === 'marking' && <ReviewTasks onOpen={(templateId, questionId) => navigate(`#/marking/review/${encodeURIComponent(templateId)}/${encodeURIComponent(questionId)}`)} />}
         {page === 'exceptions' && <Exceptions />}
         {page === 'results' && <Results admin={management} />}
+        {page === 'conversions' && management && user.role==='admin' && <Conversions/>}
         {page === 'archives' && <ArchiveManager/>}
         {page === 'people' && <DataManagement systemAdmin={user.role==='admin'}/>}
         {page === 'settings' && user.role==='admin' && <Settings />}

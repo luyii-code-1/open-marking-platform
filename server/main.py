@@ -496,6 +496,8 @@ app.include_router(scanner_workbench_router)
 
 from .school import router as school_router
 app.include_router(school_router)
+from .student_import import router as student_import_router
+app.include_router(student_import_router)
 
 from .scoring_changes import router as scoring_changes_router
 app.include_router(scoring_changes_router)
