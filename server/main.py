@@ -324,7 +324,7 @@ def publish(identifier:str,body:dict|None=None,current=Depends(admin)):
             if group.get('template_id')!=(body or {}).get('replace_id'):
                 raise HTTPException(409,'当前正式版本已变化，请重新载入后确认替换')
         from .template_checks import issues,asset_ids
-        errors=issues(template,complete=True)
+        errors=issues(template,complete=True,require_answers=False)
         if errors:raise HTTPException(422,'；'.join(errors))
         try:assets=asset_ids(template)
         except (ValueError,KeyError,TypeError) as error:raise HTTPException(422,str(error))

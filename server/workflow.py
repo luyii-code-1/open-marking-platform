@@ -74,6 +74,8 @@ def overview(db,group,current):
             counter=progress['subjective' if question['type']=='subjective' else 'objective']
             counter['total']+=1
             counter['done']+=int(scores.get(label(question)) is not None)
+    active=templates.get(group.get('template_id')) or get(db,group.get('template_id'),'templates') or {}
+    state['missing_answers']=[q['number'] for q in active.get('questions',[]) if q['type']!='subjective' and not q.get('answer')]
     state['grading_progress']=progress
     state['publication_blockers']=publication_blockers(state)
     return state
@@ -129,6 +131,7 @@ def close_scanning(identifier:str,body:dict,current=Depends(admin)):
 def publication_blockers(state):
     issues=[]
     if not state['template_id']:issues.append('尚未发布版式')
+    if state.get('missing_answers'):issues.append('请补录客观题答案：'+ '、'.join(map(str,state['missing_answers'])))
     if state['open_batches']:issues.append('仍有未完成的扫描批次')
     if state['open_exceptions']:issues.append('仍有影响成绩的异常')
     if state['results']['pending'] or state['regrades']:issues.append('评分或重阅尚未完成')

@@ -41,12 +41,10 @@ def test_pdf_preview_matches_published_print_pixels_without_persisting_draft(tmp
         early=client.get(url+'/pdf',headers=headers)
         assert early.status_code==200 and early.content.startswith(b'%PDF')
         draft=tmp_path/'draft.pdf';draft.write_bytes(early.content)
-        rejected=client.post(url+'/publish',headers=headers)
-        assert rejected.status_code==422 and '标准答案' in rejected.json()['detail']
-        body['questions'][0]['answer']=['B']
-        assert client.put(url,json={'questions':body['questions']},headers=headers).status_code==200
-        published=client.post(f"/api/v1/templates/{created['id']}/publish",headers=headers)
+        published=client.post(url+'/publish',headers=headers)
         assert published.status_code==200,published.text
+        body['questions'][0]['answer']=['B']
+        assert client.put(url+'/answer-key',json={'answers':{body['questions'][0]['id']:['B']}},headers=headers).status_code==200
         template=published.json()
         assert (template['font_size'],template['leading'])==(13,20)
         pdf=client.get(f"/api/v1/templates/{template['id']}/pdf",headers=headers)

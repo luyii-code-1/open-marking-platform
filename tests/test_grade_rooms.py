@@ -208,6 +208,33 @@ def test_official_layout_and_scoring_impact(school):
     r('POST','scan-batches/'+empty['id']+'/finish-empty',{'confirm':True})
     assert next(b for b in r('GET','scan-batches') if b['id']==empty['id'])['completed_empty']
 
+
+def test_scan_before_answer_key(school):
+    from server.scanner_pipeline import config_hash
+    f=school;r=f['request'];group=f['groups'][0];previous=f['templates'][0]
+    draft=r('POST','templates',{'group_id':group['id'],'name':'先扫后计分','paper':'A4','sides':1,
+        'questions':[{**previous['questions'][0],'id':str(uuid4()),'answer':[]}]})
+    url='templates/'+draft['id']
+    template=r('POST',url+'/publish',{'replace_id':previous['id']})
+    qid=template['questions'][0]['id']
+    f['pair'](f['students'][0],template=template)
+    results=lambda:r('GET','results?group_id='+group['id'])
+    scanned=next(row for row in results() if row['status']=='pending')
+    assert scanned['total'] is None and list(scanned['scores'].values())==[None]
+    assert r('GET','groups/'+group['id']+'/workflow')['missing_answers']==[1]
+    r('POST','results/publish',{'group_id':group['id']},409)
+    r('PUT',url+'/answer-key',{'answers':{qid:['Z']}},422)
+    key={'answers':{qid:['A']}}
+    revision=r('PUT',url+'/answer-key',key)['scoring_revision']
+    assert r('PUT',url+'/answer-key',key)['scoring_revision']==revision
+    r('PUT',url+'/answer-key',{'answers':{qid:['B']}},409)
+    f['pair'](f['students'][1],template=template)
+    scored=[row for row in results() if row['status']=='completed']
+    assert len(scored)==2 and all(row['total']==2 for row in scored)
+    refreshed=next(t for t in r('GET','templates') if t['id']==template['id'])
+    assert config_hash(template)==config_hash(refreshed)
+    r('POST','results/publish',{'group_id':group['id']})
+
 def test_card_rooms_count_scans_without_a_student_assignment(school):
     f=school
     group=f['groups'][0]['id']

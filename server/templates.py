@@ -140,7 +140,7 @@ def check_assets(template):
 
 @router.post('/templates/check')
 def check_template(body:dict,current=Depends(admin)):
-    errors=issues(body,complete=True)
+    errors=issues(body,complete=True,require_answers=False)
     if not errors:
         try:check_assets(body)
         except HTTPException as error:errors.append(str(error.detail))

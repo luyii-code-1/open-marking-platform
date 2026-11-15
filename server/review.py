@@ -52,6 +52,7 @@ def completed(db,submission_id,question_id):
 def result_for(db,submission,question):
     if submission['status']=='absent': return 0
     if question['type']!='subjective':
+        if not question.get('answer'):return None
         if question['id'] in submission.get('objective_overrides',{}):return objective_score(submission['objective_overrides'][question['id']],question.get('answer',[]),question['points'],question.get('rule'))
         selected=[]
         for page_id in submission['pages']:
@@ -97,7 +98,7 @@ def progress(template_id:str,question_id:str,current=Depends(user)):
         mine=find(db,'tasks',user_id=current['id'],template_id=template_id,question_id=question_id)
         regrade_count=db.execute('SELECT COUNT(*) FROM regrade_queue WHERE user_id=? AND template_id=? AND question_id=?',(current['id'],template_id,question_id)).fetchone()[0]
         all_final=db.execute("SELECT COUNT(*) FROM review_results r JOIN objects s ON s.id=r.submission_id WHERE r.final_cents IS NOT NULL AND s.deleted=0 AND json_extract(s.body,'$.template_id')=?",(template_id,)).fetchone()[0]
-        objective=sum(q['type']!='subjective' for q in template['questions'])
+        objective=sum(1 for q in template['questions'] if q['type']!='subjective' and q.get('answer'))
         return {'my_regrade_pending':regrade_count,'my_total':my_total,'my_progress':round(100*sum(t['status']=='completed' for t in mine)/my_total,1) if my_total else 0,'total_submissions':count,'my_completed':sum(t['status']=='completed' for t in mine),'my_in_progress':sum(t['status']=='claimed' and t['expires_at']>time.time() for t in mine),'question_completed':finalized,'question_progress':round(100*finalized/count,1) if count else 0,'paper_progress':round(100*(all_final+objective*count)/(len(template['questions'])*count),1) if count and template['questions'] else 0}
 
 
@@ -431,7 +432,6 @@ def publish_results(body:dict,current=Depends(admin)):
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
         rows=results_for(db,group_id,current)
-        if not rows or any(r['status'] not in ('completed','absent','unscanned') for r in rows): raise HTTPException(409,'阅卷尚未全部完成')
         unscanned=[r['student_id'] for r in rows if r['status']=='unscanned']
         group=require(db,group_id,'groups')
         from .workflow import overview,publication_blockers
