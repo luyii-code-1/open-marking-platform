@@ -119,6 +119,16 @@ export function TemplateEditor({ groupId }: { groupId?: string }) {
       }catch(e){message.error((e as Error).message);throw e}finally{setSaveAction('')}
     }})
   }
+  async function exportPaper() {
+    if (saving || !value.group_id) return
+    setSaveAction('export')
+    try {
+      if (!readOnly && !saver.saving && !saver.dirty && !saver.savedAt && !saved.some(t => t.id === value.id)) saver.edit(value)
+      const current = readOnly ? value : await saver.flush()
+      await download(`/templates/${current.id}/pdf`, `${current.name}.pdf`)
+    } catch (e) { message.error((e as Error).message) }
+    finally { setSaveAction('') }
+  }
   async function save(publish = false) {
     if (readOnly || saving) return
     if (!value.group_id || (groupId && value.group_id !== groupId)) { message.warning('请确认所属题卡'); return }
@@ -130,7 +140,7 @@ export function TemplateEditor({ groupId }: { groupId?: string }) {
       }
       if(!dirty&&!saved.some(t=>t.id===value.id))saver.edit(value)
       const stored = await saver.flush()
-      if (publish) { saver.load(await send<Template>(`/templates/${stored.id}/publish`,{replace_id:official??null})); message.success('题卡已发布，可以导出打印稿') }
+      if (publish) { saver.load(await send<Template>(`/templates/${stored.id}/publish`,{replace_id:official??null})); message.success('题卡已发布') }
       else message.success('草稿已保存')
       await Promise.all([templates.reload(), groups.reload()])
     } catch (e) { message.error((e as Error).message) }
@@ -169,7 +179,7 @@ export function TemplateEditor({ groupId }: { groupId?: string }) {
         { key: 'copy', label: '复制为新草稿', icon: <CopyOutlined />, disabled: !value.id, onClick: () => load({ ...structuredClone(value), id: crypto.randomUUID(), draft_version:0, name: `${value.name}（副本）`, status: 'draft', revision: 0, layout_version:3, sheet_columns:value.paper==='A3'?(value.sheet_columns||2):1, notice_template:value.notice_template||'standard-v1', print_style:'standard-v2', forbidden_regions:value.forbidden_regions||[], group_id: groupId || value.group_id, questions: value.questions.map(q => ({ ...q, id: crypto.randomUUID() })) }) },
         {key:'delete',label:'删除当前版式',danger:true,onClick:removeVersion},
       ] }}><Button disabled={saving||saver.saving}>题卡操作</Button></Dropdown></Space>
-      <Space wrap><Text type="secondary">{value.questions.length} 题 · {total} 分</Text><Tag color={readOnly ? 'green' : dirty ? 'orange' : 'default'}>{readOnly ? versionLabel(value) : saver.saving ? '正在保存…' : saver.error ? '保存失败' : dirty ? '等待自动保存' : saver.savedAt ? '已保存 '+new Date(saver.savedAt).toLocaleTimeString() : '草稿'}</Tag><Button icon={<SaveOutlined />} disabled={readOnly || saving} loading={saveAction === 'save'} onClick={() => save()}>保存草稿</Button><Button type="primary" disabled={readOnly || saving} loading={saveAction === 'publish'} onClick={() => modal.confirm({ title: official?'替换当前发布版本？':'发布这张题卡？', content: official?'将用「'+value.name+'」替换「'+(saved.find(t=>t.id===official)?.name||'当前版本')+'」。新扫描批次使用新版，已有答卷仍关联原版本。':'发布后可打印并开始扫描。', onOk: () => save(true) })}>审查发布</Button>{value.status==='published'&&<ScoringChanges template={value} onSaved={async()=>{const next=await request<Template[]>('/templates');const t=next.find(t=>t.id===value.id);if(t)load(t);await templates.reload();await groups.reload()}}/>}<Button icon={<DownloadOutlined />} disabled={!value.id || dirty || !readOnly} aria-label="导出打印PDF" onClick={async () => { try { await download(`/templates/${value.id}/pdf`, `${value.name}.pdf`) } catch (e) { message.error((e as Error).message) } }}>打印稿</Button></Space>
+      <Space wrap><Text type="secondary">{value.questions.length} 题 · {total} 分</Text><Tag color={readOnly ? 'green' : dirty ? 'orange' : 'default'}>{readOnly ? versionLabel(value) : saver.saving ? '正在保存…' : saver.error ? '保存失败' : dirty ? '等待自动保存' : saver.savedAt ? '已保存 '+new Date(saver.savedAt).toLocaleTimeString() : '草稿'}</Tag><Button icon={<SaveOutlined />} disabled={readOnly || saving} loading={saveAction === 'save'} onClick={() => save()}>保存草稿</Button><Button type="primary" disabled={readOnly || saving} loading={saveAction === 'publish'} onClick={() => modal.confirm({ title: official?'替换当前发布版本？':'发布这张题卡？', content: official?'将用「'+value.name+'」替换「'+(saved.find(t=>t.id===official)?.name||'当前版本')+'」。新扫描批次使用新版，已有答卷仍关联原版本。':'发布后可使用这张题卡扫描。', onOk: () => save(true) })}>审查发布</Button>{value.status==='published'&&<ScoringChanges template={value} onSaved={async()=>{const next=await request<Template[]>('/templates');const t=next.find(t=>t.id===value.id);if(t)load(t);await templates.reload();await groups.reload()}}/>}<Button icon={<DownloadOutlined />} disabled={saving || !value.group_id} loading={saveAction === 'export'} onClick={exportPaper}>导出题卡 PDF</Button></Space>
     </div></Card>
     {saver.error&&<Alert type="error" showIcon message="草稿未保存" description={saver.error} action={<Space><Button onClick={()=>void saver.flush().catch(()=>{})}>重试保存</Button><Button onClick={()=>modal.confirm({title:"重新载入服务器草稿？",content:"当前未保存的修改将被替换。",onOk:async()=>{const rows=await request<Template[]>('/templates');const latest=rows.find(t=>t.id===value.id);if(!latest)throw new Error("服务器尚无该草稿，请重试保存");saver.load(editableCopy(latest));await templates.reload()}})}>重新载入</Button></Space>}/>}
     <div className="template-workbench">

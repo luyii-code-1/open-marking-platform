@@ -358,8 +358,18 @@ def health():
 @app.get('/api/v1/templates/{identifier}/pdf')
 def print_template(identifier:str,current=Depends(admin)):
     with connect() as db: template=require(db,identifier,'templates')
-    if template['status'] not in ('published','superseded'): raise HTTPException(409,'请先发布题卡')
-    return Response(paper.pdf(template),media_type='application/pdf',headers={'Content-Disposition':'attachment; filename=answer-sheet.pdf'})
+    if template['status']=='draft':
+        from .template_checks import issues
+        from .templates import check_assets
+        if not paper.manual_binding(template):raise HTTPException(409,'请在制卡页保存当前版式后导出')
+        errors=issues(template,complete=True,require_answers=False)
+        if errors:raise HTTPException(422,'；'.join(errors))
+        check_assets(template)
+    elif template['status'] not in ('published','superseded'):
+        raise HTTPException(409,'当前版式无法导出')
+    try:content=paper.pdf(template)
+    except ValueError as error:raise HTTPException(422,str(error))
+    return Response(content,media_type='application/pdf',headers={'Content-Disposition':'attachment; filename=answer-sheet.pdf','Cache-Control':'private, no-store'})
 
 
 @app.get('/api/v1/scan-batches/{identifier}/pages')
