@@ -2,7 +2,7 @@ import { useEffect, type ReactNode } from 'react'
 import { canPreparePwaUpdate, reportPwaReady } from './pwaCoordinator'
 import { automaticPwaUpdates } from './updatePolicy'
 import {verifyWaitingBuild} from './buildVersion'
-import {BuildFooter} from './BuildFooter'
+import {BuildVersionMonitor} from './BuildVersionMonitor'
 
 export function PwaRuntime({children}:{children:ReactNode}){
   useEffect(()=>{
@@ -17,5 +17,5 @@ export function PwaRuntime({children}:{children:ReactNode}){
     window.addEventListener('online',resume);document.addEventListener('visibilitychange',resume)
     return()=>{updates?.stop();window.removeEventListener('beforeinstallprompt',suppressInstallPrompt);window.removeEventListener('online',resume);document.removeEventListener('visibilitychange',resume)}
   },[])
-  return <>{children}<BuildFooter/></>
+  return <>{children}<BuildVersionMonitor/></>
 }

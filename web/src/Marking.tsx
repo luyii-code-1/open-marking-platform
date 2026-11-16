@@ -39,7 +39,7 @@ export function Marking({ admin, groupId, initialTemplateId, initialQuestionId, 
   function refocusScore(){requestAnimationFrame(()=>{if(!overlayOpen)focusScoreInput(scoreRef.current)})}
   useLayoutEffect(()=>{
     const page=pageRef.current;if(!page)return
-    const resize=()=>page.style.setProperty('--marking-height',`${Math.max(240,(window.visualViewport?.height??window.innerHeight)-page.getBoundingClientRect().top-40)}px`)
+    const resize=()=>page.style.setProperty('--marking-height',`${Math.max(240,(window.visualViewport?.height??window.innerHeight)-page.getBoundingClientRect().top-12)}px`)
     resize();window.addEventListener('resize',resize);window.visualViewport?.addEventListener('resize',resize)
     const observer=new ResizeObserver(resize);if(page.parentElement)observer.observe(page.parentElement)
     return()=>{window.removeEventListener('resize',resize);window.visualViewport?.removeEventListener('resize',resize);observer.disconnect()}

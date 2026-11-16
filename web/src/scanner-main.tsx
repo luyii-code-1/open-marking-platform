@@ -11,7 +11,6 @@ import { Brand } from './Brand'
 import { cardName,subjectGrades,unassignedGrade } from './examNavigation'
 import { rowNavigation } from './rowNavigation'
 import {scannerRoomCounts} from './scannerRoomCounts'
-import {BuildFooter} from './BuildFooter'
 import './scanner.css'
 
 type Row = Record<string, any> & { id: string }
@@ -209,4 +208,4 @@ function Scanner() {
   </div>
 }
 
-createRoot(document.getElementById('root')!).render(<React.StrictMode><ConfigProvider locale={zhCN} theme={uiTheme}><App><Scanner /><BuildFooter checkUpdates={false}/></App></ConfigProvider></React.StrictMode>)
+createRoot(document.getElementById('root')!).render(<React.StrictMode><ConfigProvider locale={zhCN} theme={uiTheme}><App><Scanner /></App></ConfigProvider></React.StrictMode>)
