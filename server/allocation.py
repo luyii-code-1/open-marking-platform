@@ -40,10 +40,20 @@ def ensure(db, template, question, assignment):
     ready = db.execute("SELECT COUNT(*),MAX(rowid) FROM objects INDEXED BY object_submission WHERE kind='submissions' AND deleted=0 AND json_extract(body,'$.template_id')=? AND json_extract(body,'$.status')='ready'", (tid,)).fetchone()
     signature = hashlib.sha256(json.dumps(['equal-v1',assignment, list(ready), question.get('review_mode', 'single')], sort_keys=True).encode()).hexdigest()
     old = db.execute('SELECT signature FROM allocation_state WHERE question_id=?', (qid,)).fetchone()
-    if old and old[0] == signature:
-        return
-    validate(assignment, question)
     ordinary, arbiters = pools(assignment)
+    if old and old[0] == signature:
+        # A removed teacher keeps an in-hand paper until its lease ends.
+        # Once it ends, that retained slot must return to the current pool.
+        stale=db.execute('''SELECT 1 FROM review_allocations a WHERE a.question_id=?
+            AND ((a.round<3 AND a.user_id NOT IN (SELECT value FROM json_each(?)))
+                OR (a.round=3 AND a.user_id NOT IN (SELECT value FROM json_each(?))))
+            AND NOT EXISTS(SELECT 1 FROM objects t INDEXED BY object_task_answer WHERE t.kind='tasks' AND t.deleted=0
+                AND json_extract(t.body,'$.submission_id')=a.submission_id AND json_extract(t.body,'$.question_id')=a.question_id
+                AND json_extract(t.body,'$.user_id')=a.user_id AND (json_extract(t.body,'$.status')='completed'
+                    OR (json_extract(t.body,'$.status')='claimed' AND json_extract(t.body,'$.expires_at')>?))) LIMIT 1''',
+            (qid,json.dumps(ordinary),json.dumps(arbiters),time.time())).fetchone()
+        if not stale:return
+    validate(assignment, question)
     slots = 2 if question.get('review_mode', 'single') == 'double' else 1
     rows = db.execute("SELECT id FROM objects INDEXED BY object_submission WHERE kind='submissions' AND deleted=0 AND json_extract(body,'$.template_id')=? AND json_extract(body,'$.status')='ready'", (tid,)).fetchall()
     # Randomized paper order with stable teacher quotas across restarts.
@@ -99,3 +109,20 @@ def allocate_arbitration(db, template, question, assignment):
         selected=min(eligible,key=lambda u:(counts.get(u,0),u))
         counts[selected]=counts.get(selected,0)+1
         db.execute('INSERT INTO review_allocations VALUES(?,?,?,?,?)', (template['id'], question['id'], row[0], 3, selected))
+
+
+def progress(db, template_id, question_id, assignment):
+    """Report ordinary and arbitration work separately, including retained work."""
+    rows=db.execute('SELECT a.user_id,a.round,a.submission_id FROM review_allocations a JOIN objects s ON s.id=a.submission_id AND s.deleted=0 WHERE a.template_id=? AND a.question_id=? AND json_extract(s.body,\'$.status\')=\'ready\'',(template_id,question_id)).fetchall()
+    done={(t['submission_id'],t['user_id']) for t in find(db,'tasks',template_id=template_id,question_id=question_id,status='completed')}
+    teachers={uid:{'user_id':uid,'ordinary_total':0,'ordinary_completed':0,'arbitration_total':0,'arbitration_completed':0} for uid in participants(assignment)}
+    for row in rows:
+        uid=row['user_id']
+        record=teachers.setdefault(uid,{'user_id':uid,'ordinary_total':0,'ordinary_completed':0,'arbitration_total':0,'arbitration_completed':0})
+        kind='arbitration' if row['round']==3 else 'ordinary'
+        record[kind+'_total']+=1
+        record[kind+'_completed']+=int((row['submission_id'],uid) in done)
+    for record in teachers.values():
+        for kind in ('ordinary','arbitration'):
+            record[kind+'_pending']=record[kind+'_total']-record[kind+'_completed']
+    return list(teachers.values())

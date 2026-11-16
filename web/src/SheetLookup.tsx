@@ -6,13 +6,13 @@ import {useResource,type Row} from './api'
 import {AssetImage} from './components'
 import {ErrorNotice} from './EntityTable'
 
-export function SheetLookup({projectId,groupId}:{projectId:string;groupId?:string}){
-  const [term,setTerm]=useState(''),[page,setPage]=useState(1),[sheet,setSheet]=useState<Row|null>(null)
+export function SheetLookup({projectId,groupId,initialQuery=''}:{projectId:string;groupId?:string;initialQuery?:string}){
+  const [term,setTerm]=useState(initialQuery),[page,setPage]=useState(1),[sheet,setSheet]=useState<Row|null>(null)
   const params=new URLSearchParams({q:term,page:String(page)})
   if(groupId)params.set('group_id',groupId)
   const result=useResource<{items:Row[];total:number}>(term?`/projects/${projectId}/scanned-sheets?${params}`:null,{items:[],total:0})
   return <Card title="答题卡查询"><Space direction="vertical" style={{width:'100%'}}>
-    <Input.Search className="list-search" placeholder="输入姓名或准考证号" aria-label="搜索已入库答卷" maxLength={100} allowClear enterButton="查询" onSearch={value=>{setPage(1);setTerm(value.trim());setSheet(null)}}/>
+    <Input.Search className="list-search" defaultValue={initialQuery} placeholder="输入姓名或准考证号" aria-label="搜索已入库答卷" maxLength={100} allowClear enterButton="查询" onSearch={value=>{setPage(1);setTerm(value.trim());setSheet(null)}}/>
     <ErrorNotice error={result.error} retry={result.reload}/>
     {term&&<Table rowKey="id" query="" loading={result.loading} dataSource={result.data.items} totalRows={result.data.total}
       pagination={{current:page,pageSize:20,total:result.data.total,showSizeChanger:false,onChange:setPage}} locale={{emptyText:'未找到匹配的已入库答卷'}}

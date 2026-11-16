@@ -67,6 +67,13 @@ async def conflicting_identifier(request,error):
 from .dependencies import password_hash,user,admin,scan_user,scan_admin,require,scan_batch
 
 
+@app.get('/api/v1/system/build')
+def system_build():
+    path=web_distribution/'version.json'
+    if not path.is_file():return JSONResponse({'detail':'前端尚未构建'},status_code=503,headers={'Cache-Control':'no-store'})
+    return JSONResponse(json.loads(path.read_text(encoding='utf-8')),headers={'Cache-Control':'no-store'})
+
+
 class Login(BaseModel):
     username: str = Field(min_length=1,max_length=100)
     password: str = Field(min_length=1,max_length=200)
@@ -264,11 +271,9 @@ def create_route(kind):
                 from .electives import create_exam_subjects
                 create_exam_subjects(db,result,catalog_ids,current['id'])
             if kind=='groups' and result.get('grade_id'):
-                from .electives import card_catalog,members,save_members
-                entry=card_catalog(db,result)
-                if entry and entry.get('kind_of_subject','elective')=='elective':
-                    save_members(db,result,members(db,result['grade_id'],set(entry['student_ids'])),'elective',set(),current['id'])
-                    result=require(db,result['id'],'groups')
+                from .electives import initialize_roster
+                initialize_roster(db,result,current['id'])
+                result=require(db,result['id'],'groups')
             if kind=='subjects' and value.get('group_mode')=='default':
                 from .templates import default_group
                 group=default_group(db,result['id'],current['id']);result['default_group_id']=group['id']
@@ -545,6 +550,11 @@ app.include_router(electives_router)
 
 from .record_deletion import router as record_deletion_router
 app.include_router(record_deletion_router)
+
+from .exam_catalog import router as exam_catalog_router
+app.include_router(exam_catalog_router)
+from .selection_import import router as selection_import_router
+app.include_router(selection_import_router)
 
 web_distribution=Path(__file__).resolve().parents[1]/'web'/'dist'
 if web_distribution.exists():

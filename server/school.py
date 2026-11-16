@@ -29,7 +29,7 @@ def migrate():
         db.execute('BEGIN IMMEDIATE')
         from .electives import subject_tag
         existing={tag['name'] for tag in objects(db,'subject-tags')}
-        names={s['subject'].strip() for s in objects(db,'electives')} | {s['name'].strip() for s in objects(db,'subjects')}
+        names={s['subject'].strip() for s in objects(db,'electives')} | {s['name'].strip() for s in objects(db,'subjects') if not s.get('subject_tag_id')}
         for name in sorted(names-existing):
             if name: subject_tag(db,name)
         for cls in objects(db,'classes'):

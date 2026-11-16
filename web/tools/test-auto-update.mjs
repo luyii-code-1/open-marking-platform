@@ -39,3 +39,18 @@ try{
 }finally{updates.stop()}
 clock+=300000;updates.tick();assert.equal(checks,3)
 console.log('Automatic updates passed: idle/input/write guards, registration recovery, background checks, hidden windows, activation backoff and cleanup')
+
+let verdict
+const verifiedMessages=[],verifiedWorker=new EventTarget(),verifiedRegistration=new EventTarget()
+verifiedWorker.postMessage=value=>verifiedMessages.push(value)
+verifiedRegistration.waiting=verifiedWorker;verifiedRegistration.update=async()=>{}
+ready=true
+const guarded=automaticPwaUpdates({register:async()=>verifiedRegistration,ready:()=>ready,onReady(){},visible:()=>true,online:()=>true,now:()=>clock,verify:()=>new Promise(resolve=>{verdict=resolve})})
+try{
+  await flush();verdict(false);await flush()
+  assert.equal(verifiedMessages.length,0,'A stale worker must not activate')
+  clock+=30000;guarded.tick();ready=false;verdict(true);await flush()
+  assert.equal(verifiedMessages.length,0,'Input resuming during version verification must defer activation')
+  ready=true;clock+=30000;guarded.tick();verdict(true);await flush()
+  assert.deepEqual(verifiedMessages,[{type:'PREPARE_UPDATE'}])
+}finally{guarded.stop()}

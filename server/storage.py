@@ -189,6 +189,11 @@ def media_failed(provider):
 
 
 def remote_piece(relative,region):
+    if relative.startswith('pages/'):
+        from .lifecycle import writable
+        with connect() as db:
+            page=get(db,relative.split('/')[-1].split('.')[0],'pages')
+            if page:writable(db,'pages',page)
     # Reuse a locally available corrected page before contacting a beta service.
     if local_path(relative).is_file():return None
     with connect() as db:
@@ -225,16 +230,33 @@ def materialize(relative):
         except Exception:continue
         try:
             provider.download(reference['key'],target,expected)
+            ensure_scan_available(relative,target)
             return target
         except Exception as error:last_error=error
     from .archive import extract_file
     for record in archived:
         if expected and record['sha256']!=expected:continue
-        try:return extract_file(record['archive_id'],relative,target,{'path':relative,'size':record['size'],'sha256':record['sha256']})
+        try:
+            restored=extract_file(record['archive_id'],relative,target,{'path':relative,'size':record['size'],'sha256':record['sha256']})
+            ensure_scan_available(relative,target)
+            return restored
         except FileNotFoundError:continue
     if last_error:raise last_error
     if references and not available:raise FileNotFoundError('文件登记的远端位置与当前存储配置不一致，请恢复原配置或从有效归档恢复')
     raise FileNotFoundError(relative)
+
+
+def ensure_scan_available(relative,target):
+    """Recheck after an in-flight retrieval so a cleared scan is not recreated."""
+    if not relative.startswith('pages/'):return
+    from .lifecycle import project_for
+    from fastapi import HTTPException
+    with connect() as db:
+        page=get(db,relative.split('/')[-1].split('.')[0],'pages')
+        project=get(db,project_for(db,'pages',page),'projects') if page else None
+    if project and project.get('scans_purged'):
+        target.unlink(missing_ok=True)
+        raise HTTPException(410,'该考试的扫描文件已清理，保留成绩查询与导出')
 
 
 def mirror(relative,project_id=None):

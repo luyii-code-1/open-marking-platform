@@ -77,6 +77,34 @@ def overview(db,group,current):
     active=templates.get(group.get('template_id')) or get(db,group.get('template_id'),'templates') or {}
     state['missing_answers']=[q['number'] for q in active.get('questions',[]) if q['type']!='subjective' and not q.get('answer')]
     state['grading_progress']=progress
+    expected=len(roster['students']) if roster['configured'] else state['room_expected'] or len(submissions)
+    absent_ids={s['student_id'] for s in submissions if s.get('status')=='absent'}
+    absent=len(absent_ids)
+    unscanned=max(0,expected-len(scanned_ids|absent_ids))
+    state['scan']={'received':len(scanned_ids),'expected':expected,'pending':unscanned,'exceptions':len(exceptions),'absent':absent}
+    task_counts={}
+    for task in objects(db,'tasks'):
+        if task.get('status')=='completed':
+            key=(task.get('submission_id'),task.get('question_id'))
+            task_counts[key]=task_counts.get(key,0)+1
+    arbitration=0
+    for submission in submissions:
+        if submission.get('status')!='ready':continue
+        template=templates.get(submission['template_id'],{})
+        scores=by_student.get(submission['student_id'],{}).get('scores',{})
+        arbitration+=sum(q['type']=='subjective' and q.get('review_mode')=='double' and task_counts.get((submission['id'],q['id']),0)==2 and scores.get(label(q)) is None for q in template.get('questions',[]))
+    exception_submissions={exception_source(db,e).get('id') for e in exceptions if exception_source(db,e).get('id') in {s['id'] for s in submissions}}
+    for kind in ('objective','subjective'):
+        question_count=sum((q['type']=='subjective')==(kind=='subjective') for q in active.get('questions',[]))
+        done=progress[kind]['done'];total=progress[kind]['total']
+        blocked=len(exception_submissions)*question_count
+        pending=max(0,total-done-(arbitration if kind=='subjective' else 0))
+        state[kind]={'total':total,'completed':done,'pending':max(0,pending-blocked),'exceptions':min(pending,blocked),'unscanned':unscanned*question_count}
+        if kind=='subjective':state[kind]['arbitration']=arbitration
+    from .lifecycle import project_for
+    project=get(db,project_for(db,'groups',group),'projects') or {}
+    state['scans_purged']=bool(project.get('scans_purged'))
+    state['objective_reprocess_allowed']=bool(not group.get('frozen') and not state['scans_purged'] and any(q['type']!='subjective' for q in active.get('questions',[])) and any(b['recognized_pages'] for b in details))
     state['publication_blockers']=publication_blockers(state)
     return state
 
@@ -92,6 +120,24 @@ def workflow(identifier:str,current=Depends(admin)):
 def roster_changes(identifier:str,current=Depends(admin)):
     with connect() as db:
         return membership(db,require(db,identifier,'groups'))
+
+
+@router.post('/groups/{identifier}/objective/reprocess',status_code=202)
+def reprocess_objective(identifier:str,current=Depends(admin)):
+    from .jobs import create_job,dispatch
+    from .lifecycle import writable,project_for
+    with connect() as db:
+        db.execute('BEGIN IMMEDIATE')
+        group=require(db,identifier,'groups');writable(db,'groups',group)
+        if group.get('frozen'):raise HTTPException(409,'成绩已发布，请先发起复核')
+        template=require(db,group.get('template_id'),'templates')
+        if not any(q['type']!='subjective' for q in template['questions']):raise HTTPException(422,'当前题卡没有客观题')
+        project_id=project_for(db,'groups',group)
+        for job in find(db,'jobs',project_id=project_id):
+            if job['kind']=='objective-reprocess' and job.get('payload',{}).get('group_id')==identifier and job['status'] in ('pending','running'):return job
+        job=create_job(db,'objective-reprocess',{'group_id':identifier},project_id,current['id'])
+    dispatch(job['id'],background=True)
+    return job
 
 
 @router.post('/groups/{identifier}/roster/review')

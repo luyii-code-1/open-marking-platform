@@ -120,6 +120,75 @@ def project_analysis(project_id:str,current=Depends(user)):
         return project_rows(db,project_id,current)
 
 
+def overview_rows(db,current,project_id=None):
+    """Comparable paper, subject, grade and class cohorts within the visible scope."""
+    projects={p['id']:p for p in objects(db,'projects')}
+    subjects={s['id']:s for s in objects(db,'subjects')}
+    grades={g['id']:g for g in objects(db,'grades')}
+    groups=[g for g in objects(db,'groups') if g.get('template_id') and g.get('subject_id') in subjects]
+    if project_id:
+        require(db,project_id,'projects')
+        groups=[g for g in groups if subjects[g['subject_id']]['project_id']==project_id]
+    if current['role'] not in ('admin','manager'):
+        from .visibility import result_groups
+        visible=result_groups(db,current['id'])
+        groups=[g for g in groups if g['id'] in visible]
+    cohorts={}
+    for group in groups:
+        subject=subjects[group['subject_id']];project=projects.get(subject['project_id'])
+        if not project:continue
+        template=require(db,group['template_id'],'templates')
+        maximum=sum(q['points'] for q in template.get('questions',[]))
+        base={'project_id':project['id'],'project':project['name'],'subject':subject['name'],'subject_id':subject.get('subject_tag_id') or subject['name']}
+        rows=results_for(db,group['id'],current,convert_scores=False)
+        for kind,cohort_key,label,subset,extra in [
+            ('card',group['id'],group['name'],rows,{'grade':grades.get(group.get('grade_id'),{}).get('name',''),'grade_id':group.get('grade_id')}),
+            ('subject',subject['id'],subject['name'],rows,{}),
+            *[('grade',subject['id']+':'+str(grade),str(grade or '未设置年级'),[r for r in rows if r.get('grade')==grade],{'grade':grade,'grade_id':next((r.get('grade_id') or group.get('grade_id') for r in rows if r.get('grade')==grade),None)}) for grade in {r.get('grade') for r in rows}],
+            *[('class',subject['id']+':'+cid,next(r['class_name'] for r in rows if r['class_id']==cid),[r for r in rows if r['class_id']==cid],{'class_id':cid,'class_name':next(r['class_name'] for r in rows if r['class_id']==cid),'grade':next(r.get('grade') for r in rows if r['class_id']==cid)}) for cid in {r['class_id'] for r in rows}],
+        ]:
+            key=kind+':'+cohort_key
+            target=cohorts.setdefault(key,{'id':key,'kind':kind,'label':label,**base,**extra,'group_ids':set(),'values':[],'full_scores':set()})
+            target['group_ids'].add(group['id'])
+            target['full_scores'].add(maximum)
+            target['values'].extend({**r,'full_score':maximum} for r in subset)
+    output=[]
+    for cohort in cohorts.values():
+        rows=cohort.pop('values');completed=[r for r in rows if r['status']=='completed' and r.get('total') is not None]
+        full_scores=cohort.pop('full_scores');maximum=next(iter(full_scores)) if len(full_scores)==1 else None
+        values=[r['total'] for r in completed]
+        stats=describe(values,maximum or 0,.6,.85)
+        rates=[100*r['total']/r['full_score'] for r in completed if r['full_score']>0]
+        stats['score_rate']=rounded(sum(rates)/len(rates)) if rates else None
+        stats['pass_rate']=rounded(100*sum(r['total']>=r['full_score']*.6 for r in completed)/len(completed)) if completed else None
+        stats['excellent_rate']=rounded(100*sum(r['total']>=r['full_score']*.85 for r in completed)/len(completed)) if completed else None
+        output.append({**cohort,'group_ids':sorted(cohort['group_ids']),'full_score':maximum,'records':len(rows),
+                       **{status:sum(r['status']==status for r in rows) for status in ('completed','absent','pending','unscanned')},**stats})
+    return sorted(output,key=lambda r:(r['project'],r['subject'],r['kind'],str(r.get('grade') or ''),r['label']))
+
+
+@router.get('/analysis/overview')
+def overview(project_id:str|None=None,current=Depends(user)):
+    with connect() as db:
+        db.execute('BEGIN')
+        return {'scopes':overview_rows(db,current,project_id)}
+
+
+@router.get('/analysis/overview/export')
+def export_overview(scope_ids:str='',project_id:str|None=None,format:FileFormat='csv',current=Depends(user)):
+    requested=set(scope_ids.split(',')) if scope_ids else None
+    with connect() as db:
+        db.execute('BEGIN')
+        rows=overview_rows(db,current,project_id)
+    if requested is not None:
+        if requested-set(row['id'] for row in rows):raise HTTPException(403,'对比范围不存在或不可访问')
+        rows=[row for row in rows if row['id'] in requested]
+    fields=('project','subject','kind','grade','label','records','completed','pending','absent','unscanned','analyzed','average','full_score','score_rate','pass_rate','excellent_rate')
+    names={'card':'题卡','subject':'科目','grade':'年级','class':'班级'}
+    values=([names.get(row.get(key),row.get(key)) if key=='kind' else row.get(key) for key in fields] for row in rows)
+    return table_response(ExportTable('成绩概览与对比',['考试','科目','范围类型','年级','范围','应考份次','已结分','待结分','缺考','未扫描','统计份数','平均分','满分','平均得分率%','及格率%','优秀率%'],values),'result-comparison',format)
+
+
 def question_score_table(db, group, students, title):
     template = get(db, group.get('template_id'), 'templates') or {}
     labels = {question_label(q) for q in template.get('questions', [])}
@@ -257,6 +326,8 @@ def detail_image(group_id:str,submission_id:str,question_id:str,current=Depends(
     with connect() as db:
         db.execute('BEGIN')
         sub=require(db,submission_id,'submissions')
+        from .lifecycle import writable
+        writable(db,'submissions',sub)
         if sub['group_id']!=group_id or not any(r['student_id']==sub['student_id'] for r in results_for(db,group_id,current,convert_scores=False)):
             raise HTTPException(403,'无权查看该答卷')
         q=next((v for v in require(db,sub['template_id'],'templates')['questions'] if v['id']==question_id and v['type']=='subjective'),None)

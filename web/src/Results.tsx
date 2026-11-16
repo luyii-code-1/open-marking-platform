@@ -10,6 +10,7 @@ import { useResource, type Row } from './api'
 import { HierarchyPicker } from './HierarchyPicker'
 import { cardName } from './examNavigation'
 import { ResultExport } from './ResultExport'
+import {ResultOverview} from './ResultOverview'
 
 const number=(value:unknown)=>value===null||value===undefined?'—':String(value)
 const statusName:Record<string,string>={absent:'缺考',pending:'待结分',completed:'已完成',unscanned:'未扫描'}
@@ -74,5 +75,5 @@ export function Results({admin,groupId,projectId,projectOnly=false}:{admin:boole
       return {key:col.id,title,children:[raw,{key:col.id+'-converted',title:'赋分',render:(_:unknown,row:any)=>number(row.scores[col.id]?.converted)}]}
     }),{title:'已记录原始分合计',dataIndex:'recorded_raw_sum',render:number},{title:'已记录采用分合计',dataIndex:'recorded_effective_sum',render:number}]}/></Card>:<Card loading={crossResource.loading}><Empty description="选择考试查看跨科汇总"/></Card>}
   </Space>
-  return <>{detail?.group===group&&detail&&<AnswerDetails key={[group,detail.q.id,roomTag,includeAbsent].join(':')} group={group} q={detail.q} room={roomTag} absent={includeAbsent} onClose={()=>setDetail(null)}/>}<Space direction="vertical" style={{width:'100%'}}>{(groups.error||projects.error||subjects.error)&&<Alert type="error" message={groups.error||projects.error||subjects.error}/>}{groupId ? groupView : projectOnly ? projectView : <Tabs items={[{key:'group',label:'科目与班级分析',children:groupView},{key:'project',label:'跨科汇总',children:projectView}]}/>}</Space></>
+  return <>{detail?.group===group&&detail&&<AnswerDetails key={[group,detail.q.id,roomTag,includeAbsent].join(':')} group={group} q={detail.q} room={roomTag} absent={includeAbsent} onClose={()=>setDetail(null)}/>}<Space direction="vertical" style={{width:'100%'}}>{(groups.error||projects.error||subjects.error)&&<Alert type="error" message={groups.error||projects.error||subjects.error}/>}{groupId ? <Tabs items={[{key:'details',label:'题卡成绩',children:groupView},{key:'overview',label:'概览与对比',children:<ResultOverview groupId={groupId}/>}]}/> : projectOnly ? <Tabs items={[{key:'overview',label:'概览与对比',children:<ResultOverview projectId={projectId}/>},{key:'project',label:'跨科汇总',children:projectView}]}/> : <Tabs items={[{key:'overview',label:'概览与对比',children:<ResultOverview/>},{key:'group',label:'科目与班级分析',children:groupView},{key:'project',label:'跨科汇总',children:projectView}]}/>}</Space></>
 }

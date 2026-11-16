@@ -143,6 +143,9 @@ def execute(identifier):
     try:
         with Execution(identifier,token) as execution:
             if job['kind']=='process-page':process_page(job['payload']['page_id'],(identifier,token))
+            elif job['kind']=='objective-reprocess':
+                from .objective_reprocess import perform
+                result=perform(job,execution.progress)
             elif job['kind']=='mirror':
                 from .storage import mirror
                 mirror(job['payload']['relative'],job['payload'].get('project_id'))

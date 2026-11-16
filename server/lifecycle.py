@@ -34,9 +34,14 @@ def project_for(db, kind, body, visited=None):
 
 def project_writable(db, project_id):
     if not project_id: return
+    from .db import get
+    project = get(db, project_id, 'projects') or {}
+    purged = project.get('scans_purged')
+    owner = _operation.get()
+    if purged and not (owner and owner[0] == purged.get('plan_id')):
+        raise HTTPException(410, '该考试的扫描文件已清理，保留成绩查询与导出，不能再查看原卷、重新识别或复核')
     lock = db.execute('SELECT plan_id FROM deletion_locks WHERE project_id=?', (project_id,)).fetchone()
     if not lock: return
-    owner = _operation.get()
     if owner and owner[0] == lock['plan_id']:
         from .jobs import guard
         guard(db, owner[1]); return

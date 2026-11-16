@@ -1,0 +1,5 @@
+.build-footer{min-height:28px;padding:5px 16px;display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:6px 12px;font-size:11px;line-height:18px;color:#667085;background:#f5f7fa;border-top:1px solid #e3e7ed;font-variant-numeric:tabular-nums}
+.build-footer img{object-fit:contain;display:block}
+.ant-app .app-shell,.ant-app .login-screen,.ant-app .template-fullscreen{min-height:calc(100dvh - 28px)}
+.ant-app .review-fullscreen{height:calc(100dvh - 28px)}
+@media print{.build-footer{display:none}}

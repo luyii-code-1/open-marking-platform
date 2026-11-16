@@ -2,6 +2,7 @@ import {useState} from 'react'
 import {App, Card, Form, Modal, Select, Space, Switch, Upload, Popconfirm} from 'antd'
 import { Table } from './DataTable'
 import {Button} from './Button'
+import {RecordSelect} from './RecordSelect'
 import {download,request,send,useResource,type Row} from './api'
 
 export function Teaching({classes,users,grades,reload}:{classes:Row[];users:Row[];grades:Row[];reload:()=>Promise<any>}) {
@@ -14,13 +15,13 @@ export function Teaching({classes,users,grades,reload}:{classes:Row[];users:Row[
   return <Card title="任教关系" extra={<Space wrap><Button onClick={()=>download('/teaching/template','教师任教关系.xlsx').catch(e=>message.error(e.message))}>下载模板</Button>
     <TeacherImport classes={classes} users={users} grades={grades} reload={reload}/>
     <Button type="primary" onClick={()=>edit()}>设置任教关系</Button></Space>}>
-    <Table dataSource={rows} rowKey="id" columns={[{title:'教师',dataIndex:'teacher'},{title:'行政班',dataIndex:'className'},{title:'学科',render:(_,r)=>r.subjects?.join('、')||'—'},
+    <Table filterFields={[{key:'grade',label:'年级',options:grades.map(g=>({value:g.id,label:g.name})),values:r=>[classes.find(c=>c.id===r.class_id)?.grade_id||'']},{key:'class',label:'行政班',options:classes.map(c=>({value:c.id,label:label(c)})),values:r=>[r.class_id]},{key:'subject',label:'科目',options:[...new Set(rows.flatMap(r=>r.subjects||[]))].map(name=>({value:String(name),label:String(name)})),values:r=>r.subjects||[]}]} dataSource={rows} rowKey="id" columns={[{title:'教师',dataIndex:'teacher'},{title:'行政班',dataIndex:'className'},{title:'学科',render:(_,r)=>r.subjects?.join('、')||'—'},
       {title:'班主任',render:(_,r)=>r.homeroom==null?'待设置':r.homeroom?'是':'否'},{title:'操作',render:(_,r)=><Space><Button onClick={()=>edit(r)}>编辑</Button>
         <Popconfirm title="移除这条任教关系？" onConfirm={async()=>{try{await send('/teaching/relation',{...r,subjects:[],homeroom:false},'DELETE');await reload()}catch(e){message.error((e as Error).message)}}}><Button danger>移除</Button></Popconfirm></Space>}]}/>
     <Modal open={open} title="设置任教关系" confirmLoading={busy} onCancel={()=>setOpen(false)} onOk={()=>form.submit()}>
       <Form form={form} layout="vertical" onFinish={async v=>{setBusy(true);try{await send('/teaching/relation',v,'PUT');await reload();setOpen(false)}catch(e){message.error((e as Error).message)}finally{setBusy(false)}}}>
-        <Form.Item name="teacher_id" label="教师" rules={[{required:true}]}><Select disabled={editing} showSearch optionFilterProp="label" options={users.filter(u=>u.role==='teacher').map(u=>({value:u.id,label:u.name+' · '+u.username}))}/></Form.Item>
-        <Form.Item name="class_id" label="行政班" rules={[{required:true}]}><Select disabled={editing} showSearch optionFilterProp="label" options={classes.map(c=>({value:c.id,label:label(c)}))}/></Form.Item>
+        <Form.Item name="teacher_id" label="教师" rules={[{required:true}]}><RecordSelect title="教师" kind="users" disabled={editing} records={users.filter(u=>u.role==='teacher')} columns={[{title:'姓名',dataIndex:'name'},{title:'账号',dataIndex:'username'}]} label={u=>u.name+' · '+u.username}/></Form.Item>
+        <Form.Item name="class_id" label="行政班" rules={[{required:true}]}><RecordSelect title="行政班" kind="classes" disabled={editing} records={classes} label={label} fields={[{key:'grade',label:'年级',options:grades.map(g=>({value:g.id,label:g.name})),values:c=>[c.grade_id]}]} columns={[{title:'班级',dataIndex:'name'},{title:'年级',render:(_,c)=>grades.find(g=>g.id===c.grade_id)?.name||c.grade}]}/></Form.Item>
         <Form.Item name="subjects" label="任教学科"><Select mode="tags" options={[...new Set(subjects.data.map(s=>s.name))].map(value=>({value}))}/></Form.Item>
         <Form.Item name="homeroom" label="担任该班班主任" valuePropName="checked"><Switch/></Form.Item>
       </Form></Modal>

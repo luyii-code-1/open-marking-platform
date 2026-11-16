@@ -17,7 +17,7 @@ class Busy(HTTPException):
 
 def summary(plan,current):
     files=plan['files']
-    return {'id':plan['id'],'archive_id':plan['archive_id'],'mode':plan['mode'],'expires_at':plan['expires_at'],'status':plan['status'],'can_confirm':plan['actor']==current['id'] and not plan.get('invalidated_by_deletion'),'file_count':len(files),'local_bytes':sum(f['size'] for f in files if f['local']),'remote_files':sum(bool(f['remote_id']) for f in files),'files':files[:100],'last_result':{'status':plan['status'],'released_files':plan.get('released_files',0),'failed':plan.get('failed',[])}}
+    return {'id':plan['id'],'archive_id':plan.get('archive_id'),'action':plan.get('action','archive-release'),'mode':plan['mode'],'expires_at':plan['expires_at'],'status':plan['status'],'can_confirm':plan['actor']==current['id'] and not plan.get('invalidated_by_deletion'),'file_count':len(files),'local_bytes':sum(f['size'] for f in files if f['local']),'remote_files':sum(bool(f['remote_id']) for f in files),'files':files[:100],'last_result':{'status':plan['status'],'released_files':plan.get('released_files',0),'failed':plan.get('failed',[])}}
 
 
 @router.get('/release-plans/{identifier}')
@@ -50,6 +50,7 @@ def prepare(identifier,body,current,progress=None,plan_id=None,ownership=None):
         with connect() as db:
             existing=get(db,plan_id,'release-plans')
             if existing:return summary(existing,current)
+    if body.get('action')=='purge':return prepare_purge(identifier,current,progress,plan_id,ownership)
     archive_id=body.get('archive_id');mode=body.get('mode','local')
     if mode not in ('local','all'):raise HTTPException(422,'释放范围无效')
     try:archive,manifest,_=verify(archive_id,progress)
@@ -87,12 +88,64 @@ def prepare(identifier,body,current,progress=None,plan_id=None,ownership=None):
     return summary(plan,current)
 
 
+def purge_scope(db,identifier,ownership=None):
+    pages=scope(db,identifier)
+    from .jobs import job_project
+    if any(j['status'] in ('pending','running') and j['id']!=(ownership or (None,))[0]
+           and job_project(db,j)==identifier for j in objects(db,'jobs')):
+        raise HTTPException(409,'本考试仍有后台任务，请完成后再清理扫描文件')
+    return pages
+
+
+def prepare_purge(identifier,current,progress=None,plan_id=None,ownership=None):
+    """Snapshot the active scan files without requiring or creating an archive."""
+    with connect() as db:
+        db.execute('BEGIN')
+        pages=purge_scope(db,identifier,ownership)
+        references={}
+        for reference in objects(db,'storage-assets'):
+            if reference['status']=='stored':references.setdefault(reference['relative'],[]).append(reference)
+    files=[]
+    from .scan_files import page_suffixes
+    for index,page in enumerate(pages):
+        if progress:progress(index,len(pages),'核对直接清理内容')
+        for suffix in page_suffixes(page):
+            relative='pages/'+page['id']+suffix;path=local_path(relative);refs=references.get(relative,[])
+            for reference in refs:
+                try:for_reference(reference)
+                except Exception:raise HTTPException(409,'远端扫描文件位置不可核对，请恢复原连接后重试')
+            if not path.exists() and not refs:continue
+            files.append({'path':relative,'relative':relative,'size':path.stat().st_size if path.exists() else 0,
+                          'sha256':checksum(path) if path.exists() else (refs[0].get('sha256') if refs else None),
+                          'local':path.exists(),'remote_id':refs[0]['id'] if refs else None,'remote_ids':[r['id'] for r in refs],
+                          'candidate_number':page.get('candidate_number'),'side':page.get('side'),'sequence':page.get('sequence')})
+    with connect() as db:
+        db.execute('BEGIN IMMEDIATE')
+        from .jobs import guard
+        guard(db,ownership)
+        current_pages=purge_scope(db,identifier,ownership)
+        if sorted(p['id'] for p in current_pages)!=sorted(p['id'] for p in pages):raise HTTPException(409,'扫描记录已变化，请重新预览')
+        value={'project_id':identifier,'action':'purge','archive_id':None,'mode':'all','files':files,
+               'page_ids':sorted(p['id'] for p in pages),'actor':current['id'],'expires_at':time.time()+600,'status':'preview'}
+        if plan_id:value['id']=plan_id
+        plan=put(db,'release-plans',value,current['id'])
+    return summary(plan,current)
+
+
 @router.post('/projects/{identifier}/release')
 def release(identifier:str,body:dict,current=Depends(admin)):
     return execute_release(identifier,body,current)
 
 
-def execute_release(identifier,body,current,progress=None):
+def execute_release(identifier,body,current,progress=None,ownership=None):
+    with connect() as db:plan=require(db,body.get('plan_id'),'release-plans')
+    if plan.get('action')=='purge':
+        from .lifecycle import operation
+        with operation(plan['id'],ownership):return _execute_release(identifier,body,current,progress,ownership)
+    return _execute_release(identifier,body,current,progress,ownership)
+
+
+def _execute_release(identifier,body,current,progress=None,ownership=None):
     if body.get('confirm') is not True:raise HTTPException(422,'请再次确认释放操作')
     with connect() as db:
         plan=require(db,body.get('plan_id'),'release-plans')
@@ -102,15 +155,21 @@ def execute_release(identifier,body,current,progress=None):
         if plan['status']=='completed':return {'status':'completed','released_files':plan['released_files'],'failed':[]}
         if plan['status']=='preview' and plan['expires_at']<time.time():raise HTTPException(409,'释放清单已过期，请重新预览')
         if plan['status']=='running' and plan.get('lease_until',0)>time.time():raise Busy('该释放操作仍在运行')
-    try:verify(plan['archive_id'],progress)
-    except (ValueError,FileNotFoundError,zipfile.BadZipFile) as error:raise HTTPException(409,str(error))
+    purge=plan.get('action')=='purge'
+    if not purge:
+        try:verify(plan['archive_id'],progress)
+        except (ValueError,FileNotFoundError,zipfile.BadZipFile) as error:raise HTTPException(409,str(error))
     # Validate every local byte before removing the first file.
     for index,entry in enumerate(plan['files']):
         if progress:progress(index,len(plan['files']),'核对释放内容')
         path=local_path(entry['relative'])
         if path.exists() and checksum(path)!=entry['sha256']:raise HTTPException(409,'文件变化，释放清单已失效')
     with connect() as db:
-        db.execute('BEGIN IMMEDIATE');scope(db,identifier)
+        db.execute('BEGIN IMMEDIATE')
+        from .jobs import guard
+        guard(db,ownership)
+        pages=purge_scope(db,identifier,ownership) if purge else scope(db,identifier)
+        if purge and sorted(p['id'] for p in pages)!=plan['page_ids']:raise HTTPException(409,'扫描记录已变化，请重新预览')
         project=require(db,identifier,'projects');plan=require(db,plan['id'],'release-plans')
         if plan.get('invalidated_by_deletion'):raise HTTPException(409,'考试层级已变化，请重新预览释放清单')
         if plan['status']=='running' and plan.get('lease_until',0)>time.time():raise Busy('该释放操作仍在运行')
@@ -118,6 +177,9 @@ def execute_release(identifier,body,current,progress=None):
         operation_token=str(uuid4())
         plan.update(status='running',lease_until=time.time()+600,operation_token=operation_token);put(db,'release-plans',plan,current['id'])
         project['storage_operation']={'id':plan['id'],'token':operation_token,'until':plan['lease_until']};put(db,'projects',project,current['id'])
+        if purge:
+            project['scans_purged']={'plan_id':plan['id'],'at':time.time(),'actor':current['id']}
+            put(db,'projects',project,current['id'])
     released=0;failed=[];last_heartbeat=time.time();interrupted=True
     try:
         for index,entry in enumerate(plan['files']):
@@ -129,7 +191,7 @@ def execute_release(identifier,body,current,progress=None):
                     if reference['status']=='stored':
                         for_reference(reference).delete(reference['key'])
                         with connect() as db:
-                            reference.update(status='archived',archive_id=plan['archive_id']);put(db,'storage-assets',reference,current['id'])
+                            reference.update(status='purged' if purge else 'archived',archive_id=plan.get('archive_id'));put(db,'storage-assets',reference,current['id'])
                 path.unlink(missing_ok=True);released+=1
             except Exception as error:failed.append({'relative':entry['relative'],'error':type(error).__name__})
             if time.time()-last_heartbeat>60:

@@ -1,4 +1,4 @@
-import {SubjectCatalog} from './Electives'
+import {SubjectCatalog,ElectiveManagement} from './Electives'
 import { SessionActivity } from './SessionActivity'
 import { Button } from './Button'
 import { Brand } from './Brand'
@@ -57,7 +57,7 @@ export function App() {
   const items = [
     { key: 'dashboard', icon: <ApartmentOutlined />, label: '工作概览' },
     { type: 'group' as const, key: 'work', label: '考试工作', children: [
-      ...(management ? [{key:'scanner',icon:<ScanOutlined/>,label:'扫描台'},{ key: 'exams', icon: <BookOutlined />, label: '考试项目' },{key:'subject-catalog',icon:<BookOutlined/>,label:'科目管理'}] : []),
+      ...(management ? [{key:'scanner',icon:<ScanOutlined/>,label:'扫描台'},{ key: 'exams', icon: <BookOutlined />, label: '考试项目' },{key:'subject-catalog',icon:<BookOutlined/>,label:'科目管理'},{key:'electives',icon:<TeamOutlined/>,label:'选科管理'}] : []),
       { key: 'marking', icon: <AuditOutlined />, label: '阅卷中心' },
       ...(management ? [{ key: 'exceptions', icon: <FileSearchOutlined />, label: '异常总览' }] : []),
       { key: 'results', icon: <ReadOutlined />, label: '成绩总览' },
@@ -81,6 +81,7 @@ export function App() {
       <Layout.Content className={page==='marking'?'page-content marking-content':'page-content'}><div className="page-heading" hidden={page==='marking'||(page === 'exams' && !!location.projectId)}><div><Title level={2}>{title}</Title></div><Tag className="account-tag">{user.role==='admin'?'系统管理员':user.role==='manager'?'管理教师':'阅卷教师'} · {user.username}</Tag></div>
         {page === 'dashboard' && <Dashboard onNavigate={setPage} admin={management} />}
         {page === 'subject-catalog'&&management&&<SubjectCatalog/>}
+        {page === 'electives'&&management&&<ElectiveManagement/>}
         {page === 'exams' && <Exams location={location} navigate={navigate} />}
         {page === 'marking' && <ReviewTasks onOpen={(templateId, questionId) => navigate(`#/marking/review/${encodeURIComponent(templateId)}/${encodeURIComponent(questionId)}`)} />}
         {page === 'exceptions' && <Exceptions />}

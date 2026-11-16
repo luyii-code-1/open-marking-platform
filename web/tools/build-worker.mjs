@@ -15,6 +15,8 @@ async function files(folder) {
 const paths=(await files(root)).sort(),hash=createHash('sha256')
 for(const file of paths){hash.update(path.relative(root,file));const data=await readFile(file);hash.update(file.endsWith('.html')?data.toString().replace(/<meta name="omp-build" content="[^"]*">\s*/g,''):data)}
 const version=hash.digest('hex').slice(0,16)
+const metadata=JSON.parse(await readFile(path.join(root,'version.json'),'utf8'))
+await writeFile(path.join(root,'version.json'),JSON.stringify({...metadata,shell_version:version}))
 for(const file of paths.filter(file=>file.endsWith('.html'))){const html=(await readFile(file,'utf8')).replace(/<meta name="omp-build" content="[^"]*">\s*/g,'');await writeFile(file,html.replace('</head>','<meta name="omp-build" content="'+version+'"></head>'))}
 const shell=paths.map(file=>'/'+path.relative(root,file).split(path.sep).join('/'))
 await writeFile(path.join(root,'worker.js'),`/* Build ${version}: versioned shell and coordinated updates. */
@@ -56,6 +58,11 @@ async function prepare(event,legacy){
 }
 self.addEventListener('message',event=>{
   const value=event.data;
+  if(value?.type==='GET_BUILD_VERSION'){
+    const reply={type:'BUILD_VERSION',version:VERSION};
+    if(event.ports?.[0])event.ports[0].postMessage(reply);else event.source?.postMessage(reply);
+    return;
+  }
   if(value?.type==='PREPARE_UPDATE')event.waitUntil(prepare(event,false));
   else if(value?.type==='SKIP_WAITING')event.waitUntil(prepare(event,true));
   else if(value?.type==='UPDATE_CANCEL'&&pending&&pending.requestId===value.requestId&&pending.clients.has(event.source?.id)){pending.cancelled=true;pending.finish(false);}
