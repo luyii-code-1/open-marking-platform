@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "build": "tsc --noEmit && vite build && node tools/build-worker.mjs",
+    "build": "node tools/check-icon-assets.mjs && tsc --noEmit && vite build && node tools/check-icon-assets.mjs --built && node tools/build-worker.mjs",
     "preview": "vite preview --host 127.0.0.1",
     "test:pwa": "node tools/test-worker.mjs",
     "test:navigation": "node tools/test-exam-navigation.mjs",

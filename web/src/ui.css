@@ -11,6 +11,7 @@
 .ant-table-content{overflow-x:auto}
 .ant-table-cell .ant-space{flex-wrap:nowrap!important;white-space:nowrap}
 .ant-table-thead>tr>th{white-space:nowrap}
+.ant-table-cell.row-actions>.ant-btn-link,.ant-table-cell.row-actions .ant-space-item:first-child>.ant-btn-link{padding-inline-start:0}
 .ant-table-pagination.ant-pagination{margin:12px 0 0}
 .ant-form-item:last-child{margin-bottom:0}
 .ant-card .ant-card-head-title{font-weight:600}
