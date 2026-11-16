@@ -16,6 +16,10 @@
     "test:build-version": "node tools/test-build-version.mjs",
     "test:record-filters": "node tools/test-record-filters.mjs",
     "test:result-filters": "node tools/test-result-filter-params.mjs",
+    "test:table-sorting": "node tools/test-table-sorting.mjs",
+    "test:answer-entry": "node tools/test-answer-entry.mjs",
+    "test:rich-text": "node tools/test-rich-text-format.mjs",
+    "test:subjective-layout": "node tools/test-subjective-layout.mjs",
     "test:session": "node tools/test-auth-session.mjs",
     "test:actions": "node tools/test-actions.mjs",
     "test:icons": "node tools/test-icons.mjs"

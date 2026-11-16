@@ -1,0 +1,23 @@
+@font-face{font-family:'OMP Sans';src:url('/api/v1/paper-fonts/sans/400') format('truetype');font-style:normal;font-weight:400;font-display:swap}
+@font-face{font-family:'OMP Sans';src:url('/api/v1/paper-fonts/sans/700') format('truetype');font-style:normal;font-weight:700;font-display:swap}
+@font-face{font-family:'OMP Serif';src:url('/api/v1/paper-fonts/serif/400') format('truetype');font-style:normal;font-weight:400;font-display:swap}
+@font-face{font-family:'OMP Serif';src:url('/api/v1/paper-fonts/serif/700') format('truetype');font-style:normal;font-weight:700;font-display:swap}
+@font-face{font-family:'OMP Sans';src:url('/api/v1/paper-fonts/sans/400?italic=true') format('truetype');font-style:italic;font-weight:400;font-display:swap}
+@font-face{font-family:'OMP Sans';src:url('/api/v1/paper-fonts/sans/700?italic=true') format('truetype');font-style:italic;font-weight:700;font-display:swap}
+@font-face{font-family:'OMP Serif';src:url('/api/v1/paper-fonts/serif/400?italic=true') format('truetype');font-style:italic;font-weight:400;font-display:swap}
+@font-face{font-family:'OMP Serif';src:url('/api/v1/paper-fonts/serif/700?italic=true') format('truetype');font-style:italic;font-weight:700;font-display:swap}
+.rich-tools{max-width:100%;gap:4px;font-family:system-ui,sans-serif}
+.rich-tools-group{display:inline-flex;align-items:center;gap:3px;padding-right:7px;margin-right:3px;border-right:1px solid #dce1e7}
+.rich-tools label{display:inline-flex;align-items:center;gap:4px;font-size:12px}
+.rich-tools input[type=number]{width:52px;height:26px;border:1px solid #c6ced9;border-radius:4px;padding:2px 4px;font:inherit;color:inherit}
+.rich-tools input[type=color]{width:28px;height:26px;border:1px solid #c6ced9;border-radius:4px;padding:2px;background:#fff;cursor:pointer}
+.rich-tools .omp-button[aria-pressed=true]{color:#0866ff;background:#0866ff14}
+.rich-tool-panel{max-width:min(400px,calc(100vw - 48px));font:13px/1.5 system-ui,sans-serif}
+.rich-tool-panel-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.rich-tool-panel label{display:flex;flex-direction:column;gap:4px}
+.rich-symbol-grid{display:grid;grid-template-columns:repeat(8,minmax(28px,1fr));gap:4px}
+.rich-editor [data-enclosed-text]{display:inline-block;border:.06em solid currentColor;border-radius:50%;padding:0 .18em;line-height:1.3;text-align:center;white-space:nowrap;vertical-align:baseline;user-select:all}
+.rich-editor [data-enclosed-text]:focus{outline:1px solid #0866ff}
+.rich-editor ol,.rich-editor ul{margin:0;padding-left:24pt}
+.rich-editor li{margin:0 0 3pt}
+.rich-tools select:focus-visible,.rich-tools input:focus-visible{outline:2px solid #0866ff;outline-offset:1px}

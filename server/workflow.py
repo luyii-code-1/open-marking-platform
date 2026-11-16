@@ -211,11 +211,14 @@ def finish_empty(identifier:str,body:dict,current=Depends(admin)):
 @router.get('/projects/{identifier}/scanned-sheets')
 def scanned_sheets(identifier:str,q:str='',group_id:str|None=None,page:int=1,
                    grade_ids:list[str]=Query(default=[]),class_ids:list[str]=Query(default=[]),
-                   subject_ids:list[str]=Query(default=[]),group_ids:list[str]=Query(default=[]),current=Depends(admin)):
+                   subject_ids:list[str]=Query(default=[]),group_ids:list[str]=Query(default=[]),
+                   sort_by:str='candidate_number',sort_order:str='asc',current=Depends(admin)):
     term=q.strip()
     selected=[grade_ids,class_ids,subject_ids,group_ids]
     if len(term)>100 or not 1<=page<=1000000 or any(len(values)>200 or any(not value or len(value)>100 for value in values) for values in selected):
         raise HTTPException(422,'查询条件或页码无效')
+    if sort_by not in ('name','candidate_number','grade','class_name','subject','card','image_status') or sort_order not in ('asc','desc'):
+        raise HTTPException(422,'排序字段或方向无效')
     with connect() as db:
         db.execute('BEGIN')
         project=require(db,identifier,'projects')
@@ -255,17 +258,23 @@ def scanned_sheets(identifier:str,q:str='',group_id:str|None=None,page:int=1,
             params.extend([term]*4)
         filtered=source+(' AND '+' AND '.join(conditions) if conditions else '')
         total=db.execute('SELECT count(*) '+filtered,params).fetchone()[0]
-        matches=db.execute("SELECT s.id,s.body,json_extract(st.body,'$.name') AS current_name,"+projection.removeprefix('SELECT ')+filtered+
-                           " ORDER BY json_extract(s.body,'$.candidate_number'),subject,s.id LIMIT 20 OFFSET ?",(*params,(page-1)*20))
-        items=[];purged=bool(project.get('scans_purged'))
+        purged=bool(project.get('scans_purged'))
+        name="COALESCE(NULLIF(json_extract(s.body,'$.student_snapshot.name'),''),json_extract(st.body,'$.name'),'')"
+        image_status="'purged'" if purged else "CASE WHEN EXISTS(SELECT 1 FROM json_each(s.body,'$.pages') pid JOIN objects image ON image.id=pid.value AND image.kind='pages' AND image.deleted=0) THEN 'available' ELSE 'missing' END"
+        sort_fields={'name':name,'candidate_number':"json_extract(s.body,'$.candidate_number')",'grade':grade_name,
+                     'class_name':class_name,'subject':"json_extract(subj.body,'$.name')",'card':"json_extract(g.body,'$.name')",'image_status':image_status}
+        direction='DESC' if sort_order=='desc' else 'ASC'
+        matches=db.execute(f"SELECT s.id,s.body,{name} AS name,{image_status} AS image_status,"+projection.removeprefix('SELECT ')+filtered+
+                           f" ORDER BY {sort_fields[sort_by]} COLLATE NOCASE {direction},s.id ASC LIMIT 20 OFFSET ?",(*params,(page-1)*20))
+        items=[]
         for row in matches:
             sub=json.loads(row['body']);pages=[]
             if not purged:
                 for pid in sub['pages']:
                     image=get(db,pid,'pages')
                     if image:pages.append({'id':pid,'side':image.get('side'),'image_url':f'/api/v1/pages/{pid}/image'})
-            items.append({'id':row['id'],'name':(sub.get('student_snapshot') or {}).get('name') or row['current_name'],
+            items.append({'id':row['id'],'name':row['name'],
                           'candidate_number':sub['candidate_number'],**{key:row[key] for key in ('subject','subject_id','card','group_id','grade','grade_id','class_id','class_name')},'pages':pages,
-                          'image_status':'purged' if purged else 'available' if pages else 'missing'})
+                          'image_status':row['image_status']})
         return {'items':items,'total':total,'page':page,'options':{name:sorted(values.values(),key=lambda row:(row['name'] or '',row['id'])) for name,values in options.items()},
-                'scope':{'project_id':identifier,'group_id':group_id,'scans_purged':purged}}
+                'sort_by':sort_by,'sort_order':sort_order,'scope':{'project_id':identifier,'group_id':group_id,'scans_purged':purged}}

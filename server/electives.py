@@ -108,9 +108,11 @@ def supplement(identifier:str,body:dict,current=Depends(admin)):
         if len(added)!=len(set(ids)):raise HTTPException(422,'请选择同年级学生')
         old=get(db,group.get('roster_id'),'rosters') or {}
         students={s['id']:s for s in group_students(db,group) or []}
-        extra=set(old.get('supplemental_ids',[]))|(set(ids)-students.keys())
+        new_ids=set(ids)-students.keys()
+        if not new_ids:return {'count':len(students),'added':0}
+        extra=set(old.get('supplemental_ids',[]))|new_ids
         students.update({s['id']:s for s in added})
-        return save_members(db,group,list(students.values()),old.get('source','manual'),extra,current['id'])
+        return {**save_members(db,group,list(students.values()),old.get('source','manual'),extra,current['id']),'added':len(new_ids)}
 
 
 class SubjectTag(BaseModel):

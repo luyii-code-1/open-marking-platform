@@ -50,6 +50,8 @@ async def lifespan(app):
 
 
 app = FastAPI(title='Open Marking Platform',version='0.1.0',lifespan=lifespan)
+from .paper_fonts import router as paper_fonts_router
+app.include_router(paper_fonts_router)
 from .request_log import record_request
 app.middleware('http')(record_request)
 

@@ -1,7 +1,8 @@
 import {AnswerDetails} from './AnswerDetails'
 import {CardWorkflow} from './CardWorkflow'
 import { RoomTagBadges, RoomTagPicker } from './RoomTags'
-import { useEffect,useState } from 'react'
+import { useEffect,useId,useState,type ReactNode } from 'react'
+import {DownOutlined} from '@ant-design/icons'
 import { Alert, App, Empty, InputNumber, Progress, Select, Space, Statistic, Switch, Tabs, Tag, Typography } from 'antd'
 import { Table } from './DataTable'
 import { Button } from './Button'
@@ -11,15 +12,30 @@ import { HierarchyPicker } from './HierarchyPicker'
 import { cardName } from './examNavigation'
 import { ResultExport } from './ResultExport'
 import {ResultOverview} from './ResultOverview'
-import {ResultFilters,useResultFilterOptions,classLabel} from './ResultFilters'
+import {ResultFilters,useResultFilterOptions,classLabel,type ResultFilterOptions} from './ResultFilters'
 import {RecordSelect} from './RecordSelect'
-import {emptyResultFilters,withResultFilters} from './resultFilterParams'
+import {emptyResultFilters,withResultFilters,type ResultFilterValue} from './resultFilterParams'
 import {ClassResultSummary} from './ClassResultSummary'
+import './result-settings.css'
 
 const number=(value:unknown)=>value===null||value===undefined?'—':String(value)
 const statusName:Record<string,string>={absent:'缺考',pending:'待结分',completed:'已完成',unscanned:'未扫描'}
 const numeric=(a:any,b:any,key:string)=>(a[key]??-Infinity)-(b[key]??-Infinity)
 const measures=[['analyzed','统计人数'],['average','平均分'],['median','中位数'],['minimum','最低分'],['maximum','最高分'],['standard_deviation','标准差'],['score_rate','得分率%'],['pass_rate','及格率%'],['excellent_rate','优秀率%']].map(([key,title])=>({title,dataIndex:key,render:number,sorter:(a:any,b:any)=>numeric(a,b,key)}))
+
+function ResultSettings({summary,actions,children}:{summary:string;actions:ReactNode;children:ReactNode}){
+  const [expanded,setExpanded]=useState(false),id=useId()
+  return <Card className="result-settings"><div className="result-settings-header">
+    <Button type="text" icon={<DownOutlined rotate={expanded?180:0}/>} aria-expanded={expanded} aria-controls={id} onClick={()=>setExpanded(value=>!value)}>{expanded?'收起筛选与设置':'展开筛选与设置'}</Button>
+    <Typography.Text type="secondary" ellipsis title={summary} className="result-settings-summary">{summary}</Typography.Text>
+    <div className="result-settings-actions">{actions}</div>
+  </div><div id={id} hidden={!expanded} className="result-settings-content">{children}</div></Card>
+}
+
+function rangeSummary(filters:ResultFilterValue,options:ResultFilterOptions){
+  const classes=filters.classIds.map(id=>{const row=options.classes.find(row=>row.id===id);return row?classLabel(row):'班级'})
+  return [filters.groupIds.length?`${filters.groupIds.length} 张题卡`:'',classes.length?classes.length>2?`${classes.slice(0,2).join('、')}等 ${classes.length} 个班级`:classes.join('、'):'全部班级',filters.studentIds.length?`${filters.studentIds.length} 名指定学生`:'',filters.statuses.map(id=>options.statuses.find(row=>row.id===id)?.name||statusName[id]||id).join('、'),filters.q.trim()?`关键词：${filters.q.trim()}`:''].filter(Boolean).join(' · ')
+}
 
 export function Results({admin,groupId,projectId,projectOnly=false}:{admin:boolean;groupId?:string;projectId?:string;projectOnly?:boolean}) {
   const groups=useResource<Row[]>('/groups',[]),projects=useResource<Row[]>('/projects',[]),subjects=useResource<Row[]>('/subjects',[])
@@ -46,21 +62,19 @@ export function Results({admin,groupId,projectId,projectOnly=false}:{admin:boole
   const subject=subjects.data.find(s=>s.id===selectedGroup?.subject_id)
   const cardScope=[projects.data.find(p=>p.id===subject?.project_id)?.name,subject?.name,selectedGroup?.grade_name,selectedGroup?cardName(selectedGroup,subject):data?.group_name].filter(Boolean) as string[]
   const groupView=<Space direction="vertical" size={16} style={{width:'100%'}}>
-    <Card><div className="result-toolbar">
+    <ResultSettings summary={group?[cardScope.join(' / '),metric==='raw'?'原始分':'赋分',room?.label||'全部考场',rangeSummary(view==='students'&&rankingClass?{...filters,classIds:[rankingClass]}:filters,filterOptions.data),includeAbsent?'缺考计入统计':'缺考单列',`及格 ${cutoffs.pass}% / 优秀 ${cutoffs.excellent}%`].filter(Boolean).join(' · '):'尚未选择题卡，展开设置选择成绩范围'} actions={<>
+      <Button disabled={!group} onClick={resource.reload}>刷新</Button>
+      <ResultExport key={group} scope={{kind:'card',id:group,query:exportQuery,roomId:roomTag,studentCount:data?.summary.records??0}} initialReport={view==='students'?'ranking':'items'}
+        parts={cardScope} room={room?.label} disabled={!data || resource.loading || !!resource.error}/>
+    </>}>
       <Space wrap>
         {!groupId && <HierarchyPicker value={group} onChange={id=>{setGroup(id);setRoom(undefined);setMetric('raw')}}/>}
         <Select aria-label="统计口径" value={metric} onChange={setMetric} options={[{label:'原始分统计',value:'raw'},{label:'赋分统计',value:'converted',disabled:!selectedGroup?.conversion_id}]}/>
         <RoomTagPicker groupId={group} value={roomTag} onChange={(id,label)=>setRoom(id?{id,label}:undefined)}/>
       </Space>
-      <Space>
-        <Button disabled={!group} onClick={resource.reload}>刷新</Button>
-        <ResultExport key={group} scope={{kind:'card',id:group,query:exportQuery,roomId:roomTag,studentCount:data?.summary.records??0}} initialReport={view==='students'?'ranking':'items'}
-          parts={cardScope} room={room?.label} disabled={!data || resource.loading || !!resource.error}/>
-      </Space>
-    </div>
       {group&&<div style={{marginTop:12}}><ResultFilters value={filters} onChange={setFilters} options={filterOptions.data} loading={filterOptions.loading} matched={resource.loading?undefined:data?.summary.records}/></div>}
       <Space wrap style={{marginTop:16}}><Typography.Text>缺考计入统计</Typography.Text><Switch checked={includeAbsent} onChange={setIncludeAbsent}/><Typography.Text>及格线（满分%）</Typography.Text><InputNumber min={0} max={100} value={pass} onChange={v=>setPass(v??60)}/><Typography.Text>优秀线（满分%）</Typography.Text><InputNumber min={0} max={100} value={excellent} onChange={v=>setExcellent(v??85)}/><Button onClick={()=>{if(pass>excellent){message.warning('优秀线应不低于及格线');return}setCutoffs({pass,excellent})}}>应用分数线</Button></Space>
-    </Card>
+    </ResultSettings>
     {admin&&group&&<CardWorkflow key={group} groupId={group} onSaved={async()=>{await resource.reload();await groups.reload()}}/>}
     {(resource.error||filterOptions.error)&&<Alert type="error" message={resource.error||filterOptions.error}/>}
     {data?<>{admin&&!data.roster_configured&&<Alert type="warning" message="本组尚未配置应考名单，当前仅能显示已有答卷。可在考试项目的应考名单中配置，以显示未扫描学生。"/>}<div className="stat-grid"><Card><Statistic title="考生记录" value={data.summary.records}/></Card><Card><Statistic title="平均分" value={data.summary.average??'—'} precision={2}/></Card><Card><Statistic title="统计人数" value={data.summary.analyzed}/></Card><Card><Statistic title="未扫描 / 缺考 / 待结分" value={`${data.summary.unscanned} / ${data.summary.absent} / ${data.summary.pending}`}/></Card></div>
@@ -72,14 +86,15 @@ export function Results({admin,groupId,projectId,projectOnly=false}:{admin:boole
         {key:'students',label:'考生成绩与排名',children:<Space direction="vertical" style={{width:'100%'}}><RecordSelect title="班级" records={filterOptions.data.classes.filter(row=>!filters.classIds.length||filters.classIds.includes(row.id))} value={rankingClass} onChange={setRankingClass} label={classLabel} columns={[{title:'年级',render:(_,row)=>row.grade_name||row.grade||'—'},{title:'班级',dataIndex:'name'}]}/>{rankingClass?<><Typography.Text type="secondary">班级排名和可见范围排名以完整可见范围计算，姓名、学生及状态筛选保持原有名次。</Typography.Text>{ranking.error&&<Alert type="error" message={ranking.error}/>}<Table query="" loading={ranking.loading} rowKey="student_id" scroll={{x:'max-content'}} dataSource={ranking.loading?[]:ranking.data?.students||[]} columns={[{title:'考号',dataIndex:'candidate_number'},{title:'姓名',dataIndex:'name'},{title:'考场',render:(_:unknown,row:Row)=><RoomTagBadges tags={row.room_tags}/>},{title:'年级',dataIndex:'grade'},{title:'班级',dataIndex:'class_name'},{title:'原始分',dataIndex:'total',render:number,sorter:(a,b)=>numeric(a,b,'total')},{title:'赋分',dataIndex:'converted_score',render:number},{title:'可见范围排名',dataIndex:'scope_rank',render:number},{title:'班级排名',dataIndex:'class_rank',render:number,defaultSortOrder:'ascend',sorter:(a,b)=>(a.class_rank??Infinity)-(b.class_rank??Infinity)},{title:'状态',dataIndex:'status',render:value=><Tag>{statusName[value]||value}</Tag>}]}/></>:<Empty description="选择班级后查看考生成绩与排名"/>}</Space>},
       ]}/></Card></>:<Card loading={resource.loading}><Empty description="选择题卡查看成绩分析"/></Card>}
   </Space>
-  const projectView=<Space direction="vertical" size={16} style={{width:'100%'}}><Card><div className="result-toolbar">
-    {!projectId && <Select aria-label="考试项目" style={{width:300,maxWidth:'100%'}} placeholder="选择考试项目" value={project||undefined} onChange={setProject} options={projects.data.map(p=>({label:p.name,value:p.id}))}/>}
-    <Space>
+  const projectView=<Space direction="vertical" size={16} style={{width:'100%'}}>
+    <ResultSettings summary={project?[projects.data.find(row=>row.id===project)?.name||cross?.project_name,rangeSummary(projectTab==='class-summary'&&summaryClass?{...projectFilters,classIds:[summaryClass]}:projectFilters,projectOptions.data)].filter(Boolean).join(' · '):'尚未选择考试，展开设置选择成绩范围'} actions={<>
       <Button disabled={!project} onClick={crossResource.reload}>刷新</Button>
       <ResultExport key={project} scope={{kind:'project',id:project,query:projectExportQuery,cardCount:cross?.columns.length??0,studentCount:cross?.students.length??0}} initialReport={projectTab==='class-summary'?'class-summary':'items'}
         parts={[cross?.project_name||'']} disabled={!cross || crossResource.loading || !!crossResource.error}/>
-    </Space>
-  </div>{project&&<div style={{marginTop:12}}><ResultFilters allowGroups value={projectFilters} onChange={setProjectFilters} options={projectOptions.data} loading={projectOptions.loading} matched={crossResource.loading?undefined:cross?.students.length}/></div>}</Card>
+    </>}>
+      {!projectId && <Select aria-label="考试项目" style={{width:300,maxWidth:'100%'}} placeholder="选择考试项目" value={project||undefined} onChange={setProject} options={projects.data.map(p=>({label:p.name,value:p.id}))}/>}
+      {project&&<div style={{marginTop:12}}><ResultFilters allowGroups value={projectFilters} onChange={setProjectFilters} options={projectOptions.data} loading={projectOptions.loading} matched={crossResource.loading?undefined:cross?.students.length}/></div>}
+    </ResultSettings>
     {projectOptions.error&&<Alert type="error" message={projectOptions.error}/>}
     <Tabs activeKey={projectTab} onChange={setProjectTab} items={[{key:'cross',label:'跨科汇总',children:<Space direction="vertical" size={12} style={{width:'100%'}}>
     {crossResource.error&&<Alert type="error" message={crossResource.error}/>}

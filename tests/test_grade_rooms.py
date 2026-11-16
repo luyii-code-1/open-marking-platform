@@ -336,6 +336,19 @@ def test_scanned_sheet_default_list_server_filters_and_purge(school):
     base='projects/'+f['project']['id']+'/scanned-sheets'
     first=r('GET',base)
     assert first['total']==25 and len(first['items'])==20 and len(r('GET',base+'?page=2')['items'])==5
+    baseline=first['items']+r('GET',base+'?page=2')['items']
+    for field in ('name','candidate_number','grade','class_name','subject','card','image_status'):
+        for direction in ('asc','desc'):
+            expected=sorted(baseline,key=lambda row:row['id'])
+            expected.sort(key=lambda row:str(row[field] or '').casefold(),reverse=direction=='desc')
+            query=f'?sort_by={field}&sort_order={direction}'
+            globally_sorted=r('GET',base+query)['items']+r('GET',base+query+'&page=2')['items']
+            assert [row['id'] for row in globally_sorted]==[row['id'] for row in expected]
+    descending=r('GET',base+'?class_ids='+f['cls']['id']+'&sort_by=candidate_number&sort_order=desc')
+    assert descending['total']==24 and descending['items'][0]['candidate_number']=='000000123'
+    r('GET',base+'?sort_by=unknown',status=422)
+    r('GET',base+'?sort_by=name%20DESC%3BDROP%20TABLE%20objects',status=422)
+    r('GET',base+'?sort_order=descending',status=422)
     assert {g['id'] for g in first['options']['groups']}=={group['id'],other_group['id']}
     assert {g['id'] for g in first['options']['grades']}=={f['grade']['id'],f['other_grade']['id']}
     high2=r('GET',base+'?grade_ids='+f['other_grade']['id'])
