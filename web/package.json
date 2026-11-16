@@ -15,6 +15,7 @@
     "test:auto-update": "node tools/test-auto-update.mjs",
     "test:build-version": "node tools/test-build-version.mjs",
     "test:record-filters": "node tools/test-record-filters.mjs",
+    "test:result-filters": "node tools/test-result-filter-params.mjs",
     "test:session": "node tools/test-auth-session.mjs",
     "test:actions": "node tools/test-actions.mjs",
     "test:icons": "node tools/test-icons.mjs"

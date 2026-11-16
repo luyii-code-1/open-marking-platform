@@ -8,9 +8,10 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException
 from .db import connect, find, get, objects
 from .dependencies import user, require
-from .export_tables import ExportTable, FileFormat, table_response, workbook_response
+from .export_tables import ExportTable, FileFormat, table_response, workbook_response,ranking_response
 from .review import results_for
 from .room_tags import includes
+from .result_filters import ResultFilters,result_filter_query,filter_rows,filter_options
 
 router=APIRouter(prefix='/api/v1')
 STATUS_NAMES={'completed':'已完成','pending':'待结分','absent':'缺考','unscanned':'未扫描'}
@@ -27,11 +28,13 @@ def describe(values,maximum,pass_ratio,excellent_ratio):
     return {'analyzed':count,'average':rounded(sum(amounts)/count) if count else None,'median':rounded(median(values)) if count else None,'minimum':min(values) if count else None,'maximum':max(values) if count else None,'standard_deviation':rounded(pstdev(values)) if count else None,'score_rate':rounded(100*sum(amounts)/(full*count)) if count and full>0 else None,'pass_count':passed,'pass_rate':rounded(100*Decimal(passed)/count) if count else None,'excellent_count':excellent,'excellent_rate':rounded(100*Decimal(excellent)/count) if count else None}
 
 
-def analyze(db,group_id,current,metric='raw',include_absent=False,pass_ratio=.6,excellent_ratio=.85,room_tag_id=None):
+def analyze(db,group_id,current,metric='raw',include_absent=False,pass_ratio=.6,excellent_ratio=.85,room_tag_id=None,filters=None):
     if metric not in ('raw','converted') or not math.isfinite(pass_ratio) or not math.isfinite(excellent_ratio) or not 0<=pass_ratio<=excellent_ratio<=1:raise HTTPException(422,'统计口径或比例无效')
     group=require(db,group_id,'groups')
     template=require(db,group.get('template_id'),'templates')
-    rows=[r for r in results_for(db,group_id,current) if includes(r,room_tag_id)]
+    scope_rows=results_for(db,group_id,current)
+    rows=filter_rows(scope_rows,filters,room_tag_id)
+    if filters and filters.group_ids and group_id not in filters.group_ids:rows=[]
     maximum=sum(q['points'] for q in template['questions'])
     if metric=='converted':
         if not group.get('conversion_id'):raise HTTPException(422,'本题卡组尚未配置赋分')
@@ -51,10 +54,11 @@ def analyze(db,group_id,current,metric='raw',include_absent=False,pass_ratio=.6,
         values=[r['scores'][question_label(q)] for r in rows if r['scores'].get(question_label(q)) is not None and (include_absent or r['status']!='absent')]
         questions.append({'id':q['id'],'number':question_label(q) if q.get('parts') else q['number'],'type':q['type'],'points':q['points'],**describe(values,q['points'],pass_ratio,excellent_ratio)})
     eligible=[r for r in rows if r.get(key) is not None and (include_absent or r['status']!='absent')]
+    rank_eligible=[r for r in scope_rows if r.get(key) is not None and (include_absent or r['status']!='absent')]
     # Competition ranks: ties share their rank and the next rank has a gap.
     score_counts={}
     class_counts={}
-    for row in eligible:
+    for row in rank_eligible:
         value=row[key];score_counts[value]=score_counts.get(value,0)+1
         counts=class_counts.setdefault(row['class_id'],{});counts[value]=counts.get(value,0)+1
     def rank_map(counts):
@@ -76,10 +80,10 @@ def analyze(db,group_id,current,metric='raw',include_absent=False,pass_ratio=.6,
 
 
 @router.get('/analysis/group')
-def group_analysis(group_id:str,metric:str='raw',include_absent:bool=False,pass_ratio:float=.6,excellent_ratio:float=.85,current=Depends(user),room_tag_id:str|None=None):
+def group_analysis(group_id:str,metric:str='raw',include_absent:bool=False,pass_ratio:float=.6,excellent_ratio:float=.85,current=Depends(user),room_tag_id:str|None=None,filters:ResultFilters=Depends(result_filter_query)):
     with connect() as db:
         db.execute('BEGIN')
-        return analyze(db,group_id,current,metric,include_absent,pass_ratio,excellent_ratio,room_tag_id)
+        return analyze(db,group_id,current,metric,include_absent,pass_ratio,excellent_ratio,room_tag_id,filters)
 
 
 def project_result_groups(db,identifier,current):
@@ -95,8 +99,9 @@ def project_result_groups(db,identifier,current):
     return project, subjects, groups
 
 
-def project_rows(db,identifier,current):
+def project_rows(db,identifier,current,group_ids=None):
     project,subjects,groups=project_result_groups(db,identifier,current)
+    if group_ids:groups=[g for g in groups if g['id'] in group_ids]
     columns=[];students={}
     for group in groups:
         rows=results_for(db,group['id'],current)
@@ -114,10 +119,35 @@ def project_rows(db,identifier,current):
 
 
 @router.get('/analysis/project')
-def project_analysis(project_id:str,current=Depends(user)):
+def project_analysis(project_id:str,current=Depends(user),room_tag_id:str|None=None,filters:ResultFilters=Depends(result_filter_query)):
     with connect() as db:
         db.execute('BEGIN')
-        return project_rows(db,project_id,current)
+        from .class_ranking import class_totals,filter_project
+        return filter_project(class_totals(project_rows(db,project_id,current,filters.group_ids)),filters,room_tag_id)
+
+
+@router.get('/analysis/project/class-summary')
+def project_class_summary(project_id:str,current=Depends(user),room_tag_id:str|None=None,include_absent:bool=False,filters:ResultFilters=Depends(result_filter_query)):
+    with connect() as db:
+        db.execute('BEGIN')
+        from .class_ranking import class_totals,filter_project
+        return filter_project(class_totals(project_rows(db,project_id,current,filters.group_ids),include_absent),filters,room_tag_id)
+
+
+@router.get('/analysis/filter-options')
+def result_filter_options(group_id:str|None=None,project_id:str|None=None,current=Depends(user)):
+    if bool(group_id)==bool(project_id):raise HTTPException(422,'请选择一个题卡或考试范围')
+    with connect() as db:
+        db.execute('BEGIN')
+        if group_id:
+            rows=results_for(db,group_id,current)
+            group=require(db,group_id,'groups');subject=get(db,group.get('subject_id'),'subjects') or {}
+            groups=[{'id':group['id'],'subject':subject.get('name',''),'name':group['name']}]
+        else:
+            from .class_ranking import class_totals
+            data=class_totals(project_rows(db,project_id,current));rows=data['students']
+            groups=[{**column,'name':' · '.join(v for v in (column['subject'],column['grade'],column['group']) if v)} for column in data['columns']]
+        return {**filter_options(rows),'groups':groups}
 
 
 def overview_rows(db,current,project_id=None):
@@ -214,18 +244,25 @@ def question_score_table(db, group, students, title):
 
 
 @router.get('/results/export')
-def export_results(group_id: str, room_tag_id: str | None = None, current=Depends(user), format: FileFormat = 'csv'):
+def export_results(group_id: str, room_tag_id: str | None = None, current=Depends(user), format: FileFormat = 'csv',filters:ResultFilters=Depends(result_filter_query)):
     with connect() as db:
         db.execute('BEGIN')
         group = require(db, group_id, 'groups')
-        students = [r for r in results_for(db, group_id, current) if includes(r, room_tag_id)]
+        students = filter_rows(results_for(db, group_id, current),filters,room_tag_id)
         table = question_score_table(db, group, students, '小题分')
     return table_response(table, 'results', format)
 
 
 @router.get('/analysis/group/export')
-def export_group(group_id:str,view:str='classes',metric:str='raw',include_absent:bool=False,pass_ratio:float=.6,excellent_ratio:float=.85,current=Depends(user),room_tag_id:str|None=None,format:FileFormat='csv'):
-    data=group_analysis(group_id,metric,include_absent,pass_ratio,excellent_ratio,current,room_tag_id)
+def export_group(group_id:str,view:str='classes',metric:str='raw',include_absent:bool=False,pass_ratio:float=.6,excellent_ratio:float=.85,current=Depends(user),room_tag_id:str|None=None,format:FileFormat='csv',filters:ResultFilters=Depends(result_filter_query)):
+    with connect() as db:
+        db.execute('BEGIN')
+        data=analyze(db,group_id,current,metric,include_absent,pass_ratio,excellent_ratio,room_tag_id,filters)
+        group=require(db,group_id,'groups')
+        subject=get(db,group.get('subject_id'),'subjects') or {}
+    if view=='ranking':
+        from .class_ranking import subject_tables
+        return ranking_response(subject_tables(data,subject.get('name',data['group_name']),bool(group.get('conversion_id'))),'class-subject-ranking',format)
     if view=='students':
         headers=['考号','姓名','班级','状态','原始分','赋分','当前可见范围排名','班级排名','考场','年级']
         rows=([STATUS_NAMES.get(r.get(k),r.get(k)) if k=='status' else r.get(k) for k in ('candidate_number','name','class_name','status','total','converted_score','scope_rank','class_rank')]+['、'.join(t.get('label',t['name']) for t in r.get('room_tags',[])),r.get('grade')] for r in data['students'])
@@ -241,17 +278,23 @@ def export_group(group_id:str,view:str='classes',metric:str='raw',include_absent
 
 
 @router.get('/analysis/project/export')
-def export_project(project_id:str,current=Depends(user),view:Literal['summary','items']='summary',format:FileFormat|None=None):
+def export_project(project_id:str,current=Depends(user),view:Literal['summary','items','class-summary']='summary',format:FileFormat|None=None,room_tag_id:str|None=None,include_absent:bool=False,filters:ResultFilters=Depends(result_filter_query)):
+    if view=='class-summary':
+        from .class_ranking import project_tables
+        data=project_class_summary(project_id,current,room_tag_id,include_absent,filters)
+        return ranking_response(project_tables(data),'class-summary',format or 'xlsx')
     if view == 'items':
         if format == 'csv':
             raise HTTPException(422, '多题卡小题分请使用 Excel 工作簿')
+        selected_students={row['student_id'] for row in project_analysis(project_id,current,room_tag_id,filters)['students']}
         with connect() as db:
             db.execute('BEGIN')
             _, subjects, groups = project_result_groups(db, project_id, current)
+            if filters.group_ids:groups=[group for group in groups if group['id'] in filters.group_ids]
             grades = {g['id']: g['name'] for g in objects(db, 'grades')}
             def sheets():
                 for group in groups:
-                    students = results_for(db, group['id'], current)
+                    students = [row for row in results_for(db, group['id'], current) if row['student_id'] in selected_students]
                     if not students and current['role'] not in ('admin', 'manager'):
                         continue
                     subject = subjects[group['subject_id']]['name']
@@ -260,7 +303,7 @@ def export_project(project_id:str,current=Depends(user),view:Literal['summary','
                     title = '·'.join(part for part in (subject, grade, card) if part)
                     yield question_score_table(db, group, students, title)
             return workbook_response(sheets(), 'project-question-scores')
-    data=project_analysis(project_id,current)
+    data=project_analysis(project_id,current,room_tag_id,filters)
     columns=data['columns']
     headers=['考号','姓名','班级','已完成记录','缺考记录','待结分记录','未扫描记录','已记录原始分合计','已记录采用分合计']
     for col in columns:headers.extend('/'.join(v for v in (col['subject'],col['grade'],col['group']) if v)+f' {name}' for name in ('原始分','赋分','状态','考场'))
@@ -284,11 +327,11 @@ def detail_question(db,group_id,question_id):
 
 
 @router.get('/analysis/groups/{group_id}/questions/{question_id}')
-def answer_details(group_id:str,question_id:str,room_tag_id:str|None=None,include_absent:bool=False,current=Depends(user)):
+def answer_details(group_id:str,question_id:str,room_tag_id:str|None=None,include_absent:bool=False,current=Depends(user),filters:ResultFilters=Depends(result_filter_query)):
     from .room_tags import includes
     with connect() as db:
         db.execute('BEGIN')
-        rows=results_for(db,group_id,current,convert_scores=False)
+        rows=filter_rows(results_for(db,group_id,current,convert_scores=False),filters,room_tag_id)
         q=detail_question(db,group_id,question_id)
         subs={s['student_id']:s for s in find(db,'submissions',group_id=group_id)}
         label=question_label(q)

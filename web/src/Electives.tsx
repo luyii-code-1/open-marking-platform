@@ -37,14 +37,14 @@ export function ElectiveManagement(){
 }
 
 export function SubjectCatalog(){
-  const tags=useResource<Row[]>('/subject-tags',[]),[name,setName]=useState(''),[busy,setBusy]=useState(false),[editing,setEditing]=useState<Row|null>(null),[editName,setEditName]=useState(''),{message}=App.useApp()
-  async function add(){setBusy(true);try{await send('/subject-tags',{name:name.trim()});await tags.reload();setName('')}catch(e){message.error((e as Error).message)}finally{setBusy(false)}}
-  async function save(){if(!editing)return;setBusy(true);try{await send('/subject-tags/'+editing.id,{name:editName.trim()},'PUT');await tags.reload();setEditing(null);message.success('科目名称已保存')}catch(e){message.error((e as Error).message)}finally{setBusy(false)}}
+  const tags=useResource<Row[]>('/subject-tags',[]),[name,setName]=useState(''),[busy,setBusy]=useState(false),[editing,setEditing]=useState<Row|null>(null),[open,setOpen]=useState(false),{message}=App.useApp()
+  function edit(row?:Row){setEditing(row||null);setName(row?.name||'');setOpen(true)}
+  async function save(){setBusy(true);try{await send(editing?'/subject-tags/'+editing.id:'/subject-tags',{name:name.trim()},editing?'PUT':'POST');await tags.reload();setOpen(false);message.success(editing?'科目名称已保存':'科目已添加')}catch(e){message.error((e as Error).message)}finally{setBusy(false)}}
   return <><Card title="全校科目">{tags.error&&<Alert type="error" showIcon message={tags.error}/>}<Space wrap style={{marginBottom:12}}>
-    <Input placeholder="科目名称" value={name} onChange={e=>setName(e.target.value)} maxLength={100}/><Button type="primary" disabled={!name.trim()||busy} onClick={add}>添加科目</Button>
+    <Button type="primary" disabled={busy} onClick={()=>edit()}>添加科目</Button>
     <Upload accept=".csv,.xlsx" showUploadList={false} disabled={busy} beforeUpload={async file=>{const body=new FormData();body.append('file',file);setBusy(true);try{const result=await request<{created:number}>('/subject-tags/import',{method:'POST',body});await tags.reload();message.success(`新增 ${result.created} 个科目`)}catch(e){message.error((e as Error).message)}finally{setBusy(false)}return false}}><Button title="Excel 或 CSV，表头为“科目”">导入科目表</Button></Upload>
-    </Space><Table<Row> rowKey="id" dataSource={tags.data} loading={tags.loading} columns={[{title:'科目',dataIndex:'name'},{title:'操作',render:(_,row)=><Space><Button disabled={busy} onClick={()=>{setEditing(row);setEditName(row.name)}}>编辑</Button><DeleteRecord kind="subject-tags" row={row} reload={tags.reload}/></Space>}]}/></Card>
-    <Modal title="修改科目名称" open={!!editing} onCancel={()=>!busy&&setEditing(null)} onOk={save} confirmLoading={busy} okButtonProps={{disabled:!editName.trim()}}><Input aria-label="科目名称" value={editName} onChange={e=>setEditName(e.target.value)} maxLength={100}/></Modal></>
+    </Space><Table<Row> rowKey="id" dataSource={tags.data} loading={tags.loading} columns={[{title:'科目',dataIndex:'name'},{title:'操作',render:(_,row)=><Space><Button disabled={busy} onClick={()=>edit(row)}>编辑</Button><DeleteRecord kind="subject-tags" row={row} reload={tags.reload}/></Space>}]}/></Card>
+    <Modal title={editing?'修改科目名称':'添加科目'} open={open} onCancel={()=>!busy&&setOpen(false)} onOk={save} confirmLoading={busy} okButtonProps={{disabled:!name.trim()}}><Input autoFocus aria-label="科目名称" placeholder="输入科目名称" value={name} onChange={e=>setName(e.target.value)} onPressEnter={()=>{if(name.trim()&&!busy)void save()}} maxLength={100}/></Modal></>
 }
 
 export function CatalogPicker({value=[],onChange}:{value?:string[];onChange?:(ids:string[])=>void}){
