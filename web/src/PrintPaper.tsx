@@ -86,7 +86,7 @@ export function Paper({value,page,selected,draw,answerMode=false,forbiddenMode=f
   const visible=preview?.paper===value.paper&&preview.page===page?preview:null,pending=preview?.key!==key
   function minimumY(x:number){const panels=value.paper==='A3'?(value.sheet_columns||2):1,panelWidth=(width-24-(panels-1)*8)/panels;return (value.layout_version||2)>=3&&(page!==1||x>=12+panelWidth)?35:100}
   function point(event:React.PointerEvent){const rect=svg.current!.getBoundingClientRect(),x=Math.max(0,Math.min(width-8,(event.clientX-rect.left)/rect.width*width));return{x,y:Math.max(0,Math.min(height-8,(event.clientY-rect.top)/rect.height*height))}}
-  function regionAt(p:{x:number;y:number},s:Drag):Region{if(s.note)return noteRegion(value,page,s,p,s.region,s.resize);if(!s.forbidden&&value.questions.find(q=>q.id===s.qid)?.type==='subjective')return subjectiveRegion(value,page,s,p,s.region);if(s.forbidden)return forbiddenRegion(value,page,s,p,s.region,s.resize);const bottom=value.print_style==='standard-v2'?270:height-8,x=s.region?Math.max(0,Math.min(width-8-s.region.width,s.region.x+p.x-s.x)):Math.min(s.x,p.x);return s.region?{...s.region,x,y:Math.max(minimumY(x),Math.min(bottom-s.region.height,s.region.y+p.y-s.y))}:{page,x,y:Math.max(minimumY(x),Math.min(s.y,p.y)),width:Math.abs(s.x-p.x),height:Math.abs(Math.min(s.y,bottom)-Math.min(p.y,bottom))}}
+  function regionAt(p:{x:number;y:number},s:Drag):Region{if(s.note)return noteRegion(value,page,s,p,s.region,s.resize);if(!s.forbidden&&value.questions.find(q=>q.id===s.qid)?.type==='subjective')return subjectiveRegion(value,page,s,p,s.region,s.resize);if(s.forbidden)return forbiddenRegion(value,page,s,p,s.region,s.resize);const bottom=value.print_style==='standard-v2'?270:height-8,x=s.region?Math.max(0,Math.min(width-8-s.region.width,s.region.x+p.x-s.x)):Math.min(s.x,p.x);return s.region?{...s.region,x,y:Math.max(minimumY(x),Math.min(bottom-s.region.height,s.region.y+p.y-s.y))}:{page,x,y:Math.max(minimumY(x),Math.min(s.y,p.y)),width:Math.abs(s.x-p.x),height:Math.abs(Math.min(s.y,bottom)-Math.min(p.y,bottom))}}
   function finish(event:React.PointerEvent){
     const s=start.current
     start.current=null
@@ -107,10 +107,11 @@ export function Paper({value,page,selected,draw,answerMode=false,forbiddenMode=f
       onForbidden?.(areas)
     }else if(next.width>2&&next.height>2){
       const rounded=Object.fromEntries(Object.entries(next).map(([k,v])=>[k,Math.round(v*1000)/1000])) as Region
-      const occupied=value.questions.flatMap(q=>q.regions.filter((_,i)=>q.id!==s.qid||i!==s.index))
+      const reflow=value.auto_subjective_layout&&value.questions.find(q=>q.id===s.qid)?.type==='subjective'
+      const occupied=value.questions.filter(q=>!reflow||q.type!=='subjective').flatMap(q=>q.regions.filter((_,i)=>q.id!==s.qid||i!==s.index))
       occupied.push(...(value.forbidden_regions||[]))
-      if(value.questions.find(q=>q.id===s.qid)?.type!=='subjective')occupied.push(...(value.print_notes||[]))
-      if(occupied.some(r=>intersects(r,rounded)))message.warning('答题区域重叠，请重新选取')
+      occupied.push(...(value.print_notes||[]))
+      if(!reflow&&occupied.some(r=>intersects(r,rounded)))message.warning('答题区域重叠，请重新选取')
       else onRegion(s.qid,rounded,s.index)
     }
   }
@@ -132,6 +133,7 @@ export function Paper({value,page,selected,draw,answerMode=false,forbiddenMode=f
       {visible&&<image href={visible.url} x={0} y={0} width={width} height={height} preserveAspectRatio="none" pointerEvents="none"/>}
       {value.questions.flatMap(q=>q.regions.map((r,index)=>r.page!==page?null:<g key={`${q.id}-${index}`} pointerEvents={forbiddenMode||noteMode||draw&&!readOnly?'none':undefined}>
         <rect data-question-id={q.id} x={r.x} y={r.y} width={r.width} height={r.height} fill={selected===q.id?'#0866ff12':'transparent'} stroke={selected===q.id?'#0866ff':'transparent'} strokeWidth={.4} onPointerDown={e=>{e.stopPropagation();onSelect(q.id);svg.current?.focus();if(!editorBox&&!readOnly&&!draw&&!answerMode){start.current={...point(e),qid:q.id,index,region:r};svg.current!.setPointerCapture(e.pointerId)}}}><title>第{q.number}题 · 区域{index+1}</title></rect>
+        {selected===q.id&&q.type==='subjective'&&!readOnly&&!draw&&!answerMode&&!editorBox&&<rect aria-label={`调整第${q.number}题区域高度`} x={r.x+r.width/2-8} y={r.y+r.height-1.5} width={16} height={3} rx={1} fill="#0866ff" style={{cursor:'ns-resize'}} onPointerDown={event=>{event.stopPropagation();start.current={...point(event),qid:q.id,index,region:r,resize:true};svg.current!.setPointerCapture(event.pointerId)}}><title>上下拖动调整题区高度</title></rect>}
         {answerMode&&q.type!=='subjective'&&choiceCenters(q,r).map(({letter,x,y})=><rect key={letter} role="button" aria-label={`第${q.number}题选项${letter}`} aria-pressed={q.answer.includes(letter)} x={x-(q.choice_style==='bracket'?4:2)} y={y-1.5} width={q.choice_style==='bracket'?8:compactChoice.width} height={3} rx={.4} fill={q.answer.includes(letter)?'#0866ff35':'transparent'} stroke={q.answer.includes(letter)?'#0866ff':'transparent'} strokeWidth={.3} style={{cursor:readOnly?'default':'pointer'}} onPointerDown={e=>{e.stopPropagation();svg.current?.focus()}} onClick={()=>{if(!readOnly)onAnswer?.(q.id,letter)}}><title>第{q.number}题 · {letter}</title></rect>)}
       </g>))}
       {noteMode&&<>
@@ -149,7 +151,7 @@ export function Paper({value,page,selected,draw,answerMode=false,forbiddenMode=f
       {editorBox&&editing&&<foreignObject key={editing.kind+editing.id+editing.index} x={editorBox.x} y={editorBox.y} width={editorBox.w} height={editorBox.h}
         onPointerDown={e=>e.stopPropagation()} onDoubleClick={e=>e.stopPropagation()} onKeyDown={e=>{e.stopPropagation();if(e.key==='Escape'&&!e.nativeEvent.isComposing)onEdit?.(null)}}>
         <div className="paper-text-editor" style={{width:editorBox.w*96/25.4,height:editorBox.h*96/25.4,transform:'scale('+25.4/96+')'}}>
-          <RichEditor textStyle={{fontSize:(value.font_size??9)+"pt",lineHeight:(value.leading??13)+"pt"}} autoFocus toolbarHost={toolsHost} value={editNote?.html??prompt?.content_html??''} onChange={html=>onTextChange?.(editing,html)}/>
+          <RichEditor textStyle={{fontFamily:"OMP Sans",fontSize:(value.font_size??9)+"pt",lineHeight:(value.leading??13)+"pt"}} autoFocus toolbarHost={toolsHost} value={editNote?.html??prompt?.content_html??''} onChange={html=>onTextChange?.(editing,html)}/>
         </div>
       </foreignObject>}
       {draft&&<rect x={draft.x} y={draft.y} width={draft.width} height={draft.height} stroke="#0866ff" fill="#0866ff20" strokeDasharray="2 1" strokeWidth={.6} pointerEvents="none"/>}

@@ -2,12 +2,12 @@ import io
 import pytest
 from reportlab.pdfgen.canvas import Canvas
 from server import paper
-from server.richtext import flowables,layout
+from server.richtext import PaperCanvas,EnclosedText,flowables,layout
 
 
 def test_word_style_and_table_pdf_layout():
     html='<p><span style="font-weight:700">题目标题</span>与<em>说明</em>，x<sup>2</sup></p><table><tbody><tr><th>项目</th><th>数值</th></tr><tr><td>A</td><td>10</td></tr></tbody></table>'
-    output=io.BytesIO();canvas=Canvas(output)
+    output=io.BytesIO();canvas=PaperCanvas(output)
     height=layout(html,300,200,canvas,30,700)
     canvas.save()
     assert 20<height<200 and output.getvalue().startswith(b'%PDF')
@@ -84,3 +84,73 @@ def test_individual_line_leading_and_vector_rules():
     assert b'/Subtype /Image' not in data and data.count(b' re f')==2
     with pytest.raises(ValueError):
         layout(html.replace('"24"','"3"'),300,100,font_size=13)
+
+
+def test_font_family_size_colors_and_character_styles():
+    html='<p><span style="font-family:OMP Serif;font-size:18pt;color:#123456;background-color:#def;font-weight:700;font-style:italic;text-decoration:underline line-through">中文 Abc</span> x<sup>2</sup> H<sub>2</sub>O</p>'
+    paragraph=flowables(html,300)[0]
+    styled=next(f for f in paragraph.frags if '中文' in getattr(f,'text',''))
+    assert styled.fontName=='OMP-Paper-Serif-BoldItalic' and styled.fontSize==18
+    assert styled.textColor.hexval()=='0x123456' and styled.backColor.hexval()=='0xddeeff'
+    assert len(styled.us_lines)==2
+    shifts=[f.rise for f in paragraph.frags]
+    assert max(shifts)>0 and min(shifts)<0
+    assert layout(html,300,1000)>18
+
+
+def test_paragraph_spacing_indents_and_measurement_height():
+    html='<p data-line-leading="30" style="text-align:right;margin-left:24pt;margin-right:12pt;text-indent:-12pt;margin-top:6pt;margin-bottom:9pt">段落设置</p>'
+    flows=flowables(html,300)
+    paragraph=flows[1]
+    assert paragraph.style.leftIndent==24 and paragraph.style.rightIndent==12
+    assert paragraph.style.firstLineIndent==-12 and paragraph.style.alignment==2
+    assert layout(html,300,1000000)==45
+    assert layout(html,300,45)==45
+    with pytest.raises(ValueError,match='超过答题区域'):layout(html,300,44)
+    nested='<div style="margin-left:20pt;margin-right:10pt;margin-top:4pt;margin-bottom:5pt;text-align:center"><p data-line-leading="20">第一段</p><p data-line-leading="20">第二段</p></div>'
+    assert layout(nested,300,1000000)==55
+
+
+def test_numbered_lists_bullets_and_equal_width_table():
+    from reportlab.platypus import Paragraph,Table
+    paragraphs=[f for f in flowables('<ol start="3" type="A"><li>甲</li><li>乙</li></ol><ul style="list-style-type:square"><li>丙</li></ul>',300) if isinstance(f,Paragraph)]
+    assert [p.bulletText for p in paragraphs]==['C.','D.','▪']
+    nested=flowables('<ol start="9" type="i"><li><p>项目</p><ul><li>子项目</li></ul></li></ol>',300)
+    assert nested and layout('<ol start="9" type="i"><li><p>项目</p><ul><li>子项目</li></ul></li></ol>',300,1000000)>26
+    table=next(f for f in flowables('<table><tr><th>栏目</th><th>内容</th></tr><tr><td><p>文字</p></td><td>数值 10</td></tr></table>',300) if isinstance(f,Table))
+    assert table._argW==[150,150]
+    with pytest.raises(ValueError,match='等宽单元格'):flowables('<table><tr><td colspan="2">合并</td></tr></table>',300)
+
+
+def test_enclosed_text_is_indivisible_vector_and_keeps_source_text():
+    html='<p>圈选<span data-enclosed-text="甲乙" contenteditable="false" style="font-family:OMP Serif;font-size:18pt;color:#f00">甲乙</span>之后</p>'
+    paragraph=flowables(html,300)[0]
+    circled=next(f.cbDefn for f in paragraph.frags if isinstance(getattr(getattr(f,'cbDefn',None),'image',None),EnclosedText))
+    assert circled.image.text=='甲乙' and circled.image.font=='OMP-Paper-Serif'
+    assert circled.image.color.hexval()=='0xff0000'
+    output=io.BytesIO();canvas=PaperCanvas(output,pageCompression=0);drawn=[]
+    original=canvas.drawCentredString
+    def draw_text(x,y,text,*args,**kwargs):
+        drawn.append(text);return original(x,y,text,*args,**kwargs)
+    canvas.drawCentredString=draw_text
+    layout(html,300,100,canvas,20,700);canvas.save()
+    assert drawn==['甲乙']
+    data=output.getvalue()
+    assert b'/Subtype /Image' not in data and b' c\n' in data
+    with pytest.raises(ValueError,match='带圈文字超过'):layout(html,20,100)
+
+
+@pytest.mark.parametrize('html',[
+    '<span style="font-size:5pt">文字</span>',
+    '<span style="font-size:37pt">文字</span>',
+    '<span style="color:red">文字</span>',
+    '<span style="background-color:url(secret)">文字</span>',
+    '<p style="margin-left:145pt">文字</p>',
+    '<p style="text-indent:-73pt">文字</p>',
+    '<p style="text-indent:-12pt">文字</p>',
+    '<p style="margin-top:73pt">文字</p>',
+    '<p data-line-leading="73">文字</p>',
+    '<span data-enclosed-text="一二三四五六七八九">一二三四五六七八九</span>',
+])
+def test_invalid_word_style_values_are_rejected(html):
+    with pytest.raises(ValueError):layout(html,300,1000)

@@ -5,8 +5,9 @@ import {Table} from './DataTable'
 import {Button} from './Button'
 import {useResource,type Row} from './api'
 
-export function AnswerDetails({group,q,room,absent,onClose}:{group:string;q:Row;room?:string;absent:boolean;onClose:()=>void}){
-  const params=new URLSearchParams({include_absent:String(absent)})
+export function AnswerDetails({group,q,room,absent,onClose,query}:{group:string;q:Row;room?:string;absent:boolean;onClose:()=>void;query?:URLSearchParams}){
+  const params=new URLSearchParams(query)
+  params.set('include_absent',String(absent))
   if(room)params.set('room_tag_id',room)
   const {data,loading,error}=useResource<any>(`/analysis/groups/${group}/questions/${q.id}?${params}`,null)
   const [image,setImage]=useState<Row|null>(null)

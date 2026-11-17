@@ -12,7 +12,7 @@ import { focusScoreInput, previousReview, scoreInputError, scorePresets } from '
 import { useReviewWorkspace } from './ReviewWorkspace'
 import { cacheReview, enqueueReview, forgetReview, getReview, hasUnsentReview, listReviews, saveReviewDraft, settleReviewWrites, type ReviewRecord } from './reviewStore'
 import { useUnsavedChanges } from './useNavigation'
-import { request, send, useResource, watchChanges, type Row, type Template } from './api'
+import { ApiError, request, send, useResource, watchChanges, type Row, type Template } from './api'
 import { ErrorNotice } from './Management'
 
 export function Marking({ admin, groupId, initialTemplateId, initialQuestionId, onExit }: { admin: boolean; groupId?: string; initialTemplateId?: string; initialQuestionId?: string; onExit?: () => void }) {
@@ -70,11 +70,13 @@ export function Marking({ admin, groupId, initialTemplateId, initialQuestionId, 
     const local=(await listReviews(workspace.user.id)).filter(r=>r.template.id===templateId&&r.question.id===questionId)
     const drafts=local.filter(r=>r.status==='draft'&&r.task.id!==from&&(hasUnsentReview(r)||workspace.offline||r.task.status!=='claimed'||r.task.expires_at*1000>Date.now()))
     const cached=drafts.find(hasUnsentReview)||drafts.at(-1)
-    if(cached)return cached
-    if(workspace.offline||!navigator.onLine)return null
+    if(cached&&hasUnsentReview(cached))return cached
+    if(workspace.offline||!navigator.onLine)return cached||null
     const held=local.filter(r=>r.operation).map(r=>r.task.id)
     if(from&&!held.includes(from))held.push(from)
-    const row=await send<Row|null>('/tasks/claim',{template_id:templateId,question_id:questionId,pending_task_ids:held})
+    let row:Row|null
+    try{row=await send<Row|null>('/tasks/claim',{template_id:templateId,question_id:questionId,pending_task_ids:held})}
+    catch(error){if(cached&&(!(error instanceof ApiError)||error.status===403))return cached;throw error}
     if(!row||held.includes(row.id))return null
     const saved=await cacheTask(row)
     return saved.status==='draft'?saved:null
@@ -97,7 +99,8 @@ export function Marking({ admin, groupId, initialTemplateId, initialQuestionId, 
     const prefetched=prepared&&await prepared.catch(()=>null)
     if(prefetched){
       const latest=await getReview(workspace.user.id,prefetched.task.id)
-      if(latest?.status==='draft'&&(latest.task.status!=='claimed'||latest.task.expires_at*1000>Date.now()||workspace.offline||hasUnsentReview(latest))){showRecord(latest);return}
+      const arbitrationWaiting=(progress.data.my_arbitration_pending||0)>0
+      if(latest?.status==='draft'&&(!arbitrationWaiting||latest.task.review_role==='arbitration'||hasUnsentReview(latest)||workspace.offline)&&(latest.task.status!=='claimed'||latest.task.expires_at*1000>Date.now()||workspace.offline||hasUnsentReview(latest))){showRecord(latest);return}
     }
     const saved=await availableTask(afterSkip?undefined:from)
     if(saved)showRecord(saved);else clearTask()
@@ -113,7 +116,7 @@ export function Marking({ admin, groupId, initialTemplateId, initialQuestionId, 
     if(!initialTemplateId||!initialQuestionId||!workspace.ready||entered.current)return
     const drafts=workspace.records.filter(r=>r.template.id===initialTemplateId&&r.question.id===initialQuestionId&&r.status==='draft')
     const cached=drafts.find(hasUnsentReview)||drafts.at(-1)
-    if(cached){entered.current=true;showRecord(cached);return}
+    if(cached&&(workspace.offline||!navigator.onLine||hasUnsentReview(cached))){entered.current=true;showRecord(cached);return}
     if(!template||!question||workspace.offline||workspace.updateLocked||workspace.storageError)return
     entered.current=true
     void next()
@@ -194,7 +197,7 @@ export function Marking({ admin, groupId, initialTemplateId, initialQuestionId, 
       <ErrorNotice error={error||workspace.storageError||(workspace.offline?'':templates.error||assignments.error)} />
       {workspace.offline&&<Alert type="info" showIcon message="离线评阅：评分保存在本机，恢复连接后上传。"/>}
     </div>
-    <div className="marking-context"><span title={origin}>{origin||'请选择阅卷任务'}{question&&` / 第 ${questionLabel(question)} 题`}{task?.grade_name&&` · ${task.grade_name}`}{task?.room_tags?.length?` · ${task.room_tags.map((t:Row)=>t.label||t.name).join('、')}`:''}</span>{record?.status==='draft'&&saveState&&<Tag>{saveState}</Tag>}</div>
+    <div className="marking-context"><span title={origin}>{origin||'请选择阅卷任务'}{question&&` / 第 ${questionLabel(question)} 题`}{task?.grade_name&&` · ${task.grade_name}`}{task?.room_tags?.length?` · ${task.room_tags.map((t:Row)=>t.label||t.name).join('、')}`:''}</span>{task?.review_role==='arbitration'&&<Tag color="orange">仲裁</Tag>}{record?.status==='draft'&&saveState&&<Tag>{saveState}</Tag>}</div>
 
     {task&&question?<main className="marking-layout">
       <section className="marking-image-panel" aria-label="作答图像区">

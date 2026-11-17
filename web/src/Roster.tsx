@@ -6,19 +6,27 @@ import { Button } from './Button'
 import { download,request,send,useResource,type Row } from './api'
 import { HierarchyPicker } from './HierarchyPicker'
 import { ErrorNotice } from './EntityTable'
+import {RecordPicker} from './RecordPicker'
 
+type CandidateList={group_id:string;grade_id:string;classes:Row[];students:Row[];roster_count:number}
 type ImportReport={preview_sha:string;total_rows:number;duplicates:number;matched_count:number;students:Row[];errors:any[];warnings:any[]}
 export function Roster({groupId}:{groupId?:string}){
   const groups=useResource<Row[]>('/groups',[]),grades=useResource<Row[]>('/grades',[])
   const [selectedGroup,setGroup]=useState(groupId||''),group=groupId||selectedGroup,[gradeId,setGrade]=useState<string>(),[busy,setBusy]=useState(false),{message}=App.useApp()
   const resource=useResource<any>(group?`/groups/${group}/roster`:null,null),current=groups.data.find(g=>g.id===group)
   const [open,setOpen]=useState(false),[file,setFile]=useState<File>(),[report,setReport]=useState<ImportReport>(),[confirmed,setConfirmed]=useState(false),[importError,setImportError]=useState('')
-  const [adding,setAdding]=useState(false)
-  const students=useResource<Row[]>(adding?'/students':null,[]),classes=useResource<Row[]>(adding?'/classes':null,[])
+  const [adding,setAdding]=useState(false),[checked,setChecked]=useState<string[]>([])
+  const candidates=useResource<CandidateList|null>(adding&&group?`/groups/${group}/roster/candidates`:null,null)
   const data=resource.data?.group_id===group?resource.data:null,frozen=!!current?.frozen,selected=data?.mode==='selected'
-  useEffect(()=>{setGrade(current?.grade_id);setOpen(false);setFile(undefined);setReport(undefined);setImportError('')},[group,current?.grade_id])
+  useEffect(()=>{setGrade(current?.grade_id);setOpen(false);setAdding(false);setChecked([]);setFile(undefined);setReport(undefined);setImportError('')},[group,current?.grade_id])
   async function refresh(){await Promise.all([groups.reload(),resource.reload()])}
   async function saveGrade(){if(!gradeId)return;setBusy(true);try{await send(`/groups/${group}/grade`,{grade_id:gradeId},'PUT');await refresh();message.success('所属年级已保存')}catch(e){message.error((e as Error).message)}finally{setBusy(false)}}
+  async function removeStudents(ids:string[]){
+    if(!ids.length)return
+    setBusy(true)
+    try{const result=await send<{removed:number;retained_submissions:number;count:number}>(`/groups/${group}/roster/remove-students`,{student_ids:ids,confirm_retained:true});setChecked([]);await refresh();message.success(`已移出 ${result.removed} 名应考学生${result.retained_submissions?`，${result.retained_submissions} 份已有答卷及其评分、成绩继续保留`:''}`)}
+    catch(e){message.error((e as Error).message)}finally{setBusy(false)}
+  }
   async function useGrade(){setBusy(true);try{await send(`/groups/${group}/roster`,{mode:'grade'},'PUT');await refresh();message.success('已使用年级全体学生')}catch(e){message.error((e as Error).message)}finally{setBusy(false)}}
   async function preview(next:File){
     setFile(next);setReport(undefined);setConfirmed(false);setImportError('');setBusy(true)
@@ -35,6 +43,9 @@ export function Roster({groupId}:{groupId?:string}){
     try{const body=new FormData();body.append('file',file);body.append('action','import');body.append('preview_sha',report.preview_sha);body.append('confirm_warnings',String(confirmed));const result=await request<{expected_students:number}>(`/groups/${group}/roster/import`,{method:'POST',body});await refresh();setOpen(false);message.success(`已导入 ${result.expected_students} 名应考学生`)}
     catch(e){setImportError((e as Error).message)}finally{setBusy(false)}
   }
+  const rosterStudents:Row[]=data?.students||[],candidateData=candidates.data?.group_id===group?candidates.data:null
+  const rosterGrades=[...new Map(rosterStudents.map(s=>[String(s.grade_id||s.grade||''),s.grade||'未设置年级'])).entries()].filter(([value])=>value).map(([value,label])=>({value,label}))
+  const rosterClasses=[...new Map(rosterStudents.map(s=>[s.class_id,{value:s.class_id,label:[s.grade,s.class_name].filter(Boolean).join(' · ')}])).values()]
   const issues=report?[...report.errors.map(v=>({...v,type:'需修正'})),...report.warnings.map(v=>({...v,type:'需确认'}))]:[]
   return <Space direction="vertical" size={24} style={{width:'100%'}}>
     {!groupId&&<HierarchyPicker value={group} onChange={setGroup}/>}
@@ -42,16 +53,20 @@ export function Roster({groupId}:{groupId?:string}){
     {group&&<><Card title="应考名单" extra={<Button disabled={busy} onClick={refresh}>刷新</Button>}>
       <Space direction="vertical" size={24} style={{width:'100%'}}>
         <div className="roster-summary"><Statistic title="应考学生" value={data?.students.length||0}/><div><Tag>{selected?'指定名单':data?.dynamic?'年级全体':'待设置'}</Tag><Typography.Paragraph type="secondary" style={{marginTop:8,marginBottom:0}}>{selected?'已保存名单成员，学生资料实时关联。':'默认使用所属年级当前全体学生，走班科目可导入指定名单。'}</Typography.Paragraph></div></div>
-        <Space wrap size={16}><Button disabled={busy||frozen||!current?.grade_id} onClick={async()=>{setBusy(true);try{const r=await send('/groups/'+group+'/roster/elective');await refresh();message.success('已保存 '+r.count+' 名应考学生')}catch(e){message.error((e as Error).message)}finally{setBusy(false)}}}>使用本学科选科名单</Button><Button disabled={busy||frozen||!current?.grade_id} onClick={()=>setAdding(true)}>补加学生</Button><Button type="primary" icon={<UploadOutlined/>} disabled={busy||frozen||!current?.grade_id} onClick={()=>{setFile(undefined);setReport(undefined);setImportError('');setConfirmed(false);setOpen(true)}}>{selected?'重新导入名单':'导入指定名单'}</Button><Button icon={<DownloadOutlined/>} disabled={busy} onClick={()=>download(`/groups/${group}/roster/template`,'应考名单模板.xlsx').catch(e=>message.error(e.message))}>下载Excel模板</Button>{selected&&<Popconfirm title="改用所属年级全体学生？" description="现有答卷和成绩继续保留，应考范围改为该年级当前所有学生。" onConfirm={useGrade}><Button disabled={busy||frozen}>使用年级全体学生</Button></Popconfirm>}</Space>
+        <Space wrap size={16}><Button disabled={busy||frozen||!current?.grade_id} onClick={async()=>{setBusy(true);try{const r=await send('/groups/'+group+'/roster/elective');await refresh();message.success('已保存 '+r.count+' 名应考学生')}catch(e){message.error((e as Error).message)}finally{setBusy(false)}}}>同步选科管理名单</Button><Button disabled={busy||frozen||!current?.grade_id} onClick={()=>setAdding(true)}>补加学生</Button><Button type="primary" icon={<UploadOutlined/>} disabled={busy||frozen||!current?.grade_id} onClick={()=>{setFile(undefined);setReport(undefined);setImportError('');setConfirmed(false);setOpen(true)}}>{selected?'重新导入名单':'导入指定名单'}</Button><Button icon={<DownloadOutlined/>} disabled={busy} onClick={()=>download(`/groups/${group}/roster/template`,'应考名单模板.xlsx').catch(e=>message.error(e.message))}>下载Excel模板</Button>{selected&&<Popconfirm title="改用所属年级全体学生？" description="现有答卷和成绩继续保留，应考范围改为该年级当前所有学生。" onConfirm={useGrade}><Button disabled={busy||frozen}>使用年级全体学生</Button></Popconfirm>}</Space>
         {!current?.grade_id&&<Alert type="info" showIcon message="请先设置所属年级，再导入名单。"/>}
         {frozen&&<Alert type="info" message="成绩已发布，发起复核后可调整应考名单。"/>}
       </Space>
     </Card>
     <Card title="所属年级"><Form layout="vertical" style={{maxWidth:420}}><Form.Item label="全局年级"><Select disabled={busy||frozen} value={gradeId} placeholder="选择年级" onChange={setGrade} options={grades.data.filter(g=>!g.archived||g.id===current?.grade_id).map(g=>({label:g.name,value:g.id}))}/></Form.Item><Button disabled={busy||frozen||!gradeId||gradeId===current?.grade_id} loading={busy} onClick={saveGrade}>保存所属年级</Button></Form></Card>
-    <Card title="学生"><Table rowKey="id" loading={resource.loading} dataSource={data?.students||[]} pagination={{defaultPageSize:50,showSizeChanger:true}} columns={[{title:'准考证号',dataIndex:'candidate_number'},{title:'姓名',dataIndex:'name'},{title:'年级',dataIndex:'grade'},{title:'班级',dataIndex:'class_name'},{title:'采集状态',dataIndex:'status',render:value=><Tag color={value==='scanned'?'green':undefined}>{value==='unscanned'?'未扫描':value==='absent'?'已确认缺考':'已扫描'}</Tag>}]}/></Card>
-    <Modal title="补加应考学生" open={adding} onCancel={()=>setAdding(false)} footer={null}>
-      <Table<Row> rowKey="id" loading={students.loading||classes.loading} dataSource={students.data.filter(s=>classes.data.some(c=>c.id===s.class_id&&c.grade_id===current?.grade_id)&&!data?.students.some((r:Row)=>r.id===s.id))} columns={[{title:'准考证号',dataIndex:'candidate_number'},{title:'姓名',dataIndex:'name'},{title:'班级',render:(_,s)=>classes.data.find(c=>c.id===s.class_id)?.name},{title:'操作',render:(_,s)=><Button disabled={busy} onClick={async()=>{setBusy(true);try{await send('/groups/'+group+'/roster/add-students',{student_ids:[s.id]});await refresh();message.success('已补加 '+s.name)}catch(e){message.error((e as Error).message)}finally{setBusy(false)}}}>添加</Button>}]}/>
-    </Modal>
+    <Card title="应考学生" extra={<Popconfirm title={`移出所选 ${checked.length} 名应考学生？`} description="仅调整当前题卡的应考名单，已有答卷、评分和成绩继续保留。" onConfirm={()=>removeStudents(checked)}><Button danger disabled={busy||frozen||!checked.length}>移出所选（{checked.length}）</Button></Popconfirm>}><Table<Row> rowKey="id" loading={resource.loading} dataSource={rosterStudents} rowSelection={{selectedRowKeys:checked,onChange:keys=>setChecked(keys.map(String)),getCheckboxProps:()=>({disabled:busy||frozen})}} filterFields={[{key:'grade',label:'年级',options:rosterGrades,values:s=>[String(s.grade_id||s.grade||'')]},{key:'class',label:'班级',options:rosterClasses,values:s=>[s.class_id]},{key:'status',label:'采集状态',options:[{value:'unscanned',label:'未扫描'},{value:'scanned',label:'已扫描'},{value:'absent',label:'已确认缺考'}],values:s=>[s.status]}]} pagination={{defaultPageSize:50,showSizeChanger:true}} columns={[{title:'准考证号',dataIndex:'candidate_number'},{title:'姓名',dataIndex:'name'},{title:'年级',dataIndex:'grade'},{title:'班级',dataIndex:'class_name'},{title:'采集状态',dataIndex:'status',render:value=><Tag color={value==='scanned'?'green':undefined}>{value==='unscanned'?'未扫描':value==='absent'?'已确认缺考':'已扫描'}</Tag>},{title:'操作',key:'actions',className:'row-actions',render:(_,student)=><Popconfirm title={`将 ${student.name} 移出应考名单？`} description="仅调整当前题卡的应考名单，已有答卷、评分和成绩继续保留。" onConfirm={()=>removeStudents([student.id])}><Button danger disabled={busy||frozen}>移出名单</Button></Popconfirm>}]}/></Card>
+    <RecordPicker<Row> title="补加应考学生" open={adding} onClose={()=>setAdding(false)} value={[]} loading={candidates.loading||adding&&!candidates.loaded}
+      records={candidateData?.students||[]}
+      columns={[{title:'准考证号',dataIndex:'candidate_number'},{title:'姓名',dataIndex:'name'},{title:'年级',dataIndex:'grade'},{title:'班级',dataIndex:'class_name'},{title:'应考名单',dataIndex:'in_roster',render:value=><Tag color={value?'green':undefined}>{value?'已在名单':'可补加'}</Tag>}]}
+      fields={[{key:'class',label:'行政班',options:(candidateData?.classes||[]).map(c=>({value:c.id,label:c.name})),values:s=>[s.class_id]},{key:'membership',label:'应考名单',options:[{value:'included',label:'已在名单'},{value:'available',label:'可补加'}],values:s=>[s.in_roster?'included':'available']}]}
+      extra={<Space direction="vertical">{candidates.error?<Alert type="error" showIcon message={candidates.error} action={<Button onClick={candidates.reload}>重试</Button>}/>:<Typography.Text type="secondary">展示所属年级全部学生；已在名单的学生会保留当前状态。</Typography.Text>}</Space>}
+      label={s=>`${s.name}（${s.candidate_number}）`} onChange={async ids=>{if(!ids.length)return;setBusy(true);try{const outcome=await send<{count:number;added:number}>('/groups/'+group+'/roster/add-students',{student_ids:ids});await refresh();message[outcome.added?'success':'info'](outcome.added?`已补加 ${outcome.added} 名学生`:'所选学生均已在应考名单中')}catch(e){message.error((e as Error).message)}finally{setBusy(false)}}}
+      importer={{templateUrl:'/selection/students/template',templateName:'补加学生模板.xlsx',upload:async file=>{const body=new FormData();body.append('file',file);return (await request<{ids:string[]}>('/selection/students/match',{method:'POST',body})).ids}}}/>
     <Modal title="导入应考名单" width={860} open={open} onCancel={()=>!busy&&setOpen(false)} okText="确认导入" onOk={apply} confirmLoading={busy} okButtonProps={{disabled:!report||report.errors.length>0||!report.matched_count||report.warnings.length>0&&!confirmed}}>
       <Space direction="vertical" size={24} style={{width:'100%'}}>
         <Typography.Paragraph type="secondary" style={{margin:0}}>填写模板中的准考证号，可选填姓名。上传后自动关联全局学生，重复行合并。全部匹配后自动保存；有差异的记录会列出供确认。</Typography.Paragraph>

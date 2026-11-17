@@ -27,7 +27,10 @@ def submit(project_id,kind,payload,current):
             if plan['status']=='preview' and plan['expires_at']<time.time():raise HTTPException(409,'释放清单已过期，请重新预览')
             if plan['status']!='completed':
                 plan.update(status='queued',confirmed_at=time.time());put(db,'release-plans',plan,current['id'])
-        job=create_job(db,kind,value,project_id,current['id'])
+        if kind=='release-project' and plan.get('action')=='purge':
+            from .lifecycle import operation
+            with operation(plan['id'],None):job=create_job(db,kind,value,project_id,current['id'])
+        else:job=create_job(db,kind,value,project_id,current['id'])
     dispatch(job['id'],background=True)
     return job
 
@@ -39,6 +42,9 @@ def archive_job(identifier:str,current=Depends(admin)):
 
 @router.post('/projects/{identifier}/release-preview-jobs',status_code=202)
 def preview_job(identifier:str,body:dict,current=Depends(admin)):
+    if body.get('action')=='purge':
+        if body.get('mode','all')!='all':raise HTTPException(422,'直接清理需同时清理本地及远端扫描文件')
+        return submit(identifier,'preview-release',{'action':'purge','mode':'all'},current)
     with connect() as db:
         archive=require(db,body.get('archive_id'),'archives')
         if archive['project_id']!=identifier:raise HTTPException(422,'归档不属于该考试')
@@ -72,6 +78,6 @@ def perform(job,progress):
         return prepare(identifier,body,current,progress,body['new_plan_id'],(job['id'],job['run_token']))
     if job['kind']=='release-project':
         from .release import execute_release
-        return execute_release(identifier,body,current,progress)
+        return execute_release(identifier,body,current,progress,(job['id'],job['run_token']))
     from .archive import restore
     return restore(body['archive_id'],current['id'],progress)

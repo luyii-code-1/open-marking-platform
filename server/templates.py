@@ -15,7 +15,7 @@ from .identifiers import prepare_questions
 
 router=APIRouter(prefix='/api/v1')
 _render_slots=threading.BoundedSemaphore(2)
-DEFINITION_FIELDS=('name','subtitle','font_size','leading','paper','sides','candidate_length','layout_version','sheet_columns','notice_template','notice_layout','print_style','column_frame','uniform_subjective','print_notes','forbidden_regions','background_assets','background_asset_id','questions')
+DEFINITION_FIELDS=('name','subtitle','font_size','leading','paper','sides','candidate_length','layout_version','sheet_columns','notice_template','notice_layout','print_style','column_frame','uniform_subjective','auto_subjective_layout','print_notes','forbidden_regions','background_assets','background_asset_id','questions')
 
 
 @router.put('/groups/{group_id}/drafts/{identifier}')
@@ -145,6 +145,20 @@ def check_template(body:dict,current=Depends(admin)):
         try:check_assets(body)
         except HTTPException as error:errors.append(str(error.detail))
     return {'valid':not errors,'issues':errors}
+
+
+@router.post('/templates/subjective-layout')
+def subjective_layout(body:dict,current=Depends(admin)):
+    if body.get('group_id'):
+        with connect() as db:
+            group=require(db,body['group_id'],'groups')
+            existing=get(db,body.get('id'),'templates')
+            if group.get('frozen') or existing and existing.get('status') in ('published','superseded'):
+                raise HTTPException(409,'请先将已发布版式复制为草稿再调整题区')
+    from .subjective_layout import reflow
+    try:value,regions=reflow(body)
+    except (ValueError,KeyError,TypeError,OverflowError) as error:raise HTTPException(422,str(error))
+    return {'value':value,'regions':regions}
 
 
 @router.post('/templates/objective-preview')

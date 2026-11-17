@@ -1,0 +1,6 @@
+.result-settings-header{display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px}
+.result-settings-header>.omp-button{flex:none;margin-inline-start:-8px}
+.result-settings-summary{flex:1;min-width:180px}
+.result-settings-actions{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-inline-start:auto;flex:none}
+.result-settings-content:not([hidden]){margin-top:14px;padding-top:14px;border-top:1px solid var(--ant-color-border-secondary,#edf0f3)}
+@media(max-width:760px){.result-settings-summary{order:3;flex-basis:100%;min-width:0}.result-settings-actions{margin-inline-start:0}}

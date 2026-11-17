@@ -60,11 +60,12 @@ def use_elective(identifier:str,current=Depends(admin)):
         group=require(db,identifier,'groups')
         if group.get('frozen'):raise HTTPException(409,'成绩已冻结')
         entry=card_catalog(db,group)
-        if not entry or entry.get('kind_of_subject','elective')!='elective':raise HTTPException(422,'该科目没有选科名单')
+        if not entry:raise HTTPException(422,'该科目没有设置年级应考范围')
         from .db import get
         old=get(db,group.get('roster_id'),'rosters') or {}
         supplemental=set(old.get('supplemental_ids',[])) if old.get('source')=='elective' else set()
-        students=members(db,group['grade_id'],set(entry['student_ids'])|supplemental)
+        ids=set(entry['student_ids']) if entry.get('kind_of_subject','elective')=='elective' else {s['id'] for s in objects(db,'students')}
+        students=members(db,group['grade_id'],ids|supplemental)
         return save_members(db,group,students,'elective',supplemental,current['id'])
 
 
@@ -86,6 +87,13 @@ def save_members(db,group,students,source,supplemental,actor):
     return {'count':len(ids)}
 
 
+def initialize_roster(db,group,actor):
+    entry=card_catalog(db,group)
+    if not entry:return
+    ids=set(entry['student_ids']) if entry.get('kind_of_subject','elective')=='elective' else {s['id'] for s in objects(db,'students')}
+    save_members(db,group,members(db,group['grade_id'],ids),'elective',set(),actor)
+
+
 @router.post('/groups/{identifier}/roster/add-students')
 def supplement(identifier:str,body:dict,current=Depends(admin)):
     from .school import group_students
@@ -100,9 +108,11 @@ def supplement(identifier:str,body:dict,current=Depends(admin)):
         if len(added)!=len(set(ids)):raise HTTPException(422,'请选择同年级学生')
         old=get(db,group.get('roster_id'),'rosters') or {}
         students={s['id']:s for s in group_students(db,group) or []}
-        extra=set(old.get('supplemental_ids',[]))|(set(ids)-students.keys())
+        new_ids=set(ids)-students.keys()
+        if not new_ids:return {'count':len(students),'added':0}
+        extra=set(old.get('supplemental_ids',[]))|new_ids
         students.update({s['id']:s for s in added})
-        return save_members(db,group,list(students.values()),old.get('source','manual'),extra,current['id'])
+        return {**save_members(db,group,list(students.values()),old.get('source','manual'),extra,current['id']),'added':len(new_ids)}
 
 
 class SubjectTag(BaseModel):
@@ -128,6 +138,26 @@ def add_tag(body: SubjectTag, current=Depends(admin)):
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
         return subject_tag(db, body.name, current['id'])
+
+
+@router.put('/subject-tags/{identifier}')
+def rename_subject_tag(identifier:str,body:SubjectTag,current=Depends(admin)):
+    name=body.name.strip()
+    if not 1<=len(name)<=100:raise HTTPException(422,'科目名称需1至100字')
+    with connect() as db:
+        db.execute('BEGIN IMMEDIATE');tag=require(db,identifier,'subject-tags')
+        if any(t['id']!=identifier and t['name']==name for t in objects(db,'subject-tags')):raise HTTPException(409,'已有同名科目')
+        old=tag['name']
+        if old!=name:
+            for entry in find(db,'electives',subject=old):put(db,'electives',{**entry,'subject':name},current['id'])
+            for subject in find(db,'subjects',name=old):
+                if not subject.get('subject_tag_id'):put(db,'subjects',{**subject,'subject_tag_id':identifier},current['id'])
+            for cls in objects(db,'classes'):
+                teaching=cls.get('teaching',{});changed=False
+                for relation in teaching.values():
+                    if old in relation.get('subjects',[]):relation['subjects']=[name if s==old else s for s in relation['subjects']];changed=True
+                if changed:put(db,'classes',cls,current['id'])
+        return put(db,'subject-tags',{**tag,'name':name},current['id'])
 
 
 def create_exam_subjects(db, project, ids, actor):

@@ -324,3 +324,48 @@ def test_subject_catalog_removal(school):
     linked=r('POST','subject-tags',{'name':'劳动'})
     r('POST','projects',{'name':'劳动考试','catalog_ids':[linked['id']]})
     assert '劳动考试' in r('DELETE','records/subject-tags/'+linked['id'],status=409)['detail']
+
+
+def test_scanned_sheet_default_list_server_filters_and_purge(school):
+    f=school;r=f['request'];group=f['groups'][0];other_group=f['groups'][1]
+    for index in range(24):
+        student=f['post']('students',{'name':'名单学生'+str(index),'candidate_number':str(100+index).zfill(9),'class_id':f['cls']['id']})
+        f['pair'](student)
+    other=f['post']('students',{'name':'高二学生','candidate_number':'000000999','class_id':f['other_cls']['id']})
+    f['pair'](other,room=f['rooms'][1],group=other_group,template=f['templates'][1])
+    base='projects/'+f['project']['id']+'/scanned-sheets'
+    first=r('GET',base)
+    assert first['total']==25 and len(first['items'])==20 and len(r('GET',base+'?page=2')['items'])==5
+    baseline=first['items']+r('GET',base+'?page=2')['items']
+    for field in ('name','candidate_number','grade','class_name','subject','card','image_status'):
+        for direction in ('asc','desc'):
+            expected=sorted(baseline,key=lambda row:row['id'])
+            expected.sort(key=lambda row:str(row[field] or '').casefold(),reverse=direction=='desc')
+            query=f'?sort_by={field}&sort_order={direction}'
+            globally_sorted=r('GET',base+query)['items']+r('GET',base+query+'&page=2')['items']
+            assert [row['id'] for row in globally_sorted]==[row['id'] for row in expected]
+    descending=r('GET',base+'?class_ids='+f['cls']['id']+'&sort_by=candidate_number&sort_order=desc')
+    assert descending['total']==24 and descending['items'][0]['candidate_number']=='000000123'
+    r('GET',base+'?sort_by=unknown',status=422)
+    r('GET',base+'?sort_by=name%20DESC%3BDROP%20TABLE%20objects',status=422)
+    r('GET',base+'?sort_order=descending',status=422)
+    assert {g['id'] for g in first['options']['groups']}=={group['id'],other_group['id']}
+    assert {g['id'] for g in first['options']['grades']}=={f['grade']['id'],f['other_grade']['id']}
+    high2=r('GET',base+'?grade_ids='+f['other_grade']['id'])
+    assert high2['total']==1 and high2['items'][0]['candidate_number']==other['candidate_number']
+    assert r('GET',base+'?grade_ids='+f['grade']['id']+'&grade_ids='+f['other_grade']['id'])['total']==25
+    assert r('GET',base+'?grade_ids='+f['other_grade']['id']+'&class_ids='+f['cls']['id'])['total']==0
+    assert r('GET',base+'?class_ids='+f['cls']['id'])['total']==24
+    assert r('GET',base+'?subject_ids='+f['subject']['id'])['total']==25
+    assert r('GET',base+'?subject_ids=outside-project')['total']==0
+    assert r('GET',base+'?group_ids='+other_group['id'])['total']==1
+    fixed=r('GET',base+'?group_id='+group['id'])
+    assert fixed['total']==24 and {g['id'] for g in fixed['options']['groups']}=={group['id']}
+    assert r('GET',base+'?group_id='+group['id']+'&group_ids='+other_group['id'])['total']==0
+    another=f['post']('projects',{'name':'无权限范围'})
+    r('GET','projects/'+another['id']+'/scanned-sheets?group_id='+group['id'],status=404)
+    with db.connect() as conn:
+        project=db.get(conn,f['project']['id'],'projects');db.put(conn,'projects',{**project,'scans_purged':{'at':1}})
+    cleared=r('GET',base+'?q='+other['candidate_number'])
+    assert cleared['total']==1 and cleared['scope']['scans_purged'] is True
+    assert cleared['items'][0]['image_status']=='purged' and cleared['items'][0]['pages']==[]

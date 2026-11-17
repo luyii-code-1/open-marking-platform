@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "build": "tsc --noEmit && vite build && node tools/build-worker.mjs",
+    "build": "node tools/check-icon-assets.mjs && tsc --noEmit && vite build && node tools/check-icon-assets.mjs --built && node tools/build-worker.mjs",
     "preview": "vite preview --host 127.0.0.1",
     "test:pwa": "node tools/test-worker.mjs",
     "test:navigation": "node tools/test-exam-navigation.mjs",
@@ -13,6 +13,13 @@
     "test:review-interaction": "node tools/test-review-interaction.mjs",
     "test:review-offline": "node tools/test-review-offline.mjs",
     "test:auto-update": "node tools/test-auto-update.mjs",
+    "test:build-version": "node tools/test-build-version.mjs",
+    "test:record-filters": "node tools/test-record-filters.mjs",
+    "test:result-filters": "node tools/test-result-filter-params.mjs",
+    "test:table-sorting": "node tools/test-table-sorting.mjs",
+    "test:answer-entry": "node tools/test-answer-entry.mjs",
+    "test:rich-text": "node tools/test-rich-text-format.mjs",
+    "test:subjective-layout": "node tools/test-subjective-layout.mjs",
     "test:session": "node tools/test-auth-session.mjs",
     "test:actions": "node tools/test-actions.mjs",
     "test:icons": "node tools/test-icons.mjs"
