@@ -56,7 +56,8 @@ def test_device_scope_ownership_revocation_and_challenge_replay(tmp_path,monkeyp
             group=db.put(connection,'groups',{'name':'组','subject_id':subject['id'],'reopen_reason':'私有核查记录'})
             template=db.put(connection,'templates',{'name':'卡','group_id':group['id'],'status':'published','revision':1,'paper':'A4','sides':1,'questions':[{'id':str(uuid4()),'answer':['A']} ]})
             group['template_id']=template['id'];db.put(connection,'groups',group)
-        assert client.get('/api/v1/projects',headers=headers).json()[0]=={'id':project['id'],'name':'考试'}
+        assert client.get('/api/v1/projects',headers=headers).json()[0]=={'id':project['id'],'name':'考试',
+            'exam_status':'in_progress','exam_status_mode':'auto','auto_exam_status':'in_progress'}
         assert 'questions' not in client.get('/api/v1/templates',headers=headers).json()[0]
         assert 'reopen_reason' not in client.get('/api/v1/groups',headers=headers).json()[0]
         for route in ('users','students','classes','assignments','scanner/devices','auth/me'):

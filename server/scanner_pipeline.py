@@ -12,6 +12,7 @@ from .dependencies import require, scan_admin, scan_batch
 from .lifecycle import writable
 from .omr import ENGINE_VERSION, dimensions
 from .storage import local_path
+from .exam_status import ExamStatusFilter, STATUS_FIELDS, project_views, filter_projects
 
 router = APIRouter(prefix='/api/v1/scanner')
 LIMIT = 30 * 1024 * 1024
@@ -32,10 +33,19 @@ def config_hash(template):
 
 
 @router.get('/catalog')
-def catalog(current=Depends(scan_admin)):
+def catalog(exam_status: ExamStatusFilter='all', current=Depends(scan_admin)):
     with connect() as db:
-        return {kind: [{k: value[k] for k in fields if k in value} for value in objects(db, kind)] for kind, fields in (
-            ('projects', ('id', 'name', 'status')), ('subjects', ('id', 'name', 'project_id', 'default_group_id')),
+        db.execute('BEGIN')
+        subjects=objects(db,'subjects');groups=objects(db,'groups')
+        projects=filter_projects(project_views(db,objects(db,'projects'),subjects,groups),exam_status)
+        if exam_status!='all':
+            project_ids={p['id'] for p in projects}
+            subjects=[s for s in subjects if s.get('project_id') in project_ids]
+            subject_ids={s['id'] for s in subjects}
+            groups=[g for g in groups if g.get('subject_id') in subject_ids]
+        values={'projects':projects,'subjects':subjects,'groups':groups}
+        return {kind: [{k: value[k] for k in fields if k in value} for value in values[kind]] for kind, fields in (
+            ('projects', ('id', 'name', 'status', *STATUS_FIELDS)), ('subjects', ('id', 'name', 'project_id', 'default_group_id')),
             ('groups', ('id', 'name', 'subject_id', 'template_id', 'frozen', 'grade_id')))}
 
 
@@ -43,6 +53,7 @@ def catalog(current=Depends(scan_admin)):
 def project_package(identifier: str, current=Depends(scan_admin)):
     with connect() as db:
         db.execute('BEGIN'); project = require(db, identifier, 'projects'); writable(db, 'projects', project)
+        project=project_views(db,[project])[0]
         subjects = find(db, 'subjects', project_id=identifier); subject_ids = {s['id'] for s in subjects}
         groups = [g for g in objects(db, 'groups') if g.get('subject_id') in subject_ids]
         packaged = []
@@ -64,7 +75,7 @@ def project_package(identifier: str, current=Depends(scan_admin)):
         rooms=[{**view(db,[t])[0],**progress(db,t)} for t in find(db,'room-tags',project_id=identifier)]
         return {'protocol': 'omp-scanner-4', 'engine_version': ENGINE_VERSION,
                 'room_tags':rooms,
-                'project': {k: project[k] for k in ('id', 'name', 'status')},
+                'project': {k: project[k] for k in ('id', 'name', 'status', *STATUS_FIELDS) if k in project},
                 'subjects': [{k: s[k] for k in ('id', 'name', 'default_group_id') if k in s} for s in subjects], 'groups': packaged}
 
 
