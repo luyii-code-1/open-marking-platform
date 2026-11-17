@@ -1,7 +1,7 @@
 import { MoreOutlined, DownOutlined } from '@ant-design/icons'
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { Alert, App, Breadcrumb, Card, Checkbox, Collapse, ConfigProvider, Descriptions, Drawer, Dropdown, Empty, Form, Input, Modal, Select, Space, Tabs, Tag, Typography } from 'antd'
+import { Alert, App, Breadcrumb, Card, Checkbox, Collapse, ConfigProvider, Descriptions, Drawer, Dropdown, Empty, Form, Input, Modal, Radio, Select, Space, Tabs, Tag, Typography } from 'antd'
 import { Table } from './DataTable'
 import { Button } from './Button'
 import zhCN from 'antd/locale/zh_CN'
@@ -11,10 +11,11 @@ import { Brand } from './Brand'
 import { cardName,subjectGrades,unassignedGrade } from './examNavigation'
 import { rowNavigation } from './rowNavigation'
 import {scannerRoomCounts} from './scannerRoomCounts'
+import {scannerRoomState,type ScanRun} from './scannerRoomPages'
 import './scanner.css'
 
 type Row = Record<string, any> & { id: string }
-const statusLabels: Record<string, string> = { open: '采集中', frozen: '待核查', local_paired: '已确认，等待同步', paired: '已同步', pending: '等待上传', uploaded: '已上传', blocked: '待核查', excluded: '已排除' }
+const statusLabels: Record<string, string> = { open: '采集中', frozen: '待核查', local_paired: '已确认，等待同步', paired: '已同步', pending: '本地暂存', recognizing: '识读中', uploaded: '已上传', blocked: '待核查', excluded: '已排除' }
 function Status({ value }: { value: string }) { return <Tag color={value === 'blocked' || value === 'frozen' ? 'orange' : value === 'paired' || value === 'uploaded' ? 'green' : undefined}>{statusLabels[value] || value}</Tag> }
 
 function Scanner() {
@@ -23,12 +24,17 @@ function Scanner() {
   const [firstSide,setFirstSide]=useState(localStorage.getItem('duplex-first-side')||''), [side, setSide] = useState('front')
   const [preview, setPreview] = useState<Row | null>(null), [image, setImage] = useState(''), [question, setQuestion] = useState(''), [previewBusy, setPreviewBusy] = useState(false)
   const [connectForm] = Form.useForm(), { message, modal } = App.useApp()
+  const [scanRun,setScanRun]=useState<(ScanRun&{groupId:string;room:string})|null>(null)
+  const [scanView,setScanView]=useState<'run'|'room'>('room')
+  const activeRun=useRef<ScanRun|undefined>(undefined)
+  activeRun.current=scanView==='run'&&scanRun?scanRun:undefined
   const currentBatch = useRef(batchId), currentPage = useRef(page), reloadBusy = useRef(false), mounted = useRef(true)
   currentBatch.current = batchId; currentPage.current = page
   const reload = useCallback(async () => {
     if (reloadBusy.current || !hasScannerHost) return
     reloadBusy.current = true
-    try { const next = await scannerCall('state', { batch_id: currentBatch.current, offset: (currentPage.current - 1) * 50 }); if (mounted.current) { setState(next); setError('') } }
+    const requestedBatch=currentBatch.current,requestedPage=currentPage.current,requestedRun=activeRun.current
+    try { const next = await scannerRoomState(scannerCall,requestedBatch,requestedPage,requestedRun); if (mounted.current&&requestedBatch===currentBatch.current&&requestedPage===currentPage.current&&requestedRun===activeRun.current) { setState(next); setError('') } }
     catch (e) { if (mounted.current) setError((e as Error).message) }
     finally { reloadBusy.current = false }
   }, [])
@@ -38,7 +44,7 @@ function Scanner() {
     const poll = setInterval(reload, 3000)
     return () => { mounted.current = false; stop(); clearInterval(poll); if (scheduled) clearTimeout(scheduled) }
   }, [reload])
-  useEffect(() => { void reload() }, [batchId, page, reload])
+  useEffect(() => { void reload() }, [batchId, page, scanView, scanRun, reload])
   const busy=!!busyKey, activeAction=useRef<symbol|null>(null)
   const actionKey=(method:string,args:Record<string,unknown>={})=>`${method}:${args.project_id||args.page_id||args.batch_id||args.group_id||''}`
   async function action(method: string, args: Record<string, unknown> = {}, completed?: (result: any) => void) {
@@ -56,6 +62,9 @@ function Scanner() {
   const grade=subject?subjectGrades(subject,pack?.groups||[]).find(g=>g.id===gradeId):undefined
   const roomKey=(row:Row)=>(row.room_tags||[]).map((t:Row)=>t.id).sort().join(',')
   const roomSheets:Row[]=batch?state.batches.filter((r:Row)=>r.group_id===batch.group_id&&roomKey(r)===roomKey(batch)):[]
+  const runSheets=scanRun&&scanRun.groupId===groupId&&batch&&scanRun.room===roomKey(batch)?roomSheets.filter(r=>r.id===scanRun.anchorId||!scanRun.previousIds.includes(r.id)):[]
+  const visibleSheets=scanView==='run'&&scanRun?runSheets:roomSheets
+  const sumVisible=(key:string)=>visibleSheets.reduce((n,r)=>n+(r[key]||0),0)
   const pendingSheets=roomSheets.filter(r=>r.status==='local_paired')
   const needsReview=roomSheets.some(r=>r.status==='frozen'||r.status==='open'&&(r.pending||r.blocked||r.uploaded))
   const room=batch?.room_tags?.[0]&&pack?.room_tags?.find((r:Row)=>r.id===batch.room_tags[0].id)
@@ -95,6 +104,7 @@ function Scanner() {
   async function openProject(id: string) { await action('openProject', { project_id: id }, () => { setInProject(true); setSubject(''); setGrade('');setGroup(''); setBatch('') }) }
   function openSubject(id:string){setSubject(id);setGrade('');setGroup('');setBatch('')}
   async function enterRoom(room?:Row){
+    setScanView('room');setScanRun(null)
     if(!group||!pack)return
     const roomId=room?.id
     const matches=state.batches.filter((b:Row)=>b.group_id===group.id&&roomKey(b)===(roomId||''))
@@ -103,14 +113,27 @@ function Scanner() {
     if(group.template.sides===2&&!firstSide){message.warning('请先选择已校准的双面出图顺序');return}
     await action('createBatch',{group_id:group.id,name:room?.name||'未指定考场',room_tag_ids:roomId?[roomId]:[],capture_mode:group.template.sides===2?'duplex':'separate',first_side:firstSide},r=>{setBatch(r.id);setPage(1)})
   }
+  async function startScan(){
+    let id=batchId
+    if(batch.status!=='open'){
+      const next=await action('createBatch',{group_id:group.id,name:batch.name,room_tag_ids:batch.room_tags.map((t:Row)=>t.id),capture_mode:batch.capture_mode,first_side:firstSide})
+      if(!next)return
+      id=next.id;setBatch(id)
+    }
+    const started=await action('start',{batch_id:id,device_id:device,side})
+    if(started){
+      setScanRun({anchorId:id,previousIds:state.batches.map((r:Row)=>r.id),groupId,room:roomKey(batch)})
+      setScanView('run');setPage(1)
+    }
+  }
   async function showPreview(row: Row, qid = '') {
     setPreview(row); setPreviewBusy(true); setImage(''); setQuestion(qid)
-    try { const result = await scannerCall('preview', { batch_id: batchId, page_id: row.id, question_id: qid }); setImage(result.url) }
+    try { const result = await scannerCall('preview', { batch_id: row.batch_id||batchId, page_id: row.id, question_id: qid }); setImage(result.url) }
     catch (e) { message.error((e as Error).message) }
     finally { setPreviewBusy(false) }
   }
   function exclude(row: Row) {
-    modal.confirm({ title: batch.capture_mode === 'duplex' ? `排除第${row.sequence}张纸并整张重扫？` : `排除此${row.side === 'front' ? '正' : '背'}面？`, content: '已采集原图保留，已上传页面会在同步时排除。', okText: '排除并保留原图', okButtonProps: { danger: true }, onOk: () => action('exclude', { batch_id: batchId, page_id: row.id }) })
+    modal.confirm({ title: batch.capture_mode === 'duplex' ? `排除第${row.sheet_number??row.sequence}张纸并整张重扫？` : `排除此${row.side === 'front' ? '正' : '背'}面？`, content: '已采集原图保留，已上传页面会在同步时排除。', okText: '排除并保留原图', okButtonProps: { danger: true }, onOk: () => action('exclude', { batch_id: row.batch_id||batchId, page_id: row.id }) })
   }
   const crumbs = [
     { title: <Button type="link" disabled={locked} onClick={() => setInProject(false)}>考试项目</Button> },
@@ -152,9 +175,9 @@ function Scanner() {
             ]}/>
           <Typography.Paragraph type="secondary">题卡共确认 {group.confirmed_sheets??group.confirmed_students??0} 份 · 服务端统计以上次刷新为准</Typography.Paragraph>
           <Button disabled={!state.online||locked} onClick={()=>action('downloadProject',{project_id:pack.project.id})}>刷新考场进度</Button>
-          {state.batches.some((b:Row)=>b.group_id===group.id&&(b.blocked||b.status==='frozen'))&&<Table<Row> rowKey="id" dataSource={state.batches.filter((b:Row)=>b.group_id===group.id&&(b.blocked||b.status==='frozen'))} columns={[{title:'待核对',dataIndex:'name'},{title:'原因',dataIndex:'error'},{title:'操作',render:(_,r)=><Button onClick={()=>setBatch(r.id)}>查看原图</Button>}]}/>}</section>
-            : <section className="scanner-section"><div className="scanner-title"><div><Space align="center"><Typography.Title level={2}>{batch.room_tags?.[0]?.name||'未指定考场'}</Typography.Title><Status value={batch.status} /></Space><Typography.Paragraph type="secondary">{batch.paper} · {batch.sides === 2 ? '双面' : '单面'} · {batch.capture_mode === 'duplex' ? '自动双面' : '分面采集'} · 本机已扫 {currentCounts.scanned??'—'} 份 · 当前记录已上传 {batch.uploaded}/{batch.total} 页</Typography.Paragraph></div><Space>
-              <Button type="primary" loading={busyKey===actionKey('start',{batch_id:batchId})} disabled={locked || !device || group.frozen} onClick={async()=>{let id=batchId;if(batch.status!=='open'){const next=await action('createBatch',{group_id:group.id,name:batch.name,room_tag_ids:batch.room_tags.map((t:Row)=>t.id),capture_mode:batch.capture_mode,first_side:firstSide});if(!next)return;id=next.id;setBatch(id)}await action('start',{batch_id:id,device_id:device,side})}}>开始扫描</Button><Button danger loading={busyKey===actionKey('stop')} disabled={!state.capturing} onClick={() => action('stop')}>停止</Button>
+          {state.batches.some((b:Row)=>b.group_id===group.id&&(b.blocked||b.status==='frozen'))&&<Table<Row> rowKey="id" dataSource={state.batches.filter((b:Row)=>b.group_id===group.id&&(b.blocked||b.status==='frozen'))} columns={[{title:'待核对',dataIndex:'name'},{title:'原因',dataIndex:'error'},{title:'操作',render:(_,r)=><Button onClick={()=>{setScanView('room');setScanRun(null);setBatch(r.id)}}>查看原图</Button>}]}/>}</section>
+            : <section className="scanner-section"><div className="scanner-title"><div><Space align="center"><Typography.Title level={2}>{batch.room_tags?.[0]?.name||'未指定考场'}</Typography.Title><Status value={batch.status} /></Space><Typography.Paragraph type="secondary">{batch.paper} · {batch.sides === 2 ? '双面' : '单面'} · {batch.capture_mode === 'duplex' ? '自动双面' : '分面采集'} · 本机已扫 {currentCounts.scanned??'—'} 份 · 已上传 {roomSheets.reduce((n,r)=>n+r.uploaded,0)}/{roomSheets.reduce((n,r)=>n+r.total,0)} 页</Typography.Paragraph></div><Space>
+              <Button type="primary" loading={busyKey===actionKey('start',{batch_id:batchId})} disabled={locked || !device || group.frozen} onClick={startScan}>开始扫描</Button><Button danger loading={busyKey===actionKey('stop')} disabled={!state.capturing} onClick={() => action('stop')}>停止进纸</Button>
               <Dropdown menu={{ items: [
                 { key: 'import', label: '导入扫描图像', disabled: locked || batch.status !== 'open', onClick: () => action('import', { batch_id: batchId, side }) },
                 { key: 'refresh', label: '刷新服务端状态', disabled: locked || !state.online, onClick: () => action('refreshBatch', { batch_id: batchId }) },
@@ -172,9 +195,18 @@ function Scanner() {
                 <Select aria-label="扫描仪" placeholder="选择扫描仪" disabled={locked} value={device||undefined} style={{minWidth:260}} options={prefs?.devices.map((d:Row)=>({value:d.id,label:d.name}))} onChange={id=>action('selectDevice',{id})}/>
                 {batch.capture_mode !== 'duplex' && batch.sides === 2 && <Select aria-label="扫描面" disabled={locked} value={side} onChange={setSide} options={[{ value: 'front', label: '正面' }, { value: 'back', label: '背面' }]} />}</Space> }]} />
               <Typography.Paragraph className="scanner-progress" type="secondary" role="status" aria-live="polite">{state.message || '\u00a0'}</Typography.Paragraph>
+              <Space style={{marginBottom:16}}><Radio.Group value={scanView} onChange={e=>{setScanView(e.target.value);setPage(1)}} optionType="button" options={[{label:'本次扫描',value:'run',disabled:!runSheets.length},{label:'本考场全部',value:'room'}]}/></Space>
+              <Descriptions size="small" column={{xs:2,sm:3,lg:6}} items={[
+                {label:'已采集',children:sumVisible('total')+' 面'},
+                {label:'正面',children:sumVisible('front_count')+' 面'},
+                {label:'背面',children:sumVisible('back_count')+' 面'},
+                {label:'待核对',children:sumVisible('blocked')+' 面'},
+                {label:'本地暂存',children:sumVisible('pending')+' 面'},
+                {label:'已上传',children:sumVisible('uploaded')+' 面'},
+              ]}/>
               <Table<Row> rowKey="id" dataSource={state.pages} pagination={{ current: page, pageSize: 50, total: state.page_total, showSizeChanger: false, onChange: setPage }} columns={[
-                { title: '纸张序号', dataIndex: 'sequence', width: 100 }, { title: '扫描面', dataIndex: 'side', width: 90, render: value => value === 'front' ? '正面' : '背面' }, { title: '考号', dataIndex: 'candidate' }, { title: '状态', dataIndex: 'status', render: value => <Status value={value} /> },
-                { title: '核查信息', render: (_, row) => row.error || row.quality }, { title: '操作', className: 'row-actions', width: 110, render: (_, row) => <Space><Button type="link" onClick={() => showPreview(row)}>查看</Button><Dropdown menu={{ items: [{ key: 'retry', label: '重试本地识读', disabled: locked || row.status === 'excluded' || batch.status === 'paired', onClick: () => action('retryPage', { batch_id: batchId, page_id: row.id }) }, { key: 'review', label: '上传原图供核查', disabled: locked || !state.online || row.status !== 'blocked', onClick: () => modal.confirm({ title: '将原图和质量报告送交管理员核查？', okText: '上传待核查原图', onOk: () => action('sendForReview', { batch_id: batchId, page_id: row.id }) }) }, { key: 'exclude', label: batch.capture_mode === 'duplex' ? '排除整张重扫' : '排除此面', danger: true, disabled: locked || row.status === 'excluded' || batch.status === 'paired', onClick: () => exclude(row) }] }}><Button type="text" icon={<MoreOutlined />} aria-label={`第${row.sequence}张扫描图更多操作`} /></Dropdown></Space> },
+                { title: '纸张序号', render: (_,row) => row.sheet_number??row.sequence, width: 100 }, { title: '扫描面', dataIndex: 'side', width: 90, render: value => value === 'front' ? '正面' : '背面' }, { title: '考号', dataIndex: 'candidate' }, { title: '状态', dataIndex: 'status', render: (value,row) => <Status value={value==='pending'&&!row.recognized?'recognizing':value} /> },
+                { title: '核查信息', render: (_, row) => row.error || row.quality }, { title: '操作', className: 'row-actions', width: 110, render: (_, row) => <Space><Button type="link" onClick={() => showPreview(row)}>查看</Button><Dropdown menu={{ items: [{ key: 'retry', label: '重试本地识读', disabled: locked || row.status === 'excluded' || (row.batch_status||batch.status) === 'paired', onClick: () => action('retryPage', { batch_id: row.batch_id||batchId, page_id: row.id }) }, { key: 'review', label: '上传原图供核查', disabled: locked || !state.online || row.status !== 'blocked', onClick: () => modal.confirm({ title: '将原图和质量报告送交管理员核查？', okText: '上传待核查原图', onOk: () => action('sendForReview', { batch_id: row.batch_id||batchId, page_id: row.id }) }) }, { key: 'exclude', label: batch.capture_mode === 'duplex' ? '排除整张重扫' : '排除此面', danger: true, disabled: locked || row.status === 'excluded' || (row.batch_status||batch.status) === 'paired', onClick: () => exclude(row) }] }}><Button type="text" icon={<MoreOutlined />} aria-label={`第${row.sequence}张扫描图更多操作`} /></Dropdown></Space> },
               ]} />
             </section>}
     </main>
@@ -202,7 +234,7 @@ function Scanner() {
       <Typography.Paragraph type="secondary">已登记的设备可直接连接。首次使用时在管理后台生成配对码，再在此处填写完成绑定。</Typography.Paragraph>
       <Form.Item name="pairing_code" label="配对码（首次连接）"><Input autoComplete="one-time-code" maxLength={14}/></Form.Item><Button htmlType="submit" type="primary" loading={busyKey===actionKey('connect')}>连接</Button><Typography.Paragraph style={{marginTop:32}} type="secondary">本机数据目录</Typography.Paragraph><Typography.Text copyable>{state?.storage_path}</Typography.Text>
     </Form></Drawer>
-    <Drawer title={preview ? `第${preview.sequence}张 · ${preview.side === 'front' ? '正面' : '背面'}` : '页面核查'} open={!!preview} onClose={() => { setPreview(null); setImage('') }} width="min(880px,90vw)">
+    <Drawer title={preview ? `第${preview.sheet_number??preview.sequence}张 · ${preview.side === 'front' ? '正面' : '背面'}` : '页面核查'} open={!!preview} onClose={() => { setPreview(null); setImage('') }} width="min(880px,90vw)">
       {preview && <><Descriptions column={2} items={[{ label: '考号', children: preview.candidate || '—' }, { label: '状态', children: <Status value={preview.status} /> }]} /><Select aria-label="查看整页或切题" value={question} style={{ width: '100%', margin: '20px 0' }} onChange={value => showPreview(preview, value)} options={[{ value: '', label: '整页原图' }, ...(preview.local_cut_available ? (group?.template.questions || []) : []).filter((q: Row) => q.regions.some((r: any) => r.page === (preview.side === 'front' ? 1 : 2))).map((q: Row) => ({ value: q.id, label: `第${q.number}题 · 本地切题` }))]} />{preview.error && <Alert type="warning" message={preview.error} />}{previewBusy ? <Card loading /> : image && <img className="scanner-preview" src={image} alt={question ? '本地切题预览' : '扫描原图预览'} />}</>}
     </Drawer>
   </div>
