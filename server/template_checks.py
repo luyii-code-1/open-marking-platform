@@ -5,7 +5,7 @@ from . import paper
 from .scoring import cents
 
 
-def issues(template,complete=False):
+def issues(template,complete=False,*,require_answers=True):
     errors=[]
     if template.get('paper') not in ('A3','A4'):errors.append('纸型应为A3或A4')
     if type(template.get('sides')) is not int or template['sides'] not in (1,2):errors.append('请选择单面或双面')
@@ -21,7 +21,7 @@ def issues(template,complete=False):
         from .merged_questions import print_questions
         try:
             expanded=list(print_questions(template))
-            errors.extend(issues({**template,'questions':expanded},complete))
+            errors.extend(issues({**template,'questions':expanded},complete,require_answers=require_answers))
         except (ValueError,TypeError,KeyError,InvalidOperation) as error:errors.append(str(error))
     numbers=set()
     for index,q in enumerate(questions,1):
@@ -63,7 +63,7 @@ def issues(template,complete=False):
             if type(count) is not int or count not in (3,4,5):errors.append(label+'选项数量应为3、4或5')
             elif not isinstance(answers,list) or any(not isinstance(a,str) or a not in 'ABCDE'[:count] or len(a)!=1 for a in answers):errors.append(label+'标准答案含无效选项')
             elif len(set(answers))!=len(answers) or (q.get('type')=='single' and len(answers)>1):errors.append(label+'标准答案重复或单选题设置了多个答案')
-            elif complete and not answers:errors.append(label+'请设置标准答案')
+            elif complete and require_answers and not answers:errors.append(label+'请设置标准答案')
             rule=q.get('rule') if q.get('rule') is not None else {'mode':'exact'}
             if not isinstance(rule,dict) or rule.get('mode','exact') not in ('exact','partial','per_option'):errors.append(label+'给分规则无效')
             else:

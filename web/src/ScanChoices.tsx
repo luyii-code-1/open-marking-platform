@@ -1,0 +1,8 @@
+import {useState,type ReactNode} from 'react'
+import {Empty,Input} from 'antd'
+type Choice={id:string;name:string;description?:string;status?:ReactNode;facts?:{label:string;value:ReactNode}[];action?:ReactNode;disabled?:boolean}
+export function ScanChoices({title,description,items,onOpen,extra}:{title:string;description?:string;items:Choice[];onOpen:(id:string)=>void;extra?:ReactNode}){
+ const [query,setQuery]=useState('')
+ const visible=items.filter(item=>(item.name+' '+(item.description||'')).toLowerCase().includes(query.trim().toLowerCase()))
+ return <section className="scan-choice-section"><div className="scan-choice-heading"><div><h2>{title}</h2>{description&&<p>{description}</p>}</div>{extra}</div><Input.Search aria-label="搜索当前列表" placeholder="搜索名称" allowClear value={query} onChange={e=>setQuery(e.target.value)} style={{maxWidth:340,marginBottom:24}}/><div className="scan-choice-grid">{visible.map(item=><article className="scan-choice-card" key={item.id}><button className="scan-choice-open" disabled={item.disabled} onClick={()=>onOpen(item.id)}><span className="scan-choice-card-heading"><strong>{item.name}</strong>{item.status}</span>{item.description&&<span className="scan-choice-description">{item.description}</span>}<span className="scan-choice-facts">{item.facts?.map(f=><span key={f.label}><span>{f.label}</span><strong>{f.value}</strong></span>)}</span></button>{item.action&&<div className="scan-choice-action">{item.action}</div>}</article>)}</div>{!visible.length&&<Empty description={query?'没有匹配的记录':'暂无可扫描内容'}/>}<p className="scan-choice-count">共 {items.length} 条记录</p></section>
+}

@@ -3,7 +3,7 @@ import {readFile} from 'node:fs/promises'
 import ts from 'typescript'
 const source=await readFile(new URL('../src/reviewInteraction.ts',import.meta.url),'utf8')
 const {outputText}=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ES2022}})
-const {focusScoreInput,scorePresets,previousReview}=await import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`)
+const {focusScoreInput,scorePresets,previousReview,scoreInputError}=await import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`)
 const calls=[]
 const input={disabled:false,focus(options){calls.push(['focus',options])},select(){calls.push(['select'])}}
 focusScoreInput({querySelector(){return input}})
@@ -20,4 +20,7 @@ assert.equal(previousReview(rows,'recent')?.id,'middle')
 assert.equal(previousReview(rows,'middle')?.id,'first')
 assert.equal(previousReview(rows,'first'),undefined)
 assert.equal(previousReview([],undefined),undefined)
+for(const value of ['20','-1','','+','9.999','2e0','3字','.3'])assert.ok(scoreInputError(value,10,.5),value)
+for(const value of ['0','0.5','.5','9.50','10'])assert.equal(scoreInputError(value,10,.5),'',value)
+assert.equal(scoreInputError('0.29',10,.01),'')
 console.log('Review interaction passed: focus/select without scroll, fractional presets, previous review ordering and boundaries')

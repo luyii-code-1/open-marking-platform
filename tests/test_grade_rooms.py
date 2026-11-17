@@ -29,7 +29,7 @@ def school(tmp_path,monkeypatch):
             templates.append(post('templates/'+template['id']+'/publish'))
         rooms=[post('projects/'+project['id']+'/room-tags',{'name':'01','group_id':g['id'],'expected_students':2},201) for g in groups]
         def pair(student,room=rooms[0],group=groups[0],template=templates[0]):
-            batch=post('scan-batches',{'group_id':group['id'],'room_tag_ids':[room['id']]})
+            batch=post('scan-batches',{'group_id':group['id'],'room_tag_ids':[room['id']] if room else []})
             with db.connect() as connection:
                 page=db.put(connection,'pages',{'batch_id':batch['id'],'template_id':template['id'],'side':'front','sequence':1,'status':'recognized','candidate_number':student['candidate_number'],'selections':{template['questions'][0]['id']:['A']}})
             result=post('scan-batches/'+batch['id']+'/pair')
@@ -208,17 +208,45 @@ def test_official_layout_and_scoring_impact(school):
     r('POST','scan-batches/'+empty['id']+'/finish-empty',{'confirm':True})
     assert next(b for b in r('GET','scan-batches') if b['id']==empty['id'])['completed_empty']
 
-def test_optional_room_can_be_assigned_after_scan(school):
+
+def test_scan_before_answer_key(school):
+    from server.scanner_pipeline import config_hash
+    f=school;r=f['request'];group=f['groups'][0];previous=f['templates'][0]
+    draft=r('POST','templates',{'group_id':group['id'],'name':'先扫后计分','paper':'A4','sides':1,
+        'questions':[{**previous['questions'][0],'id':str(uuid4()),'answer':[]}]})
+    url='templates/'+draft['id']
+    template=r('POST',url+'/publish',{'replace_id':previous['id']})
+    qid=template['questions'][0]['id']
+    f['pair'](f['students'][0],template=template)
+    results=lambda:r('GET','results?group_id='+group['id'])
+    scanned=next(row for row in results() if row['status']=='pending')
+    assert scanned['total'] is None and list(scanned['scores'].values())==[None]
+    assert r('GET','groups/'+group['id']+'/workflow')['missing_answers']==[1]
+    r('POST','results/publish',{'group_id':group['id']},409)
+    r('PUT',url+'/answer-key',{'answers':{qid:['Z']}},422)
+    key={'answers':{qid:['A']}}
+    revision=r('PUT',url+'/answer-key',key)['scoring_revision']
+    assert r('PUT',url+'/answer-key',key)['scoring_revision']==revision
+    r('PUT',url+'/answer-key',{'answers':{qid:['B']}},409)
+    f['pair'](f['students'][1],template=template)
+    scored=[row for row in results() if row['status']=='completed']
+    assert len(scored)==2 and all(row['total']==2 for row in scored)
+    refreshed=next(t for t in r('GET','templates') if t['id']==template['id'])
+    assert config_hash(template)==config_hash(refreshed)
+    r('POST','results/publish',{'group_id':group['id']})
+
+def test_card_rooms_count_scans_without_a_student_assignment(school):
     f=school
-    batch,page,result=f['pair'](f['students'][0])
-    group=f['groups'][0]
-    answer=f['request']('GET','submissions?group_id='+group['id'])[0]
-    with db.connect() as connection:
-        db.put(connection,'submissions',{**answer,'room_tags':[]})
-    route='scanner/submissions/'+answer['id']+'/room'
-    f['request']('POST',route,{'room_id':f['rooms'][1]['id']},422)
-    f['post'](route,{'room_id':f['rooms'][0]['id']})
-    assert f['request']('GET','room-tags?group_id='+group['id'])[0]['scanned_students']==1
+    group=f['groups'][0]['id']
+    second=f['post']('projects/'+f['project']['id']+'/room-tags',{'name':'02','group_id':group,'expected_students':0},201)
+    f['pair'](f['students'][0],room=second)
+    f['pair'](f['students'][1],room=None)
+    package=f['request']('GET','scanner/projects/'+f['project']['id']+'/package')
+    rooms={r['id']:r for r in package['room_tags']}
+    assert rooms[second['id']]['confirmed_sheets']==1 and rooms[f['rooms'][0]['id']]['confirmed_sheets']==0
+    card=next(g for g in package['groups'] if g['id']==group)
+    assert card['confirmed_sheets']==2 and card['unassigned_sheets']==1 and 'unassigned' not in card
+    assert len(card['roster'])==3
 
 
 def test_batch_rooms_and_delete_unused_records(school):
@@ -296,3 +324,48 @@ def test_subject_catalog_removal(school):
     linked=r('POST','subject-tags',{'name':'劳动'})
     r('POST','projects',{'name':'劳动考试','catalog_ids':[linked['id']]})
     assert '劳动考试' in r('DELETE','records/subject-tags/'+linked['id'],status=409)['detail']
+
+
+def test_scanned_sheet_default_list_server_filters_and_purge(school):
+    f=school;r=f['request'];group=f['groups'][0];other_group=f['groups'][1]
+    for index in range(24):
+        student=f['post']('students',{'name':'名单学生'+str(index),'candidate_number':str(100+index).zfill(9),'class_id':f['cls']['id']})
+        f['pair'](student)
+    other=f['post']('students',{'name':'高二学生','candidate_number':'000000999','class_id':f['other_cls']['id']})
+    f['pair'](other,room=f['rooms'][1],group=other_group,template=f['templates'][1])
+    base='projects/'+f['project']['id']+'/scanned-sheets'
+    first=r('GET',base)
+    assert first['total']==25 and len(first['items'])==20 and len(r('GET',base+'?page=2')['items'])==5
+    baseline=first['items']+r('GET',base+'?page=2')['items']
+    for field in ('name','candidate_number','grade','class_name','subject','card','image_status'):
+        for direction in ('asc','desc'):
+            expected=sorted(baseline,key=lambda row:row['id'])
+            expected.sort(key=lambda row:str(row[field] or '').casefold(),reverse=direction=='desc')
+            query=f'?sort_by={field}&sort_order={direction}'
+            globally_sorted=r('GET',base+query)['items']+r('GET',base+query+'&page=2')['items']
+            assert [row['id'] for row in globally_sorted]==[row['id'] for row in expected]
+    descending=r('GET',base+'?class_ids='+f['cls']['id']+'&sort_by=candidate_number&sort_order=desc')
+    assert descending['total']==24 and descending['items'][0]['candidate_number']=='000000123'
+    r('GET',base+'?sort_by=unknown',status=422)
+    r('GET',base+'?sort_by=name%20DESC%3BDROP%20TABLE%20objects',status=422)
+    r('GET',base+'?sort_order=descending',status=422)
+    assert {g['id'] for g in first['options']['groups']}=={group['id'],other_group['id']}
+    assert {g['id'] for g in first['options']['grades']}=={f['grade']['id'],f['other_grade']['id']}
+    high2=r('GET',base+'?grade_ids='+f['other_grade']['id'])
+    assert high2['total']==1 and high2['items'][0]['candidate_number']==other['candidate_number']
+    assert r('GET',base+'?grade_ids='+f['grade']['id']+'&grade_ids='+f['other_grade']['id'])['total']==25
+    assert r('GET',base+'?grade_ids='+f['other_grade']['id']+'&class_ids='+f['cls']['id'])['total']==0
+    assert r('GET',base+'?class_ids='+f['cls']['id'])['total']==24
+    assert r('GET',base+'?subject_ids='+f['subject']['id'])['total']==25
+    assert r('GET',base+'?subject_ids=outside-project')['total']==0
+    assert r('GET',base+'?group_ids='+other_group['id'])['total']==1
+    fixed=r('GET',base+'?group_id='+group['id'])
+    assert fixed['total']==24 and {g['id'] for g in fixed['options']['groups']}=={group['id']}
+    assert r('GET',base+'?group_id='+group['id']+'&group_ids='+other_group['id'])['total']==0
+    another=f['post']('projects',{'name':'无权限范围'})
+    r('GET','projects/'+another['id']+'/scanned-sheets?group_id='+group['id'],status=404)
+    with db.connect() as conn:
+        project=db.get(conn,f['project']['id'],'projects');db.put(conn,'projects',{**project,'scans_purged':{'at':1}})
+    cleared=r('GET',base+'?q='+other['candidate_number'])
+    assert cleared['total']==1 and cleared['scope']['scans_purged'] is True
+    assert cleared['items'][0]['image_status']=='purged' and cleared['items'][0]['pages']==[]

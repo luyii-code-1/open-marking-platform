@@ -2,11 +2,24 @@ import {useState} from 'react'
 import {Alert,App,Checkbox,Collapse,Form,Input,InputNumber,Modal,Select,Space,Typography} from 'antd'
 import { Table } from './DataTable'
 import {Button} from './Button'
-import {send,type Row,type Template} from './api'
+import {AnswerEntry} from './AnswerEntry'
+import {answersComplete,completeAnswerMap} from './answerEntryLogic'
+import {send,type Row,type Template,type Question} from './api'
 
 export function ScoringChanges({template,onSaved}:{template:Template;onSaved:()=>Promise<void>}){
   const [questionId,setQuestionId]=useState('')
   const [open,setOpen]=useState(false),[json,setJson]=useState(''),[reason,setReason]=useState(''),[report,setReport]=useState<Row>(),[confirmed,setConfirmed]=useState(false),[busy,setBusy]=useState(false),{message}=App.useApp()
+  const missing=template.questions.filter(q=>q.type!=='subjective'&&!q.answer?.length).sort((a,b)=>a.number-b.number)
+  const [filling,setFilling]=useState(false),[keyQuestions,setKeyQuestions]=useState<Question[]>([])
+  async function saveKey(){
+    setBusy(true)
+    try{
+      const keyed=missing.map(question=>({...question,answer:keyQuestions.find(candidate=>candidate.id===question.id)?.answer||[]}))
+      const answers=completeAnswerMap(keyed)
+      await send(`/templates/${template.id}/answer-key`,{answers},'PUT')
+      setFilling(false);await onSaved();message.success('答案已保存，已扫描答卷已按答案计分')
+    }catch(e){message.error((e as Error).message)}finally{setBusy(false)}
+  }
   let draft:Row[]=[];try{draft=JSON.parse(json)}catch{}
   const question=template.questions.find(q=>q.id===questionId),entry=Array.isArray(draft)?draft.find(q=>q.id===questionId):undefined,rule=entry?.rule||{mode:'exact'}
   function patch(value:object){setJson(JSON.stringify(draft.map(q=>q.id===questionId?{...q,...value}:q),null,2));setReport(undefined);setConfirmed(false)}
@@ -16,7 +29,12 @@ export function ScoringChanges({template,onSaved}:{template:Template;onSaved:()=
     if(apply){await send(`/templates/${template.id}/scoring`,{questions,reason,confirm:confirmed,preview_sha:report?.preview_sha},'PUT');setOpen(false);await onSaved();message.success('已重新计分，请核对后再次发布成绩')}
     else{setReport(await send(`/templates/${template.id}/scoring-preview`,{questions}));setConfirmed(false)}
   }catch(e){message.error((e as Error).message);setReport(undefined)}finally{setBusy(false)}}
-  return <><Button disabled={!template.questions.some(q=>q.type!=='subjective')} onClick={()=>{setJson(JSON.stringify(template.questions.filter(q=>q.type!=='subjective').map(q=>({id:q.id,answer:q.answer,rule:q.rule||{mode:'exact'}})),null,2));setQuestionId(template.questions.find(q=>q.type!=='subjective')?.id||'');setReason('');setReport(undefined);setConfirmed(false);setOpen(true)}}>调整答案与评分</Button>
+  return <>{missing.length>0&&<Button type="primary" onClick={()=>{setKeyQuestions(missing.map(question=>({...question,answer:[]})));setFilling(true)}}>补录客观题答案（{missing.length}）</Button>}
+    <Modal title="补录客观题答案" open={filling} onCancel={()=>!busy&&setFilling(false)} onOk={saveKey} okText="保存并计分" confirmLoading={busy} okButtonProps={{disabled:!answersComplete(keyQuestions)}} width={620}>
+      <Typography.Paragraph>逐题选择待补录的标准答案，填写完整后保存并计分。</Typography.Paragraph>
+      <AnswerEntry active={filling} questions={keyQuestions} onChange={setKeyQuestions} readOnly={busy}/>
+    </Modal>
+    {template.status==='published'&&!missing.length&&<Button disabled={!template.questions.some(q=>q.type!=='subjective')} onClick={()=>{setJson(JSON.stringify(template.questions.filter(q=>q.type!=='subjective').map(q=>({id:q.id,answer:q.answer,rule:q.rule||{mode:'exact'}})),null,2));setQuestionId(template.questions.find(q=>q.type!=='subjective')?.id||'');setReason('');setReport(undefined);setConfirmed(false);setOpen(true)}}>调整答案与评分</Button>}
     <Modal width={850} title="答案与评分复核" open={open} onCancel={()=>!busy&&setOpen(false)} footer={<Space><Button disabled={busy} onClick={()=>setOpen(false)}>取消</Button><Button loading={busy} onClick={()=>run()}>预览影响</Button><Button type="primary" loading={busy} disabled={!report||!confirmed||!reason.trim()} onClick={()=>run(true)}>确认复核并重新计分</Button></Space>}>
       <Space direction="vertical" size={20} style={{width:'100%'}}>
         <Typography.Paragraph>预览受影响的答卷及分数，确认后重新计分并进入待发布状态。</Typography.Paragraph>

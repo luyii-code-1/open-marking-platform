@@ -20,9 +20,10 @@ export function beginMutation(method='GET'){
 export function automaticPwaUpdates(options:{
   register:()=>Promise<ServiceWorkerRegistration>; ready:()=>boolean; onReady:()=>void
   visible:()=>boolean; online:()=>boolean; now?:()=>number
+  verify?:(worker:ServiceWorker)=>Promise<boolean>
 }){
   const now=options.now??Date.now
-  let stopped=false,registration:ServiceWorkerRegistration|undefined,registering=false,checking=false,lastAttempt=-Infinity,lastCheck=-Infinity
+  let stopped=false,registration:ServiceWorkerRegistration|undefined,registering=false,checking=false,verifying=false,lastAttempt=-Infinity,lastCheck=-Infinity
   const observed=new Map<ServiceWorker,()=>void>()
   function watch(worker:ServiceWorker|null){
     if(!worker||observed.has(worker))return
@@ -48,8 +49,16 @@ export function automaticPwaUpdates(options:{
       checking=true;lastCheck=now()
       void registration.update().catch(()=>{lastCheck=now()-270000}).finally(()=>{checking=false})
     }
-    if(registration.waiting&&options.visible()&&options.ready()&&now()-lastAttempt>=30000){
-      lastAttempt=now();registration.waiting.postMessage({type:'PREPARE_UPDATE'})
+    if(registration.waiting&&!verifying&&options.online()&&options.visible()&&options.ready()&&now()-lastAttempt>=30000){
+      lastAttempt=now()
+      const worker=registration.waiting
+      if(!options.verify)worker.postMessage({type:'PREPARE_UPDATE'})
+      else{
+        verifying=true
+        void options.verify(worker).then(verified=>{
+          if(verified&&!stopped&&registration?.waiting===worker&&options.online()&&options.visible()&&options.ready())worker.postMessage({type:'PREPARE_UPDATE'})
+        }).catch(()=>{}).finally(()=>{verifying=false})
+      }
     }
   }
   const timer=setInterval(tick,5000)

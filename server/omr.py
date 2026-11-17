@@ -1,5 +1,6 @@
 """Shared image recognition used by server recovery and the desktop worker."""
 import math
+from itertools import product
 import cv2
 import numpy as np
 import zxingcpp
@@ -77,22 +78,46 @@ def decode(data,template=None):
 
 def align(image,template):
     width,height=dimensions(template)
-    _,binary=cv2.threshold(image,90,255,cv2.THRESH_BINARY_INV)
-    contours,_=cv2.findContours(binary,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE)
     ih,iw=image.shape
-    candidates=[]
-    for contour in contours:
-        x,y,w,h=cv2.boundingRect(contour)
-        if .65<w/max(h,1)<1.5 and 2.5<w*width/iw<6.5 and 2.5<h*height/ih<6.5 and cv2.contourArea(contour)/(w*h)>.75:
-            candidates.append([x+w/2,y+h/2])
-    if len(candidates)<4: raise ValueError('无法定位四角标记')
-    points=np.array(candidates,dtype=np.float32)
-    corners=np.array([[0,0],[iw,0],[iw,ih],[0,ih]],dtype=np.float32)
-    chosen=np.array([points[np.argmin(np.linalg.norm((points-corner)/[iw,ih],axis=1))] for corner in corners])
-    if len(np.unique(chosen,axis=0))!=4: raise ValueError('四角标记不完整')
-    expected=np.array([[7,7],[width-7,7],[width-7,height-7],[7,height-7]],dtype=np.float32)
-    if np.max(np.abs(chosen/[iw/width,ih/height]-expected))>8:raise ValueError('四角标记位置异常，需要人工定位')
-    target=np.array([[7,7],[width-7,7],[width-7,height-7],[7,height-7]],dtype=np.float32)*4
+    pixels_per_mm=np.array([iw/width,ih/height])
+    rw,rh=np.ceil(np.minimum([width*.16,height*.16],40)*pixels_per_mm).astype(int)
+    corners=[]
+    for x,y in ((0,0),(iw-rw,0),(iw-rw,ih-rh),(0,ih-rh)):
+        roi=image[y:y+rh,x:x+rw]
+        _,_,stats,centres=cv2.connectedComponentsWithStats(np.uint8(roi<=90))
+        candidates=[]
+        for (left,top,w,h,area),centre in zip(stats[1:],centres[1:]):
+            bw,bh=np.array([w,h])/pixels_per_mm
+            if (left>0 and top>0 and left+w<rw and top+h<rh and
+                    2.5<=bw<=6.5 and 2.5<=bh<=6.5 and .6<=bw/bh<=1.6 and area>=.7*w*h):
+                candidates.append((centre+[x,y])/pixels_per_mm)
+        if not candidates:raise ValueError('四角定位标记不完整')
+        if len(candidates)>8:raise ValueError('角区方块过多，请核对原图')
+        corners.append(candidates)
+
+    # A reduced print may be offset on the glass. Match the shape of the
+    # entire frame independently of that offset, including opposing edges.
+    best_error=second_error=math.inf
+    chosen=None
+    for tl,tr,br,bl in product(*corners):
+        across=((tr-tl)+(br-bl))/2
+        down=((bl-tl)+(br-tr))/2
+        sx,sy=across[0]/(width-14),down[1]/(height-14)
+        if not (.76<sx<1.12 and .76<sy<1.12 and abs(sx-sy)<.1):continue
+        if abs(across[1])>.15*across[0] or abs(down[0])>.15*down[1]:continue
+        closure=np.linalg.norm(tl+br-tr-bl)
+        if closure>min(width,height)*.025:continue
+        skew=abs(np.dot(across,down))/(np.linalg.norm(across)*np.linalg.norm(down))
+        if skew>.10:continue
+        error=closure+min(width,height)*(abs(sx-sy)+skew)
+        if error<best_error:
+            chosen=np.float32(np.array([tl,tr,br,bl])*pixels_per_mm)
+            second_error,best_error=best_error,error
+        elif error<second_error:
+            second_error=error
+    if chosen is None:raise ValueError('四角标记与题卡定位框不一致，请核对原图')
+    if second_error-best_error<1:raise ValueError('存在多组可能的四角标记，请核对原图')
+    target=np.float32([[7,7],[width-7,7],[width-7,height-7],[7,height-7]])*4
     transform=cv2.getPerspectiveTransform(chosen,target)
     return cv2.warpPerspective(image,transform,(width*4,height*4),borderValue=255)
 
@@ -120,10 +145,10 @@ def absent_mark(normalized,side,template=None):
     return bool(crop.size and np.mean(crop<135)>.45)
 
 
-def orient_scan(image, template, side):
+def normalize_scan(image, template, side):
     """Use printed fiducials and the calibration strip before interpreting answers."""
     if not manual_binding(template):
-        return image
+        return align(image, template)
     width, height = dimensions(template)
     if (image.shape[1] > image.shape[0]) != (width > height):
         image = cv2.rotate(image, cv2.ROTATE_90_CLOCKWISE)
@@ -131,10 +156,14 @@ def orient_scan(image, template, side):
     def has_strip(page):
         levels = [float(np.median(page[25:29, (width-43+i*5)*4:(width-41+i*5)*4])) for i in range(5)]
         return levels[0]-levels[-1] > 60 and all(a >= b-12 for a,b in zip(levels, levels[1:]))
-    reverse = cv2.rotate(aligned, cv2.ROTATE_180)
+    # Template coordinates are measured from the paper edges. Rotate about
+    # the paper centre so x mm maps to (width-x) mm, even at 4 pixels/mm.
+    h,w=aligned.shape
+    reverse=cv2.warpAffine(aligned,np.float32([[-1,0,w],[0,-1,h]]),(w,h),
+                           flags=cv2.INTER_NEAREST,borderValue=255)
     upright, inverted = has_strip(aligned), has_strip(reverse)
     if upright != inverted:
-        return image if upright else cv2.rotate(image, cv2.ROTATE_180)
+        return aligned if upright else reverse
     if side == 'front':
         # The ten preprinted digit boxes are present even on an unfilled card.
         def grid_score(page):
@@ -143,12 +172,12 @@ def orient_scan(image, template, side):
                        for c in range(template.get('candidate_length',8)) for d in range(10))
         a,b = grid_score(aligned),grid_score(reverse)
         if max(a,b)>100 and max(a,b)>2*min(a,b):
-            return image if a>b else cv2.rotate(image,cv2.ROTATE_180)
+            return aligned if a>b else reverse
     raise ValueError('无法可靠确定纸面方向，请核对原图')
 
 
 def recognize(image,template,side,corners=None):
-    normalized=manual_align(image,template,corners) if corners is not None else align(image,template)
+    normalized=manual_align(image,template,corners) if corners is not None else normalize_scan(image,template,side)
     calibrated=135
     if any(q.get('choice_style') in ('bracket','compact') for q in template.get('questions',[])):
         width,height=dimensions(template)

@@ -25,7 +25,7 @@ public sealed record QualityReport(string[] Issues, double Dpi, double Sharpness
     public string Summary => Passed ? "本地检查通过" : string.Join("；", Issues.Select(x => x switch
     {
         "low_resolution" => "页面分辨率不足", "missing_binding" => "缺少考卷版本绑定", "missing_qr" => "二维码未读出",
-        "wrong_paper" => "二维码与所选考卷或面不符", "multiple_qr" => "混有多个题卡二维码", "missing_markers" => "四角定位标记不完整",
+        "wrong_paper" => "二维码与所选考卷或面不符", "multiple_qr" => "混有多个题卡二维码", "missing_markers" => $"检测到 {Corners}/4 个定位方块，请核对原图",
         "blur" => "页面可能模糊", "too_large" => "上传文件超过30MB", "inspection_failed" => "本地检查未完成，请检查配置或扫描图像", _ => "质量检查异常"
     }));
 }
@@ -99,8 +99,12 @@ public static class QualityInspector
 
     private static int CountCorners(byte[] gray, int width, int height, double paperWidth, double paperHeight)
     {
-        int count = 0, rw = Math.Max(1, width / 10), rh = Math.Max(1, height / 10);
         var sx = width / paperWidth; var sy = height / paperHeight;
+        // A fit-to-page print moves all four squares inwards. This inexpensive
+        // gate finds a square in each corner; the OMR engine checks their geometry.
+        int rw = (int)Math.Ceiling(Math.Min(40, paperWidth * .16) * sx);
+        int rh = (int)Math.Ceiling(Math.Min(40, paperHeight * .16) * sy);
+        int count = 0;
         foreach (var (ox, oy) in new[] { (0, 0), (width - rw, 0), (0, height - rh), (width - rw, height - rh) })
         {
             var seen = new bool[rw * rh]; var found = false;
@@ -117,9 +121,9 @@ public static class QualityInspector
                         { seen[ny * rw + nx] = true; pending.Enqueue((nx, ny)); }
                 }
                 double bw = (maxX - minX + 1) / sx, bh = (maxY - minY + 1) / sy;
-                double cx = (ox + (minX + maxX) / 2.0) / sx, cy = (oy + (minY + maxY) / 2.0) / sy;
-                double ex = ox == 0 ? 7 : paperWidth - 7, ey = oy == 0 ? 7 : paperHeight - 7;
-                found = bw >= 2.5 && bw <= 6.5 && bh >= 2.5 && bh <= 6.5 && bw / bh >= .6 && bw / bh <= 1.6 && pixels >= .7 * (maxX - minX + 1) * (maxY - minY + 1) && Math.Abs(cx - ex) <= 8 && Math.Abs(cy - ey) <= 8;
+                found = minX > 0 && minY > 0 && maxX < rw-1 && maxY < rh-1 &&
+                    bw >= 2.5 && bw <= 6.5 && bh >= 2.5 && bh <= 6.5 && bw / bh >= .6 && bw / bh <= 1.6 &&
+                    pixels >= .7 * (maxX - minX + 1) * (maxY - minY + 1);
             }
             if (found) count++;
         }

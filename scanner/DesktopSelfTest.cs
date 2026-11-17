@@ -10,8 +10,8 @@ internal static class DesktopSelfTest
     private static void Checkpoint(string name,object? result=null){Console.WriteLine(JsonSerializer.Serialize(new{checkpoint=name,result}));Console.Out.Flush();}
     public static async Task Run(string[] args)
     {
-        if(args.Length is not (10 or 11))throw new ArgumentException("Desktop self-test: server root front back project username password python-or-dash repository [first-side]");
-        var firstSide=args.Length==11?args[10]:"front";
+        if(args.Length is not (10 or 11 or 12))throw new ArgumentException("Desktop self-test: server root front back project username password python-or-dash repository [first-side]");
+        var firstSide=args.Length>=11?args[10]:"front";
         if(firstSide is not ("front" or "back"))throw new ArgumentException("Invalid first side");
         var root=Path.GetFullPath(args[2]);Directory.CreateDirectory(root);var queue=new LocalQueue(root);
         var python=args[8]=="-"?null:args[8];var repository=args[9];
@@ -40,11 +40,13 @@ internal static class DesktopSelfTest
                 await online.Invoke("downloadProject",Json(new{project_id=args[5]}));await online.Close();
             }
             Checkpoint("ready_for_offline");await Console.In.ReadLineAsync();
-            string batchId;
+            string batchId,bulkId="";
             using(var worker=Worker())
             using(var offline=new DesktopController(new LocalQueue(root),worker,selfTest:true))
             {
                 var state=Json(await offline.Invoke("state",Json(new{}))!);Check(!state.GetProperty("online").GetBoolean(),"Restart should start with cached metadata before a connection.");
+                Check(!state.GetProperty("session_open").GetBoolean(),"Startup bypassed server selection.");
+                await offline.Invoke("enterOffline",Json(new{}));
                 var group=state.GetProperty("package").GetProperty("groups")[0];
                 Check(!group.GetProperty("template").GetProperty("questions")[0].TryGetProperty("answer",out _),"Device cache contains an answer key.");
                 var tags=state.GetProperty("package").TryGetProperty("room_tags",out var tagList)?tagList.EnumerateArray().Where(t=>!t.TryGetProperty("group_id",out var gid)||gid.GetString()==group.GetProperty("id").GetString()).Select(t=>t.GetProperty("id").GetString()).ToArray():[];
@@ -74,11 +76,52 @@ internal static class DesktopSelfTest
                 var preview=Json(await offline.Invoke("preview",Json(new{batch_id=batchId,page_id=queue.Pages(batchId).First(p=>p.Side=="front").CaptureId,question_id=firstQuestion.GetProperty("id").GetString()})));
                 using(var imageStream=new MemoryStream(Convert.FromBase64String(preview.GetProperty("url").GetString()!.Split(',')[1])))
                 using(var thumbnail=System.Drawing.Image.FromStream(imageStream))Check(thumbnail.Width==360&&thumbnail.Height==172,"Local question preview did not merge all regions.");
+                if(args.Length==12)
+                {
+                    var bulk=Json(await offline.Invoke("createBatch",Json(new{group_id=group.GetProperty("id").GetString(),name="连续缓冲采集验证",capture_mode="duplex",first_side=firstSide,room_tag_ids=Array.Empty<string>()}))!);
+                    bulkId=bulk.GetProperty("id").GetString()!;
+                    var bulkBatch=queue.Batches().Single(b=>b.Id==bulkId);
+                    await offline.Capture(bulkBatch,async receive=>{
+                        var fronts=new[]{args[3],args[3],args[11]};
+                        for(var index=0;index<3;index++)
+                        {
+                            using var front=System.Drawing.Image.FromFile(fronts[index]);
+                            using var back=System.Drawing.Image.FromFile(args[4]);
+                            if(index==0){using var graphics=System.Drawing.Graphics.FromImage(front);graphics.Clear(System.Drawing.Color.White);}
+                            if(firstSide=="front"){await receive(front);await receive(back);}
+                            else{await receive(back);await receive(front);}
+                        }
+                    },"auto");
+                    var saved=Json(await offline.Invoke("state",Json(new{batch_id=bulkId,page_scope="room"})));
+                    Check(saved.GetProperty("page_total").GetInt32()==6,"Continuous acquisition stopped at an invalid sheet.");
+                    Check(saved.GetProperty("pages").EnumerateArray().Select(p=>p.GetProperty("batch_id").GetString()).Distinct().Count()==3,"Continuous acquisition lost a sheet.");
+                    Check(saved.GetProperty("pages").EnumerateArray().Count(p=>p.GetProperty("side").GetString()=="front")==3,"Continuous acquisition lost front pages.");
+                    var manual=Json(await offline.Invoke("createBatch",Json(new{group_id=group.GetProperty("id").GetString(),name="手动停止验证",capture_mode="duplex",first_side=firstSide,room_tag_ids=Array.Empty<string>()}))!);
+                    var manualBatch=queue.Batches().Single(b=>b.Id==manual.GetProperty("id").GetString());
+                    await offline.Capture(manualBatch,async receive=>{
+                        using var front=System.Drawing.Image.FromFile(args[3]);
+                        using(var graphics=System.Drawing.Graphics.FromImage(front))graphics.Clear(System.Drawing.Color.White);
+                        await receive(front);
+                        await offline.Invoke("stop",Json(new{}));
+                        await receive(front);
+                    },"auto");
+                    Check(queue.Pages(manualBatch.Id).Count==1,"Manual stop continued receiving images or lost its saved page.");
+                }
                 await offline.Close();
             }
             Checkpoint("offline_processed",new{batch_id=batchId,pages=2});await Console.In.ReadLineAsync();
             using(var resumed=new DesktopController(new LocalQueue(root),Worker(),selfTest:true))
             {
+                await resumed.Invoke("enterOffline",Json(new{}));
+                var deadline=DateTime.UtcNow.AddSeconds(90);
+                while(resumed.Processing&&DateTime.UtcNow<deadline)await Task.Delay(100);
+                Check(!resumed.Processing,"Recognition queue did not resume after restart.");
+                if(bulkId.Length>0)
+                {
+                    var bulk=queue.Batches().Single(b=>b.Id==bulkId);
+                    var related=queue.Batches().Where(b=>b.GroupId==bulk.GroupId&&b.RoomTagsJson==bulk.RoomTagsJson).ToArray();
+                    Check(related.Length==4&&related.Count(b=>b.Status=="frozen")==2&&related.Count(b=>b.Status=="local_paired")==2,"Invalid sheet blocked later sheets or recovery failed.");
+                }
                 Check(queue.Batches().Single(b=>b.Id==batchId).Status=="local_paired","Restart lost the local pairing state.");
                 await resumed.Tick();Check(queue.Pages(batchId).All(p=>p.Status=="pending"),"Connection uploaded local pages without confirmation.");
                 await resumed.Invoke("upload",Json(new{batch_id=batchId}));
@@ -86,7 +129,7 @@ internal static class DesktopSelfTest
                 Check(queue.Batches().Single(b=>b.Id==batchId).Status=="paired","Resumed batch was not committed: "+queue.Batches().Single(b=>b.Id==batchId).Error);
                 Check(queue.Pages(batchId).All(p=>p.Status=="uploaded"),"Upload acknowledgement was lost.");await resumed.Close();
             }
-            Checkpoint("passed",new{batch_id=batchId,scope="offline restart, local TCP recognition, durable queue, native signed upload and server pairing"});
+            Checkpoint("passed",new{batch_id=batchId,continuous_pages=bulkId.Length>0?6:0,invalid_sheet_continued=bulkId.Length>0,scope="offline restart, continuous capture, queued recognition and explicit signed upload"});
         }
         finally
         {

@@ -1,4 +1,12 @@
 /* Component wrappers keep their accessible labels and state classes. */
+.anticon-undo { --fluent-glyph: url("@fluentui/svg-icons/icons/arrow_undo_20_regular.svg"); }
+.anticon-redo { --fluent-glyph: url("@fluentui/svg-icons/icons/arrow_redo_20_regular.svg"); }
+.anticon-strikethrough { --fluent-glyph: url("@fluentui/svg-icons/icons/text_strikethrough_20_regular.svg"); }
+.anticon-align-left { --fluent-glyph: url("@fluentui/svg-icons/icons/text_align_left_20_regular.svg"); }
+.anticon-align-center { --fluent-glyph: url("@fluentui/svg-icons/icons/text_align_center_20_regular.svg"); }
+.anticon-align-right { --fluent-glyph: url("@fluentui/svg-icons/icons/text_align_right_20_regular.svg"); }
+.anticon-ordered-list { --fluent-glyph: url("@fluentui/svg-icons/icons/text_number_list_ltr_20_regular.svg"); }
+.anticon-unordered-list { --fluent-glyph: url("@fluentui/svg-icons/icons/text_bullet_list_20_regular.svg"); }
 .anticon-arrow-left { --fluent-glyph: url("@fluentui/svg-icons/icons/arrow_left_20_regular.svg"); }
 .anticon-arrow-right { --fluent-glyph: url("@fluentui/svg-icons/icons/arrow_right_20_regular.svg"); }
 .anticon-left { --fluent-glyph: url("@fluentui/svg-icons/icons/chevron_left_20_regular.svg"); }
@@ -62,6 +70,14 @@
 .anticon-caret-left { --fluent-glyph: url("@fluentui/svg-icons/icons/caret_left_20_regular.svg"); }
 
 :is(
+  .anticon-undo,
+  .anticon-redo,
+  .anticon-strikethrough,
+  .anticon-align-left,
+  .anticon-align-center,
+  .anticon-align-right,
+  .anticon-ordered-list,
+  .anticon-unordered-list,
   .anticon-arrow-left,
   .anticon-arrow-right,
   .anticon-left,

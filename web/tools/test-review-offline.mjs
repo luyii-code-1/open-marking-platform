@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import ts from 'typescript'
-import { indexedDB } from 'fake-indexeddb'
+import { indexedDB, IDBKeyRange } from 'fake-indexeddb'
 
 globalThis.indexedDB=indexedDB
+globalThis.IDBKeyRange=IDBKeyRange
 globalThis.sessionStorage={setItem(){}}
 async function sourceUrl(name,replacements={}){
   let source=await readFile(new URL('../src/'+name,import.meta.url),'utf8')
@@ -11,7 +12,8 @@ async function sourceUrl(name,replacements={}){
   const {outputText}=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ES2022}})
   return `data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`
 }
-const storeUrl=await sourceUrl('reviewStore.ts'),store=await import(storeUrl)
+const interactionUrl=await sourceUrl('reviewInteraction.ts')
+const storeUrl=await sourceUrl('reviewStore.ts',{"'./reviewInteraction'":JSON.stringify(interactionUrl)}),store=await import(storeUrl)
 const {syncReviewRecords}=await import(await sourceUrl('reviewSync.ts',{"'./reviewStore'":JSON.stringify(storeUrl)}))
 const owner='teacher-1',question={id:'q1',number:1,type:'subjective',points:10,step:.5},template={id:'t1',name:'题卡',group_id:'g1',revision:1}
 const task=id=>({id,question_id:'q1',status:'claimed',score_revision:0})
@@ -30,11 +32,15 @@ async function transport(path,body){
   if(responseLost){responseLost=false;throw new TypeError('Response lost after server commit')}
   return {status:200,body:row}
 }
-await store.cacheReview(owner,task('one'),template,question,image)
+assert.equal(store.hasUnsentReview(await store.cacheReview(owner,task('one'),template,question,image)),false)
+await store.saveReviewDraft(owner,'one',20,'20')
+assert.equal((await store.getReview(owner,'one')).draftText,'20')
+assert.ok(store.hasUnsentReview(await store.getReview(owner,'one')))
+await assert.rejects(store.enqueueReview(owner,'one',20),/满分 10/)
 await store.saveReviewDraft(owner,'one',4.5)
 await store.settleReviewWrites()
 // A new module connection represents reopening after refresh, sharing IndexedDB.
-const reopened=await import(await sourceUrl('reviewStore.ts')+'#reopen')
+const reopened=await import(storeUrl+'#reopen')
 assert.equal((await reopened.getReview(owner,'one')).draft,4.5)
 assert.equal(await (await reopened.getReview(owner,'one')).image.text(),'answer-image')
 assert.equal((await store.listReviews('other-teacher')).length,0)
@@ -42,12 +48,17 @@ const [first,second]=await Promise.all([store.enqueueReview(owner,'one',4.5),reo
 assert.equal(first.operation.id,second.operation.id,'Two tabs must share one queued operation')
 await assert.rejects(store.saveReviewDraft(owner,'one',6))
 await store.enqueueReview(owner,'one',4.5) // recovery clears the failed write for this record
-offline=true;assert.equal((await syncReviewRecords(owner,transport)).state,'offline');assert.equal((await reopened.getReview(owner,'one')).status,'queued')
+let uploadClock=1000
+const sync=()=>syncReviewRecords(owner,transport,()=>uploadClock)
+offline=true;assert.equal((await sync()).state,'offline');assert.equal((await reopened.getReview(owner,'one')).status,'queued')
+uploadClock+=store.REVIEW_RETRY_DELAYS[0]
 offline=false;responseLost=true
-assert.equal((await syncReviewRecords(owner,transport)).state,'offline')
+assert.equal((await sync()).sent,0)
 assert.equal(receipts.size,1);assert.equal((await store.getReview(owner,'one')).operation.id,first.operation.id)
-assert.equal((await syncReviewRecords(owner,transport)).sent,1)
+uploadClock+=store.REVIEW_RETRY_DELAYS[1]
+assert.equal((await sync()).sent,1)
 assert.equal(receipts.size,1);assert.equal((await store.getReview(owner,'one')).status,'confirmed')
+assert.equal(store.hasUnsentReview(await store.getReview(owner,'one')),false)
 await store.cacheReview(owner,task('two'),template,question,image);await store.enqueueReview(owner,'two',3)
 const before=calls
 mismatch=true;assert.equal((await syncReviewRecords(owner,transport)).state,'login');assert.equal(calls,before)
@@ -58,6 +69,25 @@ await syncReviewRecords(owner,transport)
 assert.equal((await store.getReview(owner,'two')).status,'conflict')
 assert.equal((await store.getReview(owner,'two')).operation.score,3)
 const conflictCalls=calls;await syncReviewRecords(owner,transport);assert.equal(calls,conflictCalls,'Conflicts must not retry forever')
+conflict=''
+await store.cacheReview(owner,task('retry-limit'),template,question,image)
+const queued=await store.enqueueReview(owner,'retry-limit',8.5)
+await store.cacheReview(owner,task('parallel'),template,question,image)
+await store.enqueueReview(owner,'parallel',9)
+let attempts=0
+const temporary=async(path,body)=>path.includes('/retry-limit/')?(attempts++,{status:503,body:{}}):transport(path,body)
+const retryPass=()=>syncReviewRecords(owner,temporary,()=>uploadClock)
+assert.equal((await retryPass()).sent,1,'One failing score must not block other papers')
+for(const delay of store.REVIEW_RETRY_DELAYS){
+  assert.equal((await reopened.getReview(owner,'retry-limit')).status,'queued')
+  const prior=attempts;await retryPass();assert.equal(attempts,prior,'No early retry')
+  uploadClock+=delay;await retryPass()
+}
+const exhausted=await reopened.getReview(owner,'retry-limit')
+assert.equal(attempts,4);assert.equal(exhausted.status,'failed');assert.equal(exhausted.operation.id,queued.operation.id)
+uploadClock+=60000;await retryPass();assert.equal(attempts,4)
+await store.retryFailedReview(exhausted);assert.equal((await sync()).sent,1)
+assert.equal(await reopened.getReview(owner,'retry-limit').then(r=>r.status),'confirmed')
 store.lockReviewUpdate(true);await assert.rejects(store.cacheReview(owner,task('three'),template,question,image));store.lockReviewUpdate(false)
 await store.cacheReview(owner,task('three'),template,question,image)
 const saving=store.saveReviewDraft(owner,'three',2.5);await store.settleReviewWrites();await saving

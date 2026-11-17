@@ -37,6 +37,8 @@ async function checkIcons(folder) {
     if (entry.isDirectory()) { await checkIcons(path); continue }
     if (!/\.(tsx?|css|svg|json|webmanifest|html)$/.test(entry.name)) continue
     const text = await readFile(path, 'utf8')
+    // The paper palette contains document characters that users insert as text.
+    if(entry.name==='paperSymbols.ts')continue
     assert.ok(!/\p{Extended_Pictographic}|[\uFE0F\u20E3\u{1F1E6}-\u{1F1FF}]/u.test(text), `Use SVG library icons instead of emoji: ${path.pathname}`)
     if (entry.name.endsWith('.tsx')) assert.ok(!/[⋯☰▶◀→←↻]/u.test(text), `Use SVG library icons instead of graphical characters: ${path.pathname}`)
   }

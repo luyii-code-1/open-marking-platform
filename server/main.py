@@ -50,6 +50,8 @@ async def lifespan(app):
 
 
 app = FastAPI(title='Open Marking Platform',version='0.1.0',lifespan=lifespan)
+from .paper_fonts import router as paper_fonts_router
+app.include_router(paper_fonts_router)
 from .request_log import record_request
 app.middleware('http')(record_request)
 
@@ -65,6 +67,13 @@ async def conflicting_identifier(request,error):
 
 
 from .dependencies import password_hash,user,admin,scan_user,scan_admin,require,scan_batch
+
+
+@app.get('/api/v1/system/build')
+def system_build():
+    path=web_distribution/'version.json'
+    if not path.is_file():return JSONResponse({'detail':'前端尚未构建'},status_code=503,headers={'Cache-Control':'no-store'})
+    return JSONResponse(json.loads(path.read_text(encoding='utf-8')),headers={'Cache-Control':'no-store'})
 
 
 class Login(BaseModel):
@@ -142,12 +151,15 @@ def create_user(body: Account,current=Depends(admin)):
 
 
 KINDS={'projects':(), 'subjects':('project_id','projects'), 'groups':('subject_id','subjects'), 'classes':(), 'students':('class_id','classes'), 'templates':('group_id','groups'), 'scan-batches':('group_id','groups'), 'assignments':('template_id','templates'), 'score-conversions':()}
+from .exam_status import ExamStatusFilter, STATUS_FIELDS, project_views, filter_projects
 
 
 def list_route(kind):
     def endpoint(current=Depends(scan_user if kind in ('projects','subjects','groups','templates','scan-batches') else user)):
         with connect() as db:
+            if kind=='projects':db.execute('BEGIN')
             values=objects(db,kind)
+            if kind=='projects':values=project_views(db,values)
             if kind=='groups':
                 grades={g['id']:g['name'] for g in objects(db,'grades')}
                 values=[{**v,'grade_name':grades.get(v.get('grade_id'),'')} for v in values]
@@ -160,7 +172,7 @@ def list_route(kind):
             if current['role']=='scanner':
                 if kind=='scan-batches':return [v for v in values if v.get('scanner_device_id')==current['id']]
                 if kind=='templates':return [{k:v[k] for k in ('id','name','group_id','paper','sides','status','revision','layout_version') if k in v} for v in values]
-                fields={'projects':('id','name','status'),'subjects':('id','name','project_id'),'groups':('id','name','subject_id','template_id','frozen','grade_id','grade_name')}
+                fields={'projects':('id','name','status',*STATUS_FIELDS),'subjects':('id','name','project_id'),'groups':('id','name','subject_id','template_id','frozen','grade_id','grade_name')}
                 return [{k:v[k] for k in fields[kind] if k in v} for v in values]
             assigned=[a for a in objects(db,'assignments') if current['id'] in (a.get('user_ids',[])+a.get('arbitrator_ids',[]))]
             templates={a['template_id'] for a in assigned}
@@ -175,6 +187,10 @@ def list_route(kind):
             projects={s['project_id'] for s in objects(db,'subjects') if s['id'] in subjects}
             if kind=='projects': return [p for p in values if p['id'] in projects]
             raise HTTPException(403,'需要管理员权限')
+    if kind=='projects':
+        def projects_endpoint(exam_status:ExamStatusFilter='all',current=Depends(scan_user)):
+            return filter_projects(endpoint(current),exam_status)
+        return projects_endpoint
     return endpoint
 
 
@@ -192,7 +208,10 @@ def create_route(kind):
             value.pop('id',None)
             if kind in ('projects','subjects','groups','classes','students','templates') and not str(value.get('name','')).strip():
                 raise HTTPException(422,'请填写名称')
-            if kind=='projects': value['status']='draft'
+            if kind=='projects':
+                value['status']='draft'
+                for field in STATUS_FIELDS:value.pop(field,None)
+                value['exam_status_mode']='auto'
             if kind=='subjects' and value.get('group_mode','custom') not in ('custom','default'):raise HTTPException(422,'分组方式无效')
             if kind=='groups':
                 value['template_id']=None
@@ -264,17 +283,16 @@ def create_route(kind):
                 from .electives import create_exam_subjects
                 create_exam_subjects(db,result,catalog_ids,current['id'])
             if kind=='groups' and result.get('grade_id'):
-                from .electives import card_catalog,members,save_members
-                entry=card_catalog(db,result)
-                if entry and entry.get('kind_of_subject','elective')=='elective':
-                    save_members(db,result,members(db,result['grade_id'],set(entry['student_ids'])),'elective',set(),current['id'])
-                    result=require(db,result['id'],'groups')
+                from .electives import initialize_roster
+                initialize_roster(db,result,current['id'])
+                result=require(db,result['id'],'groups')
             if kind=='subjects' and value.get('group_mode')=='default':
                 from .templates import default_group
                 group=default_group(db,result['id'],current['id']);result['default_group_id']=group['id']
             if kind=='assignments':
                 from .allocation import ensure
                 ensure(db,template,question,result)
+            if kind=='projects':return project_views(db,[result])[0]
             return result
     return endpoint
 
@@ -324,7 +342,7 @@ def publish(identifier:str,body:dict|None=None,current=Depends(admin)):
             if group.get('template_id')!=(body or {}).get('replace_id'):
                 raise HTTPException(409,'当前正式版本已变化，请重新载入后确认替换')
         from .template_checks import issues,asset_ids
-        errors=issues(template,complete=True)
+        errors=issues(template,complete=True,require_answers=False)
         if errors:raise HTTPException(422,'；'.join(errors))
         try:assets=asset_ids(template)
         except (ValueError,KeyError,TypeError) as error:raise HTTPException(422,str(error))
@@ -358,8 +376,18 @@ def health():
 @app.get('/api/v1/templates/{identifier}/pdf')
 def print_template(identifier:str,current=Depends(admin)):
     with connect() as db: template=require(db,identifier,'templates')
-    if template['status'] not in ('published','superseded'): raise HTTPException(409,'请先发布题卡')
-    return Response(paper.pdf(template),media_type='application/pdf',headers={'Content-Disposition':'attachment; filename=answer-sheet.pdf'})
+    if template['status']=='draft':
+        from .template_checks import issues
+        from .templates import check_assets
+        if not paper.manual_binding(template):raise HTTPException(409,'请在制卡页保存当前版式后导出')
+        errors=issues(template,complete=True,require_answers=False)
+        if errors:raise HTTPException(422,'；'.join(errors))
+        check_assets(template)
+    elif template['status'] not in ('published','superseded'):
+        raise HTTPException(409,'当前版式无法导出')
+    try:content=paper.pdf(template)
+    except ValueError as error:raise HTTPException(422,str(error))
+    return Response(content,media_type='application/pdf',headers={'Content-Disposition':'attachment; filename=answer-sheet.pdf','Cache-Control':'private, no-store'})
 
 
 @app.get('/api/v1/scan-batches/{identifier}/pages')
@@ -538,6 +566,12 @@ app.include_router(record_deletion_router)
 
 from .login_footer import router as login_footer_router
 app.include_router(login_footer_router)
+from .exam_catalog import router as exam_catalog_router
+app.include_router(exam_catalog_router)
+from .exam_status import router as exam_status_router
+app.include_router(exam_status_router)
+from .selection_import import router as selection_import_router
+app.include_router(selection_import_router)
 
 web_distribution=Path(__file__).resolve().parents[1]/'web'/'dist'
 if web_distribution.exists():

@@ -7,7 +7,7 @@
 [Setup]
 AppId={{F99BAA68-43F4-460E-A420-0581A775D95C}
 AppName=Open Marking Platform Scanner Electron
-AppVersion=0.1.4
+AppVersion=0.1.10
 AppPublisher=Open Marking Platform
 DefaultDirName={localappdata}\Programs\OpenMarkingPlatform\ScannerElectron
 DefaultGroupName=Open Marking Platform

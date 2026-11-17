@@ -55,7 +55,9 @@ export class UserActivity {
   private stopped=false
   private flight=false
   private timer:ReturnType<typeof setTimeout>|undefined
-  constructor(private renew:(idleMs:number)=>Promise<unknown>,private now=Date.now,private schedule=setTimeout,private cancel=clearTimeout){}
+  constructor(private renew:(idleMs:number)=>Promise<unknown>,private now=Date.now,
+    private schedule=(callback:()=>void,delay:number)=>setTimeout(callback,delay),
+    private cancel=(timer:ReturnType<typeof setTimeout>)=>clearTimeout(timer)){}
   interact(trusted:boolean){
     if(!trusted||this.stopped)return
     this.last=this.now();this.dirty=true;this.queue()

@@ -30,11 +30,40 @@ def preview(db,identifier,body):
     rows=[]
     for submission in find(db,'submissions',group_id=group['id']):
         if submission['template_id']!=identifier:continue
-        before=sum(result_for(db,submission,q) for q in template['questions'] if q['id'] in changed)
+        prior=[result_for(db,submission,q) for q in template['questions'] if q['id'] in changed]
+        before=sum(prior)/100 if None not in prior else None
         after=sum(result_for(db,submission,q) for q in updated['questions'] if q['id'] in changed)
-        rows.append({'id':submission['id'],'candidate_number':submission['candidate_number'],'before':before/100,'after':after/100})
+        rows.append({'id':submission['id'],'candidate_number':submission['candidate_number'],'before':before,'after':after/100})
     digest=hashlib.sha256(json.dumps({'template':template,'changes':changes,'rows':rows,'frozen':group.get('frozen',False)},sort_keys=True).encode()).hexdigest()
     return template,updated,group,{'preview_sha':digest,'questions':changed,'affected_submissions':len(rows),'changed_scores':sum(r['before']!=r['after'] for r in rows),'rows':rows,'published':bool(group.get('frozen'))}
+
+
+@router.put('/templates/{identifier}/answer-key')
+def fill_answer_key(identifier:str,body:dict,current=Depends(admin)):
+    answers=body.get('answers')
+    if not isinstance(answers,dict) or not answers:raise HTTPException(422,'请填写客观题答案')
+    with connect() as db:
+        db.execute('BEGIN IMMEDIATE')
+        template=require(db,identifier,'templates')
+        group=require(db,template['group_id'],'groups')
+        if template['status'] not in ('published','superseded') or group.get('frozen'):raise HTTPException(409,'该版式当前不能补录答案')
+        questions={q['id']:q for q in template['questions'] if q['type']!='subjective'}
+        added={}
+        for qid,answer in answers.items():
+            if qid not in questions or not isinstance(answer,list) or not answer:raise HTTPException(422,'题目或标准答案无效')
+            question=questions[qid]
+            if question.get('answer'):
+                if question['answer']!=answer:raise HTTPException(409,'该题已有答案，请刷新或使用答案复核')
+            else:
+                question['answer']=answer
+                added[qid]=answer
+        if added:
+            errors=issues(template,complete=True,require_answers=False)
+            if errors:raise HTTPException(422,'；'.join(errors))
+            template['scoring_revision']=template.get('scoring_revision',1)+1
+            put(db,'templates',template,current['id'])
+            put(db,'regrade-events',{'template_id':identifier,'reason':'补录客观题答案','answers':added,'at':time.time()},current['id'])
+        return {'scoring_revision':template.get('scoring_revision',1)}
 
 
 @router.post('/templates/{identifier}/scoring-preview')

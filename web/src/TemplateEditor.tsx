@@ -1,7 +1,7 @@
 import { DraftSaver } from './draftSaver'
 import {ScoringChanges} from './ScoringChanges'
 import { useEffect, useRef, useState } from 'react'
-import { Alert, App, Card, Dropdown, Empty, Form, Input, InputNumber, Modal, Radio, Select, Space, Tabs, Tag, Typography, Upload } from 'antd'
+import { Alert, App, Card, Dropdown, Empty, Form, Input, InputNumber, Modal, Radio, Select, Space, Switch, Tabs, Tag, Typography, Upload } from 'antd'
 import { Table } from './DataTable'
 import { Button } from './Button'
 import { CopyOutlined, DownloadOutlined, PlusOutlined, SaveOutlined } from '@ant-design/icons'
@@ -16,13 +16,14 @@ import { QuestionSettings } from './QuestionSettings'
 
 import { mergeQuestions, splitQuestions, questionNumbers, questionLabel } from './mergeQuestions'
 import { uniformSubjectiveWidths } from './sheetRegions'
+import {subjectiveLayoutKey} from './subjectiveLayout'
 
 const { Text } = Typography
-const emptyTemplate = (groupId = ''): Template => ({ id: crypto.randomUUID(), name: '新答题卡', font_size:13, leading:20, group_id: groupId, paper: 'A4', sides: 2, layout_version: 3, sheet_columns: 1, notice_template:'standard-v1', notice_layout:2, column_frame:true, uniform_subjective:true, print_style:'standard-v2', forbidden_regions:[], candidate_length: 9, revision: 0, questions: [] })
+const emptyTemplate = (groupId = ''): Template => ({ id: crypto.randomUUID(), name: '新答题卡', font_size:13, leading:20, group_id: groupId, paper: 'A4', sides: 2, layout_version: 3, sheet_columns: 1, notice_template:'standard-v1', notice_layout:2, column_frame:true, uniform_subjective:true, auto_subjective_layout:true, print_style:'standard-v2', forbidden_regions:[], candidate_length: 9, revision: 0, questions: [] })
 const lockedVersion=(t:Template)=>t.status==='published'||t.status==='superseded'
 const versionLabel=(t:Template)=>t.status==='superseded'?'历史版本':t.status==='published'?'已发布':'草稿'
 const editableCopy=(t:Template):Template=>lockedVersion(t)?structuredClone(t):uniformSubjectiveWidths({
-  ...structuredClone(t),layout_version:3,uniform_subjective:true,column_frame:t.column_frame??true,notice_layout:2,notice_template:t.notice_template||'standard-v1',
+  ...structuredClone(t),layout_version:3,uniform_subjective:true,auto_subjective_layout:t.auto_subjective_layout??false,column_frame:t.column_frame??true,notice_layout:2,notice_template:t.notice_template||'standard-v1',
   print_style:'standard-v2',forbidden_regions:t.forbidden_regions||[],
 })
 export function TemplateEditor({ groupId }: { groupId?: string }) {
@@ -64,6 +65,33 @@ export function TemplateEditor({ groupId }: { groupId?: string }) {
   const official=groups.data.find(g=>g.id===(groupId||value.group_id))?.template_id
   const saving = !!saveAction || (!!groupId && initialized.current !== groupId)
   const question = value.questions.find(q => q.id === questionId), total = value.questions.reduce((sum, q) => sum + Number(q.points || 0), 0)
+  const [layoutBusy,setLayoutBusy]=useState(false),[layoutError,setLayoutError]=useState('')
+  const layoutSequence=useRef(0),lastLayout=useRef(''),editingRef=useRef(editing);editingRef.current=editing
+  useEffect(()=>setLayoutError(''),[value.id])
+  const layoutKey=subjectiveLayoutKey(value)
+  async function arrange(source:Template,signal?:AbortSignal){
+    const sequence=++layoutSequence.current,key=subjectiveLayoutKey(source)
+    setLayoutBusy(true)
+    try{
+      const result=await request<{value:Template}>('/templates/subjective-layout',{method:'POST',body:JSON.stringify(source),signal})
+      if(signal?.aborted||sequence!==layoutSequence.current||saver.value.id!==source.id||subjectiveLayoutKey(saver.value)!==key)return saver.value
+      const next={...saver.value,questions:result.value.questions}
+      lastLayout.current=subjectiveLayoutKey(next);setLayoutError('')
+      if(JSON.stringify(next.questions)!==JSON.stringify(saver.value.questions))saver.edit(next)
+      const target=editingRef.current
+      if(target?.kind==='question'){
+        const region=next.questions.find(q=>q.id===target.id)?.regions[target.index]
+        if(region)setPage(region.page)
+      }
+      return next
+    }finally{if(sequence===layoutSequence.current)setLayoutBusy(false)}
+  }
+  useEffect(()=>{
+    if(readOnly||saving||!value.auto_subjective_layout||!value.questions.some(q=>q.type==='subjective')||layoutKey===lastLayout.current){setLayoutBusy(false);return}
+    const controller=new AbortController()
+    const timer=setTimeout(()=>{void arrange(saver.value,controller.signal).catch(error=>{if(!controller.signal.aborted)setLayoutError((error as Error).message)})},500)
+    return()=>{clearTimeout(timer);controller.abort()}
+  },[layoutKey,value.id,readOnly,saving])
   useUnsavedChanges(dirty)
   useEffect(() => {
     if (!groupId || initialized.current === groupId || !templates.loaded || !groups.loaded) return
@@ -119,18 +147,30 @@ export function TemplateEditor({ groupId }: { groupId?: string }) {
       }catch(e){message.error((e as Error).message);throw e}finally{setSaveAction('')}
     }})
   }
+  async function exportPaper() {
+    if (saving || !value.group_id) return
+    setSaveAction('export')
+    try {
+      if (!readOnly && !saver.saving && !saver.dirty && !saver.savedAt && !saved.some(t => t.id === value.id)) saver.edit(value)
+      if(!readOnly&&saver.value.auto_subjective_layout)await arrange(saver.value)
+      const current = readOnly ? value : await saver.flush()
+      await download(`/templates/${current.id}/pdf`, `${current.name}.pdf`)
+    } catch (e) { message.error((e as Error).message) }
+    finally { setSaveAction('') }
+  }
   async function save(publish = false) {
     if (readOnly || saving) return
     if (!value.group_id || (groupId && value.group_id !== groupId)) { message.warning('请确认所属题卡'); return }
     setSaveAction(publish ? 'publish' : 'save')
     try {
+      const prepared=saver.value.auto_subjective_layout?await arrange(saver.value):saver.value
       if (publish) {
-        const check = await send<{ valid: boolean; issues: string[] }>('/templates/check', value)
+        const check = await send<{ valid: boolean; issues: string[] }>('/templates/check', prepared)
         if (!check.valid) { modal.warning({ title: '发布前请完善以下内容', content: <ul className="validation-issues">{check.issues.map((issue, index) => <li key={index}>{issue}</li>)}</ul> }); return }
       }
       if(!dirty&&!saved.some(t=>t.id===value.id))saver.edit(value)
       const stored = await saver.flush()
-      if (publish) { saver.load(await send<Template>(`/templates/${stored.id}/publish`,{replace_id:official??null})); message.success('题卡已发布，可以导出打印稿') }
+      if (publish) { saver.load(await send<Template>(`/templates/${stored.id}/publish`,{replace_id:official??null})); message.success('题卡已发布') }
       else message.success('草稿已保存')
       await Promise.all([templates.reload(), groups.reload()])
     } catch (e) { message.error((e as Error).message) }
@@ -169,14 +209,15 @@ export function TemplateEditor({ groupId }: { groupId?: string }) {
         { key: 'copy', label: '复制为新草稿', icon: <CopyOutlined />, disabled: !value.id, onClick: () => load({ ...structuredClone(value), id: crypto.randomUUID(), draft_version:0, name: `${value.name}（副本）`, status: 'draft', revision: 0, layout_version:3, sheet_columns:value.paper==='A3'?(value.sheet_columns||2):1, notice_template:value.notice_template||'standard-v1', print_style:'standard-v2', forbidden_regions:value.forbidden_regions||[], group_id: groupId || value.group_id, questions: value.questions.map(q => ({ ...q, id: crypto.randomUUID() })) }) },
         {key:'delete',label:'删除当前版式',danger:true,onClick:removeVersion},
       ] }}><Button disabled={saving||saver.saving}>题卡操作</Button></Dropdown></Space>
-      <Space wrap><Text type="secondary">{value.questions.length} 题 · {total} 分</Text><Tag color={readOnly ? 'green' : dirty ? 'orange' : 'default'}>{readOnly ? versionLabel(value) : saver.saving ? '正在保存…' : saver.error ? '保存失败' : dirty ? '等待自动保存' : saver.savedAt ? '已保存 '+new Date(saver.savedAt).toLocaleTimeString() : '草稿'}</Tag><Button icon={<SaveOutlined />} disabled={readOnly || saving} loading={saveAction === 'save'} onClick={() => save()}>保存草稿</Button><Button type="primary" disabled={readOnly || saving} loading={saveAction === 'publish'} onClick={() => modal.confirm({ title: official?'替换当前发布版本？':'发布这张题卡？', content: official?'将用「'+value.name+'」替换「'+(saved.find(t=>t.id===official)?.name||'当前版本')+'」。新扫描批次使用新版，已有答卷仍关联原版本。':'发布后可打印并开始扫描。', onOk: () => save(true) })}>审查发布</Button>{value.status==='published'&&<ScoringChanges template={value} onSaved={async()=>{const next=await request<Template[]>('/templates');const t=next.find(t=>t.id===value.id);if(t)load(t);await templates.reload();await groups.reload()}}/>}<Button icon={<DownloadOutlined />} disabled={!value.id || dirty || !readOnly} aria-label="导出打印PDF" onClick={async () => { try { await download(`/templates/${value.id}/pdf`, `${value.name}.pdf`) } catch (e) { message.error((e as Error).message) } }}>打印稿</Button></Space>
+      <Space wrap><Text type="secondary">{value.questions.length} 题 · {total} 分</Text><Tag color={readOnly ? 'green' : dirty ? 'orange' : 'default'}>{readOnly ? versionLabel(value) : saver.saving ? '正在保存…' : saver.error ? '保存失败' : dirty ? '等待自动保存' : saver.savedAt ? '已保存 '+new Date(saver.savedAt).toLocaleTimeString() : '草稿'}</Tag><Button icon={<SaveOutlined />} disabled={readOnly || saving} loading={saveAction === 'save'} onClick={() => save()}>保存草稿</Button><Button type="primary" disabled={readOnly || saving} loading={saveAction === 'publish'} onClick={() => modal.confirm({ title: official?'替换当前发布版本？':'发布这张题卡？', content: official?'将用「'+value.name+'」替换「'+(saved.find(t=>t.id===official)?.name||'当前版本')+'」。新扫描批次使用新版，已有答卷仍关联原版本。':'发布后即可扫描，客观题答案可在扫描后补录。', onOk: () => save(true) })}>审查发布</Button>{readOnly&&<ScoringChanges template={value} onSaved={async()=>{const next=await request<Template[]>('/templates');const t=next.find(t=>t.id===value.id);if(t)load(t);await templates.reload();await groups.reload()}}/>}<Button icon={<DownloadOutlined />} disabled={saving || !value.group_id} loading={saveAction === 'export'} onClick={exportPaper}>导出题卡 PDF</Button></Space>
     </div></Card>
+    {layoutError&&<Alert type="error" showIcon message="题区需要调整" description={layoutError} action={<Button disabled={readOnly||layoutBusy} onClick={()=>void arrange(saver.value).catch(error=>setLayoutError((error as Error).message))}>重新排版</Button>}/>}
     {saver.error&&<Alert type="error" showIcon message="草稿未保存" description={saver.error} action={<Space><Button onClick={()=>void saver.flush().catch(()=>{})}>重试保存</Button><Button onClick={()=>modal.confirm({title:"重新载入服务器草稿？",content:"当前未保存的修改将被替换。",onOk:async()=>{const rows=await request<Template[]>('/templates');const latest=rows.find(t=>t.id===value.id);if(!latest)throw new Error("服务器尚无该草稿，请重试保存");saver.load(editableCopy(latest));await templates.reload()}})}>重新载入</Button></Space>}/>}
     <div className="template-workbench">
       <Card className="template-config"><Tabs activeKey={pane} onChange={key=>{setEditing(null);setPane(key);setForbiddenMode(false);setAnswerMode(key==='objective');setDraw(key==='subjective');if(key==='subjective'&&question?.type!=='subjective')setQuestionId(subjective[0]?.id||'')}} items={[
         { key: 'setup', label: '底版', children: setup },
         { key: 'objective', label: '选择题', children: <ObjectiveEditor value={value} page={page} readOnly={readOnly || saving} selected={questionId} onChange={questions => change({ questions, layout_version:3 })} onSelect={id => select(id)} onEdit={id => select(id, true)} /> },
-        { key: 'subjective', label: '主观题', children: <div className="editor-section"><Space wrap><Button icon={<PlusOutlined />} disabled={readOnly||saving} onClick={() => { const q = newQuestion(Math.max(0, ...value.questions.flatMap(questionNumbers)) + 1); change({ questions: [...value.questions, q] }); setEditing(null);setQuestionId(q.id); setDraw(true); setAnswerMode(false); setForbiddenMode(false) }}>添加主观题并框选</Button><Button disabled={readOnly||saving||mergeIds.length<2} onClick={combine}>合并题目</Button></Space><Text type="secondary">在栏内上下拖动框选作答区，双击已有题区编辑题干。</Text><Table<Question> rowSelection={readOnly?undefined:{selectedRowKeys:mergeIds,onChange:keys=>setMergeIds(keys.map(String)),getCheckboxProps:q=>({disabled:!!q.parts||saving})}} rowClassName={q=>q.id===questionId?'selected-question-row':''} onRow={q=>({onClick:()=>{setEditing(null);setQuestionId(q.id);setDraw(!q.parts);if(q.regions.length)setPage(q.regions[0].page)}})} rowKey="id" size="middle" dataSource={subjective} pagination={{ defaultPageSize:50 }} locale={{ emptyText: <Empty description="添加主观题后，在预览中框选答题区域" /> }} columns={[{ title: '题号', render:(_,q)=>questionLabel(q) }, { title: '分值', render:(_,q)=><InputNumber aria-label={'第'+q.number+'题分值'} disabled={readOnly||saving||!!q.parts} min={0.01} precision={2} value={q.points} onChange={points=>{if(points!==null)change({questions:value.questions.map(item=>item.id===q.id?{...item,points}:item)})}}/> }, { title: '区域', render: (_, q) => q.regions.length ? `${q.regions.length} 个` : '待框选' }, { title: '', render: (_, q) => <Button type="link" onClick={() => select(q.id, true)}>设置</Button> }]} /></div> },
+        { key: 'subjective', label: '主观题', children: <div className="editor-section"><Space wrap><Switch aria-label="题区随内容自动调整" disabled={readOnly||saving} checked={!!value.auto_subjective_layout} onChange={auto_subjective_layout=>change({auto_subjective_layout})}/><Text>题区随内容自动调整</Text><Button disabled={readOnly||saving||layoutBusy} loading={layoutBusy} onClick={()=>void arrange(saver.value).catch(error=>setLayoutError((error as Error).message))}>按内容排版</Button><Button icon={<PlusOutlined />} disabled={readOnly||saving} onClick={() => { const q = newQuestion(Math.max(0, ...value.questions.flatMap(questionNumbers)) + 1); change({ questions: [...value.questions, q] }); setEditing(null);setQuestionId(q.id); setDraw(true); setAnswerMode(false); setForbiddenMode(false) }}>{value.auto_subjective_layout?'添加主观题':'添加主观题并框选'}</Button><Button disabled={readOnly||saving||mergeIds.length<2} onClick={combine}>合并题目</Button></Space><Text type="secondary">双击题区编辑题干；切换移动模式后可拖动底边调整高度。自动排版会顺排后续题区。</Text><Table<Question> rowSelection={readOnly?undefined:{selectedRowKeys:mergeIds,onChange:keys=>setMergeIds(keys.map(String)),getCheckboxProps:q=>({disabled:!!q.parts||saving})}} rowClassName={q=>q.id===questionId?'selected-question-row':''} onRow={q=>({onClick:()=>{setEditing(null);setQuestionId(q.id);setDraw(!q.parts);if(q.regions.length)setPage(q.regions[0].page)}})} rowKey="id" size="middle" dataSource={subjective} pagination={{ defaultPageSize:50 }} locale={{ emptyText: <Empty description="添加主观题后，在预览中框选答题区域" /> }} columns={[{ title: '题号', render:(_,q)=>questionLabel(q) }, { title: '分值', render:(_,q)=><InputNumber aria-label={'第'+q.number+'题分值'} disabled={readOnly||saving||!!q.parts} min={0.01} precision={2} value={q.points} onChange={points=>{if(points!==null)change({questions:value.questions.map(item=>item.id===q.id?{...item,points}:item)})}}/> }, { title: '区域', render: (_, q) => q.regions.length ? `${q.regions.length} 个` : '待框选' }, { title: '', render: (_, q) => <Button type="link" onClick={() => select(q.id, true)}>设置</Button> }]} /></div> },
         { key:'notes',label:'版面文字',children:<div className="editor-section">
           <Text>点击网格添加文字，双击已有文字修改。拖动文字框移动，拖右下角调整大小。</Text>
           {!!notes.filter(n=>n.page===page).length&&<Select aria-label="当前面的文字框" placeholder="选择文字框" value={note?.id} onChange={id=>{setEditing(null);setNoteId(id)}} options={notes.filter(n=>n.page===page).map((n,i)=>({value:n.id,label:new DOMParser().parseFromString(n.html,'text/html').body.textContent?.trim().slice(0,35)||('文字框 '+(i+1))}))}/>}

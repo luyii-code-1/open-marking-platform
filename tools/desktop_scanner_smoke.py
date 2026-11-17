@@ -53,7 +53,7 @@ def run(scanner_dll=None,bundled=False,back_first=False):
                 project=post('projects',{'name':'离线工作区验证'});subject=post('subjects',{'project_id':project['id'],'name':'语文','group_mode':'default'});group_id=subject['default_group_id']
                 grade=post('grades',{'name':'高一'});api.put('groups/'+group_id+'/grade',json={'grade_id':grade['id']}).raise_for_status()
                 cls=post('classes',{'name':'一班','grade_id':grade['id']});post('students',{'class_id':cls['id'],'name':'学生','candidate_number':'123'})
-                post('students',{'class_id':cls['id'],'name':'更正考生','candidate_number':'023'})
+                post('students',{'class_id':cls['id'],'name':'更正考生','candidate_number':'023'});post('students',{'class_id':cls['id'],'name':'连续采集考生','candidate_number':'012'})
                 post('projects/'+project['id']+'/room-tags',{'name':'第一考场','group_id':group_id,'expected_students':1})
                 pairing=post('scanner/pairings',None)
                 template=post('templates',{'group_id':group_id,'name':'本机双面卷','paper':'A4','sides':2,'candidate_length':3,'questions':[
@@ -73,8 +73,17 @@ def run(scanner_dll=None,bundled=False,back_first=False):
                     for region in question['regions']:
                         _,x,y=paper.bubbles(question,region)[1 if index==0 else 0];fill(x,y)
                     path=root/f'filled-{index}.png';path.write_bytes(cv2.imencode('.png',image)[1].tobytes());images.append(path)
+                second=cv2.imread(str(images[0]),cv2.IMREAD_GRAYSCALE)
+                sx=second.shape[1]/210;sy=second.shape[0]/297
+                for col,digit in enumerate('123'):
+                    x=18+col*6;y=57+int(digit)*3.5
+                    cv2.rectangle(second,(round((x-1.5)*sx),round((y-1)*sy)),(round((x+1.5)*sx),round((y+1)*sy)),255,-1)
+                for col,digit in enumerate('012'):
+                    x=18+col*6;y=57+int(digit)*3.5
+                    cv2.rectangle(second,(round((x-1.5)*sx),round((y-1)*sy)),(round((x+1.5)*sx),round((y+1)*sy)),0,-1)
+                second_path=root/'second-front.png';second_path.write_bytes(cv2.imencode('.png',second)[1].tobytes())
                 entry=[str(dll.with_suffix('.exe'))] if bundled else ['dotnet',str(dll)]
-                native=subprocess.Popen([*entry,'--desktop-self-test',base,str(root/'client'),str(images[0]),str(images[1]),project['id'],'pair-code',pairing['code'],'-' if bundled else sys.executable,str(repo),'back' if back_first else 'front'],cwd=repo,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding='utf-8',creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
+                native=subprocess.Popen([*entry,'--desktop-self-test',base,str(root/'client'),str(images[0]),str(images[1]),project['id'],'pair-code',pairing['code'],'-' if bundled else sys.executable,str(repo),'back' if back_first else 'front',str(second_path)],cwd=repo,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding='utf-8',creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
                 messages=queue.Queue()
                 def collect():
                     for line in native.stdout:messages.put(line)

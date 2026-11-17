@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, session, Menu, protocol: electronProtocol, net } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, session, screen, protocol: electronProtocol, net } = require('electron')
 const { spawn } = require('node:child_process')
 const { createInterface } = require('node:readline')
 const path = require('node:path')
@@ -10,21 +10,6 @@ const localPage = 'omp-scanner-ui://app/scanner.html'
 let window, host, server = '', quitting = false, ready = false, sequence = 0, pageGeneration = 0
 const pending = new Map()
 const activations = process.argv.filter(value => value.startsWith('omp-scanner:'))
-let scanSettings = { dpi: 300, color: 'gray' }
-function refreshScanMenu() {
-  const colors = { bw: '黑白', gray: '灰度', color: '彩色' }
-  window.setMenu(Menu.buildFromTemplate([{ label: '扫描参数', submenu: [
-    { label: `${scanSettings.dpi} DPI · ${colors[scanSettings.color]}`, enabled: false },
-    { type: 'separator' },
-    { label: '分辨率', submenu: [150, 200, 300, 600].map(dpi => ({ label: `${dpi} DPI`, type: 'radio', checked: scanSettings.dpi === dpi, click: () => changeScanSettings({ dpi }) })) },
-    { label: '色彩模式', submenu: Object.entries(colors).map(([color, label]) => ({ label, type: 'radio', checked: scanSettings.color === color, click: () => changeScanSettings({ color }) })) },
-  ] }]))
-}
-async function changeScanSettings(value) {
-  try { scanSettings = await invoke('scanSettings', { ...scanSettings, ...value }) }
-  catch (error) { await dialog.showMessageBox(window, { type: 'error', title: '扫描参数', message: error.message }) }
-  refreshScanMenu()
-}
 function send(value) { if (window && !window.isDestroyed() && allowed(window.webContents.getURL(), server, localPage)) window.webContents.send('scanner:message', value) }
 function invoke(method, args = {}) {
   return new Promise((resolve, reject) => {
@@ -75,7 +60,8 @@ else {
     session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
     session.defaultSession.setPermissionCheckHandler(() => false)
     session.defaultSession.on('will-download', event => event.preventDefault())
-    window = new BrowserWindow({ width: 1280, height: 850, minWidth: 960, minHeight: 640, title: '扫描工作台', backgroundColor: '#f3f5f4', show: false, autoHideMenuBar: false,
+    const area=screen.getPrimaryDisplay().workAreaSize
+    window = new BrowserWindow({ width: Math.min(1280,area.width), height: Math.min(850,area.height), minWidth: Math.min(960,area.width), minHeight: Math.min(640,area.height), title: '扫描工作台', backgroundColor: '#f3f5f4', show: false, autoHideMenuBar: false,
       webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true } })
     window.removeMenu()
     window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
@@ -117,8 +103,8 @@ else {
       try { value = JSON.parse(line) } catch { return }
       if (value.event === 'ready') {
         ready = true; server = value.server
-        scanSettings = await invoke('scanSettings'); refreshScanMenu()
-        await navigate(value.page_url || localPage); window.show()
+        window.setMenu(null)
+        await navigate(localPage); window.show()
         for (const uri of activations.splice(0)) await activate(uri)
       } else if (value.event === 'changed') send(value)
       else {

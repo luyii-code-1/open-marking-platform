@@ -43,6 +43,59 @@ const flushed=calls.length;await tick(2000);leaving.flushPending()
 assert.equal(calls.length,flushed,'Page exit does not manufacture a renewal when no input is pending')
 leaving.stop()
 
+// Native browser timers reject a UserActivity instance as their receiver.
+const browserTimers={exports:{}}
+let nativeScheduled=0,nativeCancelled=0
+vm.runInNewContext(sharedSource,{exports:browserTimers.exports,module:browserTimers,
+  setTimeout:function(){assert.equal(this,undefined);nativeScheduled++;return 1},
+  clearTimeout:function(){assert.equal(this,undefined);nativeCancelled++}})
+const nativeActivity=new browserTimers.exports.UserActivity(async()=>{},()=>1)
+nativeActivity.interact(true);await new Promise(resolve=>setImmediate(resolve))
+nativeActivity.interact(true);nativeActivity.stop()
+assert.equal(nativeScheduled,1);assert.equal(nativeCancelled,1)
+
+const subscriptions=[],timers=new Map(),sockets=[]
+class MockSocket {
+  static OPEN=1
+  static CLOSED=3
+  readyState=0
+  constructor(){sockets.push(this)}
+  close(){assert.equal(this.readyState,MockSocket.OPEN,'Finish the handshake before closing');this.readyState=3}
+  send(){assert.fail('A retired connection must not authenticate')}
+}
+const realtime={exports:{}}
+vm.runInNewContext(await compile('RealtimeStatus.tsx'),{
+  module:realtime,exports:realtime.exports,
+  require:name=>name==='react'?{useRef:current=>({current}),useEffect:fn=>subscriptions.push(fn)}:{currentToken:()=>'session'},
+  WebSocket:MockSocket,URL,location:new URL('https://exam.test'),navigator:{onLine:true},
+  window:new EventTarget(),document:new EventTarget(),
+  setTimeout:fn=>{const id=Symbol();timers.set(id,fn);return id},clearTimeout:id=>timers.delete(id),
+})
+realtime.exports.RealtimeStatus({user:{id:'teacher'}})
+const startSocket=subscriptions.at(-1)
+startSocket()()
+assert.equal(timers.size,0,'A remount before the scheduled connection leaves no socket')
+const stopSocket=startSocket()
+for(const run of timers.values())run()
+assert.equal(sockets.length,1);stopSocket()
+sockets[0].readyState=MockSocket.OPEN;sockets[0].onopen()
+assert.equal(sockets[0].readyState,MockSocket.CLOSED)
+
+const nav={exports:{}},windowEvents=new EventTarget()
+let disposeGuard
+vm.runInNewContext(await compile('useNavigation.ts'),{exports:nav.exports,module:nav,
+  window:windowEvents,require:()=>({useEffect:effect=>{disposeGuard=effect()}})})
+nav.exports.useUnsavedChanges(true,true)
+const refresh=new Event('beforeunload',{cancelable:true})
+Object.defineProperty(refresh,'returnValue',{writable:true,value:''})
+windowEvents.dispatchEvent(refresh)
+assert.ok(refresh.defaultPrevented)
+assert.ok(nav.exports.hasUnsavedChanges())
+assert.ok(nav.exports.confirmLeaving(),'A durable upload can continue after in-app navigation')
+disposeGuard()
+assert.equal(windowEvents.dispatchEvent(new Event('beforeunload',{cancelable:true})),true)
+assert.equal(nav.exports.hasUnsavedChanges(),false)
+
 function browser(local){
   const win=new EventTarget(),module={exports:{}};let handler=async()=>new Response('{}')
   vm.runInNewContext(apiSource,{exports:module.exports,module,require:name=>name==='react'?{}:name==='./sharedSession'?shared.exports:name==='./updatePolicy'?{beginMutation:()=>()=>{}}:null,

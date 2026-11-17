@@ -35,9 +35,16 @@ def test_pdf_preview_matches_published_print_pixels_without_persisting_draft(tmp
         body.update(column_frame=True,layout_version=3,print_style='standard-v2',print_notes=[
             {'id':'hint','page':sides,'x':20,'y':140,'width':100,'height':10,'html':'<p>补充说明：结果为 _ _ _ 米。</p>'}
         ])
+        body['questions'][0]['answer']=[]
         created=client.post('/api/v1/templates',json=body,headers=headers).json()
-        published=client.post(f"/api/v1/templates/{created['id']}/publish",headers=headers)
+        url=f"/api/v1/templates/{created['id']}"
+        early=client.get(url+'/pdf',headers=headers)
+        assert early.status_code==200 and early.content.startswith(b'%PDF')
+        draft=tmp_path/'draft.pdf';draft.write_bytes(early.content)
+        published=client.post(url+'/publish',headers=headers)
         assert published.status_code==200,published.text
+        body['questions'][0]['answer']=['B']
+        assert client.put(url+'/answer-key',json={'answers':{body['questions'][0]['id']:['B']}},headers=headers).status_code==200
         template=published.json()
         assert (template['font_size'],template['leading'])==(13,20)
         pdf=client.get(f"/api/v1/templates/{template['id']}/pdf",headers=headers)
@@ -48,6 +55,11 @@ def test_pdf_preview_matches_published_print_pixels_without_persisting_draft(tmp
             assert preview.headers['content-type']=='image/png' and preview.headers['cache-control']=='private, no-store'
             prefix=tmp_path/f'print-{page}'
             subprocess.run([renderer,'-r','220','-f',str(page),'-l',str(page),'-singlefile','-png',str(source),str(prefix)],capture_output=True,check=True)
+            draft_prefix=tmp_path/f'draft-{page}'
+            subprocess.run([renderer,'-r','220','-f',str(page),'-l',str(page),'-singlefile','-png',str(draft),str(draft_prefix)],capture_output=True,check=True)
+            with Image.open(draft_prefix.with_suffix('.png')) as early_page,Image.open(prefix.with_suffix('.png')) as final_page:
+                assert early_page.size==final_page.size
+                assert ImageChops.difference(early_page.convert('RGB'),final_page.convert('RGB')).getbbox() is None
             with Image.open(io.BytesIO(preview.content)) as actual,Image.open(prefix.with_suffix('.png')) as expected:
                 assert actual.size==expected.size
                 assert ImageChops.difference(actual.convert('RGB'),expected.convert('RGB')).getbbox() is None

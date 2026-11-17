@@ -14,6 +14,16 @@ export function scorePresets(points:number,step:number) {
   return values
 }
 
+export function scoreInputError(raw:string,points:number,step=.5):string {
+  const text=raw.trim()
+  if(!text)return '请先输入分数'
+  if(!/^-?(?:\d+(?:\.\d{0,2})?|\.\d{1,2})$/.test(text))return '请输入数字，最多保留两位小数'
+  const score=Number(text)
+  if(!Number.isFinite(score)||score<0||score>points)return `本题满分 ${points} 分，请输入 0～${points} 分`
+  if(!(step>0)||Math.round(score*100)%Math.round(step*100)!==0)return `本题按 ${step} 分递增，请调整分数`
+  return ''
+}
+
 // History is displayed newest first; previous moves toward earlier reviews.
 export function previousReview<T extends {id:string}>(rows:T[],currentId?:string) {
   const index=rows.findIndex(row=>row.id===currentId)

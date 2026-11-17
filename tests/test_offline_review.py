@@ -40,7 +40,7 @@ def test_offline_score_receipt_after_response_loss_and_revision_conflict(review)
     assert client.post(url,headers=headers,json={**first,'score':9}).status_code==409
 
 
-@pytest.mark.parametrize('condition',['expired','invalidated','frozen','deleted','step','protocol','missing_revision'])
+@pytest.mark.parametrize('condition',['expired','invalidated','frozen','deleted','step','range','precision','protocol','missing_revision'])
 def test_offline_conflicts_preserve_server_result(review,condition):
     client,headers,task,template=review;payload=operation()
     with db.connect() as connection:
@@ -51,6 +51,8 @@ def test_offline_conflicts_preserve_server_result(review,condition):
         if condition=='deleted':connection.execute('UPDATE objects SET deleted=1 WHERE id=?',(task['id'],))
         else:db.put(connection,'tasks',task)
     if condition=='step':payload['score']=.1
+    if condition=='range':payload['score']=1000
+    if condition=='precision':payload['score']=5.001
     if condition=='protocol':payload['offline_protocol']=2
     if condition=='missing_revision':payload.pop('base_score_revision')
     response=client.post('/api/v1/tasks/'+task['id']+'/score',headers=headers,json=payload)

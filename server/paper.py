@@ -68,6 +68,10 @@ def validate(template):
             for previous in occupied:
                 if previous['page']==region['page'] and region['x']<previous['x']+previous['width'] and previous['x']<region['x']+region['width'] and region['y']<previous['y']+previous['height'] and previous['y']<region['y']+region['height']: raise ValueError('答题区域重叠')
             occupied.append(region)
+            if template.get('auto_subjective_layout') and question['type']=='subjective' and not question.get('parts'):
+                from .subjective_layout import required_height
+                if region['height']+.001<required_height(question,region['width'],template):
+                    raise ValueError(f"第{question['number']}题内容或横线超过题区，请先按内容排版")
             if question.get('content_html') and not question.get('parts'):
                 image_height=min(region['height']-12,question.get('image_height',25)) if question.get('image_asset_id') else 0
                 rich_layout(question['content_html'],(region['width']-6)*mm,(region['height']-12-image_height)*mm,**text_options)

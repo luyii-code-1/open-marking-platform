@@ -3,10 +3,50 @@ import json
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from fastapi.responses import FileResponse
-from .db import connect, find, objects, put
+from .db import connect, find, get, objects, put
 from .dependencies import admin, require
 
 router=APIRouter(prefix='/api/v1')
+
+
+@router.get('/groups/{identifier}/roster/candidates')
+def roster_candidates(identifier:str,current=Depends(admin)):
+    from .school import group_students,student_view
+    with connect() as db:
+        db.execute('BEGIN')
+        group=require(db,identifier,'groups')
+        if not group.get('grade_id'):raise HTTPException(422,'请先设置题卡所属年级')
+        classes=[c for c in objects(db,'classes') if c.get('grade_id')==group['grade_id']]
+        class_ids={c['id'] for c in classes}
+        selected={s['id'] for s in group_students(db,group) or []}
+        students=[{**student_view(db,s),'in_roster':s['id'] in selected} for s in objects(db,'students') if s.get('class_id') in class_ids]
+        return {'group_id':identifier,'grade_id':group['grade_id'],'classes':classes,'students':students,'roster_count':len(selected)}
+
+
+@router.post('/groups/{identifier}/roster/remove-students')
+def remove_roster_students(identifier:str,body:dict,current=Depends(admin)):
+    from .school import group_students
+    with connect() as db:
+        db.execute('BEGIN IMMEDIATE')
+        group=require(db,identifier,'groups')
+        if group.get('frozen'):raise HTTPException(409,'成绩已发布，请先发起复核')
+        ids=body.get('student_ids')
+        if not isinstance(ids,list) or not ids or any(not isinstance(sid,str) or not sid for sid in ids):raise HTTPException(422,'请选择需要移出的应考学生')
+        selected=set(ids)
+        members=group_students(db,group) or []
+        if not selected.issubset({s['id'] for s in members}):raise HTTPException(409,'应考名单已变化，请刷新后重新选择')
+        retained=sum(s['student_id'] in selected for s in find(db,'submissions',group_id=identifier))
+        if retained and body.get('confirm_retained') is not True:raise HTTPException(409,'所选学生已有答卷记录，请确认仅移出应考名单并保留已有答卷、评分和成绩')
+        remaining=[s for s in members if s['id'] not in selected]
+        old=get(db,group.get('roster_id'),'rosters') or {}
+        if group.get('grade_id') or group.get('roster_mode')=='selected':
+            from .electives import save_members
+            save_members(db,group,remaining,old.get('source','manual'),set(old.get('supplemental_ids',[]))-selected,current['id'])
+        else:
+            roster={**old,'group_id':identifier,'class_ids':[],'student_ids':[s['id'] for s in remaining],'students':remaining}
+            saved=put(db,'rosters',roster,current['id'])
+            put(db,'groups',{**group,'roster_id':saved['id'],'expected_students':len(remaining)},current['id'])
+        return {'removed':len(selected),'retained_submissions':retained,'count':len(remaining)}
 
 
 @router.get('/groups/{identifier}/roster')

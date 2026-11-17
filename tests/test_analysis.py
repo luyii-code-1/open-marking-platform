@@ -3,6 +3,7 @@ import io
 import time
 from uuid import uuid4
 from fastapi.testclient import TestClient
+from openpyxl import load_workbook
 from server import db
 from server.main import app
 
@@ -78,3 +79,50 @@ def test_analysis_statistics_rank_scope_conversion_and_exports(tmp_path,monkeypa
         assert rows[0][9].startswith("'=")
         for invalid in ({'metric':'no'},{'pass_ratio':.9,'excellent_ratio':.8},{'pass_ratio':'nan'}):
             assert client.get(path,params={**params,**invalid},headers=admin).status_code==422
+
+        # Simulate a merged marking item and a student on the roster with no submission.
+        with db.connect() as connection:
+            group = db.get(connection, groups[0]['id'])
+            template = db.get(connection, group['template_id'])
+            template['questions'][1]['parts'] = [{'number': 5, 'points': 3}, {'number': 7, 'points': 4}]
+            db.put(connection, 'templates', template)
+            missing = db.put(connection, 'students', {'class_id': cls1['id'], 'name': '未到', 'candidate_number': '006'})
+            roster = db.put(connection, 'rosters', {'group_id': group['id'], 'students': [*students, missing]})
+            db.put(connection, 'groups', {**group, 'roster_id': roster['id']})
+            scanned = next(s for s in db.find(connection, 'submissions', group_id=group['id']) if s['candidate_number'] == '001')
+            room = db.put(connection, 'room-tags', {'project_id': project['id'], 'name': '考场一'})
+            db.put(connection, 'submissions', {**scanned, 'room_tags': [room]})
+
+        def workbook(path, params, headers):
+            response = client.get('/api/v1/' + path, params={**params, 'format': 'xlsx'}, headers=headers)
+            assert response.status_code == 200 and 'spreadsheetml' in response.headers['Content-Type']
+            return load_workbook(io.BytesIO(response.content))
+
+        sheet = workbook('results/export', params, admin).active
+        assert sheet.freeze_panes == 'C2'
+        headers, *values = list(sheet.values)
+        assert headers[6:8] == ('第1题', '第5、7题（合计）')
+        rows = {r[0]: r for r in values}
+        assert len(rows) == 7 and rows['000'][1:5] == ('=公式名字', '一班', '已完成', 10)
+        assert rows['001'][6:8] == (0, 4) and rows['000'][6:8] == (3, 7)
+        assert rows['002'][3:8] == ('缺考', 0, 0, 0, 0)
+        assert rows['003'][3:8] == ('待结分', None, None, 3, None)
+        assert rows['006'][3:8] == ('未扫描', None, None, None, None)
+        assert all(c.data_type != 'f' for record in sheet for c in record)
+        assert sheet['A2'].data_type == 's'
+        filtered = workbook('results/export', {**params, 'room_tag_id': room['id']}, teacher_headers).active
+        assert filtered.max_row == 2 and filtered['A2'].value == '001' and filtered['J2'].value == '考场一'
+        empty = workbook('results/export', {**params, 'room_tag_id': str(uuid4())}, admin).active
+        assert list(empty.values) == [headers]
+        project_params = {'project_id': project['id'], 'view': 'items'}
+        book = workbook('analysis/project/export', project_params, admin)
+        assert len(book.worksheets) == 2
+        assert list(book.worksheets[0].values) == list(sheet.values)
+        assert '第5、7题（合计）' not in next(book.worksheets[1].values)
+        visible_book = workbook('analysis/project/export', project_params, teacher_headers)
+        assert len(visible_book.worksheets) == 1
+        assert {r[0] for r in list(visible_book.active.values)[1:]} == {'000', '001', '004', '006'}
+        assert client.get('/api/v1/analysis/project/export', params={**project_params, 'format':'csv'}, headers=admin).status_code == 422
+        for view in ('classes','questions','distribution','students'):
+            assert workbook('analysis/group/export', {**params,'view':view}, teacher_headers).active.max_row > 1
+        assert workbook('analysis/project/export', {'project_id':project['id']}, teacher_headers).active.max_row == 5

@@ -18,11 +18,12 @@ export function uniformSubjectiveWidths(template:Template):Template {
   })})
   return {...template,questions}
 }
-export function subjectiveRegion(template:Template,page:number,start:Point,end:Point,existing?:Region):Region {
+export function subjectiveRegion(template:Template,page:number,start:Point,end:Point,existing?:Region,resize=false):Region {
   const {left,right,top,bottom}=columnBounds(template,page,existing?.x??start.x)
   const a=clamp(start.y,top,bottom), b=clamp(end.y,top,bottom)
-  const y=existing?clamp(existing.y+end.y-start.y,top,bottom-existing.height):Math.min(a,b)
-  return {...existing,page,x:left,y,width:Math.round((right-left)*1000)/1000,height:existing?.height??Math.abs(b-a)}
+  const y=existing?(resize?existing.y:clamp(existing.y+end.y-start.y,top,bottom-existing.height)):Math.min(a,b)
+  const height=existing?(resize?clamp(end.y-existing.y,8,bottom-existing.y):existing.height):Math.abs(b-a)
+  return {...existing,page,x:left,y,width:Math.round((right-left)*1000)/1000,height,min_height:height,anchor_page:page,anchor_x:left,anchor_y:y}
 }
 export function noteRegion(template:Template,page:number,start:Point,end:Point,existing?:Region,resize=false):Region {
   const {left,right,top,bottom}=columnBounds(template,page,existing?(resize?existing.x:existing.x+end.x-start.x):start.x)

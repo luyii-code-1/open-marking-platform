@@ -37,7 +37,7 @@ def test_websocket_origin_auth_no_query_token_and_revocation(tmp_path,monkeypatc
             response=client.post('/api/v1/projects',json={'name':'项目'},headers={'Authorization':'Bearer '+token})
             assert response.status_code==200
             event=socket.receive_json()
-            assert event=={'type':'invalidate','roots':['projects']}
+            assert event=={'type':'invalidate','roots':['exam-catalog','projects']}
             assert token not in json.dumps(event) and response.json()['id'] not in json.dumps(event)
             assert client.post('/api/v1/auth/logout',headers={'Authorization':'Bearer '+token}).status_code==200
             with pytest.raises(WebSocketDisconnect) as revoked:socket.receive_json()

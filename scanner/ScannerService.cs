@@ -4,6 +4,8 @@ using NAPS2.Scan;
 
 namespace OMP.Scanner;
 
+internal sealed record ScannerImageFile(string Path);
+
 public sealed class ScannerService : IDisposable
 {
     private readonly ScanningContext _context;
@@ -31,6 +33,16 @@ public sealed class ScannerService : IDisposable
 
     public Task<List<ScanDevice>> Devices(Driver driver) => _controller.GetDeviceList(DiscoveryOptions(driver));
 
+    internal async Task<bool> UseFeeder(ScanDevice device, bool duplex)
+    {
+        if (device.Driver != Driver.Wia) return true;
+        var caps = (await _controller.GetCaps(device, CancellationToken.None))?.PaperSourceCaps;
+        if (caps == null) return true;
+        if (duplex && caps.SupportsFlatbed && !caps.SupportsDuplex)
+            throw new InvalidOperationException("当前 WIA 设备无法自动双面，请选择单面或手动翻面。");
+        return caps.SupportsFeeder || !caps.SupportsFlatbed;
+    }
+
     internal static ScanOptions CaptureOptions(ScanDevice device,string paper,bool feeder,bool duplex,ScanCaptureSettings? settings=null)
     {
         var selected=(settings??new()).Validate();
@@ -50,6 +62,15 @@ public sealed class ScannerService : IDisposable
         };
     }
 
+    internal static void SaveImage(System.Drawing.Image image,System.IO.Stream output)
+    {
+        if(image.Tag is ScannerImageFile source && image.RawFormat.Guid==System.Drawing.Imaging.ImageFormat.Png.Guid)
+        {
+            using var input=System.IO.File.OpenRead(source.Path);input.CopyTo(output);
+        }
+        else image.Save(output,System.Drawing.Imaging.ImageFormat.Png);
+    }
+
     public async Task Acquire(ScanDevice device, string paper, bool feeder, Func<System.Drawing.Image, Task> receive, CancellationToken cancel, bool duplex = false, ScanCaptureSettings? settings=null)
     {
         var options = CaptureOptions(device,paper,feeder,duplex,settings);
@@ -62,6 +83,7 @@ public sealed class ScannerService : IDisposable
                 {
                     scanned.Save(path);
                     using var image = System.Drawing.Image.FromFile(path);
+                    image.Tag=new ScannerImageFile(path);
                     await receive(image);
                 }
                 finally { if (System.IO.File.Exists(path)) System.IO.File.Delete(path); }

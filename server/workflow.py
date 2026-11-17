@@ -2,7 +2,7 @@
 import time
 import hashlib
 import json
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from .db import connect, find, get, objects, put
 from .dependencies import admin, require
 from .school import group_students, student_view
@@ -74,7 +74,37 @@ def overview(db,group,current):
             counter=progress['subjective' if question['type']=='subjective' else 'objective']
             counter['total']+=1
             counter['done']+=int(scores.get(label(question)) is not None)
+    active=templates.get(group.get('template_id')) or get(db,group.get('template_id'),'templates') or {}
+    state['missing_answers']=[q['number'] for q in active.get('questions',[]) if q['type']!='subjective' and not q.get('answer')]
     state['grading_progress']=progress
+    expected=len(roster['students']) if roster['configured'] else state['room_expected'] or len(submissions)
+    absent_ids={s['student_id'] for s in submissions if s.get('status')=='absent'}
+    absent=len(absent_ids)
+    unscanned=max(0,expected-len(scanned_ids|absent_ids))
+    state['scan']={'received':len(scanned_ids),'expected':expected,'pending':unscanned,'exceptions':len(exceptions),'absent':absent}
+    task_counts={}
+    for task in objects(db,'tasks'):
+        if task.get('status')=='completed':
+            key=(task.get('submission_id'),task.get('question_id'))
+            task_counts[key]=task_counts.get(key,0)+1
+    arbitration=0
+    for submission in submissions:
+        if submission.get('status')!='ready':continue
+        template=templates.get(submission['template_id'],{})
+        scores=by_student.get(submission['student_id'],{}).get('scores',{})
+        arbitration+=sum(q['type']=='subjective' and q.get('review_mode')=='double' and task_counts.get((submission['id'],q['id']),0)==2 and scores.get(label(q)) is None for q in template.get('questions',[]))
+    exception_submissions={exception_source(db,e).get('id') for e in exceptions if exception_source(db,e).get('id') in {s['id'] for s in submissions}}
+    for kind in ('objective','subjective'):
+        question_count=sum((q['type']=='subjective')==(kind=='subjective') for q in active.get('questions',[]))
+        done=progress[kind]['done'];total=progress[kind]['total']
+        blocked=len(exception_submissions)*question_count
+        pending=max(0,total-done-(arbitration if kind=='subjective' else 0))
+        state[kind]={'total':total,'completed':done,'pending':max(0,pending-blocked),'exceptions':min(pending,blocked),'unscanned':unscanned*question_count}
+        if kind=='subjective':state[kind]['arbitration']=arbitration
+    from .lifecycle import project_for
+    project=get(db,project_for(db,'groups',group),'projects') or {}
+    state['scans_purged']=bool(project.get('scans_purged'))
+    state['objective_reprocess_allowed']=bool(not group.get('frozen') and not state['scans_purged'] and any(q['type']!='subjective' for q in active.get('questions',[])) and any(b['recognized_pages'] for b in details))
     state['publication_blockers']=publication_blockers(state)
     return state
 
@@ -90,6 +120,24 @@ def workflow(identifier:str,current=Depends(admin)):
 def roster_changes(identifier:str,current=Depends(admin)):
     with connect() as db:
         return membership(db,require(db,identifier,'groups'))
+
+
+@router.post('/groups/{identifier}/objective/reprocess',status_code=202)
+def reprocess_objective(identifier:str,current=Depends(admin)):
+    from .jobs import create_job,dispatch
+    from .lifecycle import writable,project_for
+    with connect() as db:
+        db.execute('BEGIN IMMEDIATE')
+        group=require(db,identifier,'groups');writable(db,'groups',group)
+        if group.get('frozen'):raise HTTPException(409,'成绩已发布，请先发起复核')
+        template=require(db,group.get('template_id'),'templates')
+        if not any(q['type']!='subjective' for q in template['questions']):raise HTTPException(422,'当前题卡没有客观题')
+        project_id=project_for(db,'groups',group)
+        for job in find(db,'jobs',project_id=project_id):
+            if job['kind']=='objective-reprocess' and job.get('payload',{}).get('group_id')==identifier and job['status'] in ('pending','running'):return job
+        job=create_job(db,'objective-reprocess',{'group_id':identifier},project_id,current['id'])
+    dispatch(job['id'],background=True)
+    return job
 
 
 @router.post('/groups/{identifier}/roster/review')
@@ -129,6 +177,7 @@ def close_scanning(identifier:str,body:dict,current=Depends(admin)):
 def publication_blockers(state):
     issues=[]
     if not state['template_id']:issues.append('尚未发布版式')
+    if state.get('missing_answers'):issues.append('请补录客观题答案：'+ '、'.join(map(str,state['missing_answers'])))
     if state['open_batches']:issues.append('仍有未完成的扫描批次')
     if state['open_exceptions']:issues.append('仍有影响成绩的异常')
     if state['results']['pending'] or state['regrades']:issues.append('评分或重阅尚未完成')
@@ -160,36 +209,72 @@ def finish_empty(identifier:str,body:dict,current=Depends(admin)):
 
 
 @router.get('/projects/{identifier}/scanned-sheets')
-def scanned_sheets(identifier:str,q:str,group_id:str|None=None,page:int=1,current=Depends(admin)):
+def scanned_sheets(identifier:str,q:str='',group_id:str|None=None,page:int=1,
+                   grade_ids:list[str]=Query(default=[]),class_ids:list[str]=Query(default=[]),
+                   subject_ids:list[str]=Query(default=[]),group_ids:list[str]=Query(default=[]),
+                   sort_by:str='candidate_number',sort_order:str='asc',current=Depends(admin)):
     term=q.strip()
-    if not term or len(term)>100 or not 1<=page<=1000000:
-        raise HTTPException(422,'请输入姓名或准考证号，并选择有效页码')
+    selected=[grade_ids,class_ids,subject_ids,group_ids]
+    if len(term)>100 or not 1<=page<=1000000 or any(len(values)>200 or any(not value or len(value)>100 for value in values) for values in selected):
+        raise HTTPException(422,'查询条件或页码无效')
+    if sort_by not in ('name','candidate_number','grade','class_name','subject','card','image_status') or sort_order not in ('asc','desc'):
+        raise HTTPException(422,'排序字段或方向无效')
     with connect() as db:
         db.execute('BEGIN')
-        require(db,identifier,'projects')
+        project=require(db,identifier,'projects')
         if group_id:
             from .room_tags import project_for_group
             if project_for_group(db,group_id)!=identifier:raise HTTPException(404,'题卡不属于本考试')
-        source="""FROM objects s JOIN objects g ON g.id=json_extract(s.body,'$.group_id') AND g.kind='groups' AND g.deleted=0
+        class_id="COALESCE(json_extract(s.body,'$.student_snapshot.class_id'),json_extract(st.body,'$.class_id'))"
+        grade_id="COALESCE(json_extract(g.body,'$.grade_id'),json_extract(cl.body,'$.grade_id'))"
+        class_name="COALESCE(json_extract(s.body,'$.student_snapshot.class_name'),json_extract(cl.body,'$.name'),'')"
+        grade_name="COALESCE(json_extract(gr.body,'$.name'),json_extract(s.body,'$.student_snapshot.grade'),json_extract(cl.body,'$.grade'),'')"
+        source=f"""FROM objects s JOIN objects g ON g.id=json_extract(s.body,'$.group_id') AND g.kind='groups' AND g.deleted=0
             JOIN objects subj ON subj.id=json_extract(g.body,'$.subject_id') AND subj.kind='subjects' AND subj.deleted=0
-            LEFT JOIN objects st ON st.id=json_extract(s.body,'$.student_id') AND st.kind='students'
+            LEFT JOIN objects st ON st.id=json_extract(s.body,'$.student_id') AND st.kind='students' AND st.deleted=0
+            LEFT JOIN objects cl ON cl.id={class_id} AND cl.kind='classes'
+            LEFT JOIN objects gr ON gr.id={grade_id} AND gr.kind='grades'
             WHERE s.kind='submissions' AND s.deleted=0 AND json_array_length(s.body,'$.pages')>0
-            AND json_extract(subj.body,'$.project_id')=? AND (? IS NULL OR g.id=?)
-            AND (instr(lower(json_extract(s.body,'$.student_snapshot.name')),lower(?))>0
-            OR instr(lower(json_extract(st.body,'$.name')),lower(?))>0
-            OR instr(json_extract(s.body,'$.candidate_number'),?)>0)"""
-        params=(identifier,group_id,group_id,term,term,term)
-        total=db.execute('SELECT count(*) '+source,params).fetchone()[0]
-        matches=db.execute("""SELECT s.id,s.body,json_extract(st.body,'$.name') AS current_name,
-            json_extract(subj.body,'$.name') AS subject,json_extract(g.body,'$.name') AS card """+
-            source+" ORDER BY json_extract(s.body,'$.candidate_number'),subject,s.id LIMIT 20 OFFSET ?",(*params,(page-1)*20))
+            AND json_extract(subj.body,'$.project_id')=? AND (? IS NULL OR g.id=?)"""
+        base_params=(identifier,group_id,group_id)
+        projection=f"""SELECT g.id AS group_id,json_extract(g.body,'$.name') AS card,
+            subj.id AS subject_id,json_extract(subj.body,'$.name') AS subject,
+            {grade_id} AS grade_id,{grade_name} AS grade,{class_id} AS class_id,{class_name} AS class_name """
+        options={name:{} for name in ('grades','classes','subjects','groups')}
+        for row in db.execute('SELECT DISTINCT '+projection.removeprefix('SELECT ')+source,base_params):
+            if row['grade_id']:options['grades'][row['grade_id']]={'id':row['grade_id'],'name':row['grade']}
+            if row['class_id']:options['classes'][row['class_id']]={'id':row['class_id'],'name':row['class_name'],'grade_id':row['grade_id'],'grade':row['grade']}
+            options['subjects'][row['subject_id']]={'id':row['subject_id'],'name':row['subject']}
+            options['groups'][row['group_id']]={'id':row['group_id'],'name':row['card'],'subject_id':row['subject_id'],'subject':row['subject'],'grade_id':row['grade_id'],'grade':row['grade']}
+        conditions=[];params=list(base_params)
+        for expression,values in zip((grade_id,class_id,'subj.id','g.id'),selected):
+            if values:
+                ids=list(dict.fromkeys(values));conditions.append(expression+' IN ('+','.join('?' for _ in ids)+')');params.extend(ids)
+        if term:
+            conditions.append("""(instr(lower(json_extract(s.body,'$.student_snapshot.name')),lower(?))>0
+                OR instr(lower(json_extract(st.body,'$.name')),lower(?))>0
+                OR instr(json_extract(s.body,'$.candidate_number'),?)>0
+                OR instr(json_extract(st.body,'$.candidate_number'),?)>0)""")
+            params.extend([term]*4)
+        filtered=source+(' AND '+' AND '.join(conditions) if conditions else '')
+        total=db.execute('SELECT count(*) '+filtered,params).fetchone()[0]
+        purged=bool(project.get('scans_purged'))
+        name="COALESCE(NULLIF(json_extract(s.body,'$.student_snapshot.name'),''),json_extract(st.body,'$.name'),'')"
+        image_status="'purged'" if purged else "CASE WHEN EXISTS(SELECT 1 FROM json_each(s.body,'$.pages') pid JOIN objects image ON image.id=pid.value AND image.kind='pages' AND image.deleted=0) THEN 'available' ELSE 'missing' END"
+        sort_fields={'name':name,'candidate_number':"json_extract(s.body,'$.candidate_number')",'grade':grade_name,
+                     'class_name':class_name,'subject':"json_extract(subj.body,'$.name')",'card':"json_extract(g.body,'$.name')",'image_status':image_status}
+        direction='DESC' if sort_order=='desc' else 'ASC'
+        matches=db.execute(f"SELECT s.id,s.body,{name} AS name,{image_status} AS image_status,"+projection.removeprefix('SELECT ')+filtered+
+                           f" ORDER BY {sort_fields[sort_by]} COLLATE NOCASE {direction},s.id ASC LIMIT 20 OFFSET ?",(*params,(page-1)*20))
         items=[]
         for row in matches:
-            sub=json.loads(row['body'])
-            pages=[]
-            for pid in sub['pages']:
-                image=get(db,pid,'pages')
-                if image:pages.append({'id':pid,'side':image.get('side'),'image_url':f'/api/v1/pages/{pid}/image'})
-            items.append({'id':row['id'],'name':(sub.get('student_snapshot') or {}).get('name') or row['current_name'],
-                          'candidate_number':sub['candidate_number'],'subject':row['subject'],'card':row['card'],'pages':pages})
-        return {'items':items,'total':total,'page':page}
+            sub=json.loads(row['body']);pages=[]
+            if not purged:
+                for pid in sub['pages']:
+                    image=get(db,pid,'pages')
+                    if image:pages.append({'id':pid,'side':image.get('side'),'image_url':f'/api/v1/pages/{pid}/image'})
+            items.append({'id':row['id'],'name':row['name'],
+                          'candidate_number':sub['candidate_number'],**{key:row[key] for key in ('subject','subject_id','card','group_id','grade','grade_id','class_id','class_name')},'pages':pages,
+                          'image_status':row['image_status']})
+        return {'items':items,'total':total,'page':page,'options':{name:sorted(values.values(),key=lambda row:(row['name'] or '',row['id'])) for name,values in options.items()},
+                'sort_by':sort_by,'sort_order':sort_order,'scope':{'project_id':identifier,'group_id':group_id,'scans_purged':purged}}

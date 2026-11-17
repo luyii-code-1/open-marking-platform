@@ -89,6 +89,20 @@ public sealed partial class LocalQueue
         return list;
     }
 
+    public Dictionary<string,(int Total,int Front,int Back,int Pending,int Blocked,int Uploaded,int Scanned)> Counts()
+    {
+        using var db=Open();using var cmd=db.CreateCommand();
+        cmd.CommandText="""
+            SELECT batch_id,COUNT(*),SUM(side='front'),SUM(side='back'),SUM(status='pending'),
+                SUM(status='blocked'),SUM(status='uploaded'),SUM(side='front' AND status!='excluded')
+            FROM pages GROUP BY batch_id
+            """;
+        using var rows=cmd.ExecuteReader();
+        var counts=new Dictionary<string,(int Total,int Front,int Back,int Pending,int Blocked,int Uploaded,int Scanned)>();
+        while(rows.Read())counts[rows.GetString(0)]=(rows.GetInt32(1),rows.GetInt32(2),rows.GetInt32(3),rows.GetInt32(4),rows.GetInt32(5),rows.GetInt32(6),rows.GetInt32(7));
+        return counts;
+    }
+
     public List<PageRow> Pages(string batchId)
     {
         using var db = Open();
@@ -101,7 +115,7 @@ public sealed partial class LocalQueue
         return list;
     }
 
-    public PageRow AddPage(BatchRow batch, string side, System.Drawing.Image image)
+    public PageRow AddPage(BatchRow batch, string side, System.Drawing.Image image, bool deferInspection = false)
     {
         if (batch.Status != "open") throw new InvalidOperationException("当前批次已关闭或冻结，请新建批次。");
         var automatic = side == "auto";
@@ -113,7 +127,7 @@ public sealed partial class LocalQueue
         var folder = System.IO.Path.Combine(Root, "pages", batch.Id);
         Directory.CreateDirectory(folder);
         var original = System.IO.Path.Combine(folder, captureId + ".png");
-        SaveDurably(original, stream => image.Save(stream, ImageFormat.Png));
+        SaveDurably(original, stream => ScannerService.SaveImage(image, stream));
         using var file = File.OpenRead(original);
         var sha = Convert.ToHexString(SHA256.HashData(file)).ToLowerInvariant();
         using var db = Open();
@@ -123,7 +137,7 @@ public sealed partial class LocalQueue
         if (automatic)
         {
             string? detected = null;
-            try { detected = QualityInspector.ReadSide(image, batch); }
+            try { if(!deferInspection)detected = QualityInspector.ReadSide(image, batch); }
             catch (Exception ex) when (ex is not OutOfMemoryException) { sideReadFailed = true; }
             slot = DuplexOrder.Next(batch, Pages(batch.Id), detected);
             side = slot.Side; batch.DuplexFirstSide = slot.FirstSide;
@@ -131,14 +145,14 @@ public sealed partial class LocalQueue
         QualityReport report;
         try
         {
-            var options = QualityOptions.Load(Root);
-            report = QualityInspector.Inspect(image, batch, side, automatic ? options with { CheckQr = true } : options);
+            var options = deferInspection ? new QualityOptions() : QualityOptions.Load(Root);
+            report = deferInspection ? new QualityReport([],0,0,0,options) : QualityInspector.Inspect(image, batch, side, automatic ? options with { CheckQr = true } : options);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         { report = new QualityReport(["inspection_failed"], 0, 0, 0, new QualityOptions()); }
-        if (file.Length > 160 * 1024 * 1024) report = report with { Issues = [.. report.Issues, "too_large"] };
+        if (!deferInspection && file.Length > 160 * 1024 * 1024) report = report with { Issues = [.. report.Issues, "too_large"] };
         if (sideReadFailed || slot?.InvalidState == true) report = report with { Issues = [.. report.Issues, "inspection_failed"] };
-        var quality = System.Text.Json.JsonSerializer.Serialize(report, new System.Text.Json.JsonSerializerOptions { PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase });
+        var quality = deferInspection ? "{}" : System.Text.Json.JsonSerializer.Serialize(report, new System.Text.Json.JsonSerializerOptions { PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase });
         using var cmd = db.CreateCommand();
         cmd.Transaction = transaction;
         cmd.CommandText = "SELECT COALESCE(MAX(sequence),0)+1 FROM pages WHERE batch_id=$batch AND side=$side";
@@ -176,6 +190,9 @@ public sealed partial class LocalQueue
     }
 
     public void PageUploaded(string id, string serverId) => Execute("UPDATE pages SET status='uploaded',error='',server_id=$server WHERE capture_id=$id", ("$id", id), ("$server", serverId));
+    public void UpdateQualityReport(string id, QualityReport report) =>
+        Execute("UPDATE pages SET quality_report=$report WHERE capture_id=$id AND status='blocked'",
+            ("$id", id), ("$report", System.Text.Json.JsonSerializer.Serialize(report, System.Text.Json.JsonSerializerOptions.Web)));
     public void PageExcluded(string id) => Execute("UPDATE pages SET status='excluded',error='管理员已排除该页，原始文件保留' WHERE capture_id=$id", ("$id", id));
     public void PageError(string id, string error, bool blocked = false) => Execute("UPDATE pages SET error=$error,status=$status WHERE capture_id=$id", ("$id", id), ("$error", error), ("$status", blocked ? "blocked" : "pending"));
     public void RetryBlocked(string batchId) => Execute("UPDATE pages SET status='pending',error='' WHERE batch_id=$batch AND status='blocked'", ("$batch", batchId));

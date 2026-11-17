@@ -1,6 +1,4 @@
-import csv
 import hashlib
-import io
 import json
 import sqlite3
 import time
@@ -8,11 +6,10 @@ import zipfile
 import secrets
 from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import FileResponse,Response
+from fastapi.responses import FileResponse
 from . import db as database
 from .db import connect,get,objects,put,find
 from .dependencies import system_admin,admin,user,require,password_hash
-from .review import results
 
 router=APIRouter(prefix='/api/v1')
 
@@ -153,17 +150,6 @@ def edit_user(identifier:str,body:dict,current=Depends(admin)):
 def csv_cell(value):
     text=str(value if value is not None else '')
     return "'"+text if text.lstrip().startswith(('=','+','-','@')) else text
-
-
-@router.get('/results/export')
-def export_results(group_id:str,room_tag_id:str|None=None,current=Depends(user)):
-    rows=results(group_id,room_tag_id,current)
-    numbers=sorted({n for row in rows for n in row['scores']},key=lambda n:int(n.split('～')[0].split('、')[0]))
-    output=io.StringIO(newline=''); writer=csv.writer(output)
-    writer.writerow(['准考证号','姓名','班级','状态','总分','赋分']+[f'第{n}题' for n in numbers]+['年级','考场'])
-    from .analysis import STATUS_NAMES
-    for row in rows: writer.writerow([csv_cell(STATUS_NAMES.get(row.get(key),row.get(key)) if key=='status' else row.get(key)) for key in ('candidate_number','name','class_id','status','total','converted_score')]+[row['scores'].get(n) for n in numbers]+[csv_cell(row.get('grade')),csv_cell('、'.join(t.get('label',t['name']) for t in row.get('room_tags',[])))])
-    return Response(('\ufeff'+output.getvalue()).encode('utf-8'),media_type='text/csv; charset=utf-8',headers={'Content-Disposition':'attachment; filename=results.csv'})
 
 
 @router.post('/projects/{identifier}/archive')

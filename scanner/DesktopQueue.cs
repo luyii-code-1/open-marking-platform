@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using System.IO;
 using System.Text.Json;
 
 namespace OMP.Scanner;
@@ -18,7 +19,10 @@ public sealed partial class LocalQueue
         UPDATE batches SET project_id=$project,subject_id=$subject,config_sha256=$hash,template_json=$template,roster_json=$roster,local_pairs_json=$pairs,room_tags_json=$tags WHERE id=$id
         """,("$id",batch.Id),("$project",batch.ProjectId),("$subject",batch.SubjectId),("$hash",batch.ConfigSha256),("$template",batch.TemplateJson),("$roster",batch.RosterJson),("$pairs",batch.LocalPairsJson),("$tags",batch.RoomTagsJson));
 
-    public void PageRecognized(string captureId,string result)=>Execute("UPDATE pages SET recognition_json=$result,status='pending',error='' WHERE capture_id=$id AND status!='excluded'",("$id",captureId),("$result",result));
+    public void PageRecognized(string captureId,string result,string? issue=null)=>Execute("""
+        UPDATE pages SET recognition_json=$result,status=$status,error=$error
+        WHERE capture_id=$id AND status IN ('pending','blocked')
+        """,("$id",captureId),("$result",result),("$status",issue==null?"pending":"blocked"),("$error",issue??""));
 
     public string PairLocally(BatchRow batch)
     {
@@ -46,6 +50,57 @@ public sealed partial class LocalQueue
         }
         return JsonSerializer.Serialize(pairs);
     }
+    public void SaveQuality(string id,QualityReport report)=>Execute(
+        "UPDATE pages SET quality_report=$quality WHERE capture_id=$id AND status IN ('pending','blocked')",
+        ("$id",id),("$quality",JsonSerializer.Serialize(report,System.Text.Json.JsonSerializerOptions.Web)));
+
+    public bool ClearLocalSheets(BatchRow[] sheets)
+    {
+        var root=Path.GetFullPath(Root)+Path.DirectorySeparatorChar;
+        string CheckedPath(string relative)
+        {
+            var path=Path.GetFullPath(Path.Combine(Root,relative));
+            if(!path.StartsWith(root,StringComparison.OrdinalIgnoreCase))throw new IOException("清理路径超出本地队列");
+            return path;
+        }
+        var trash=CheckedPath(Path.Combine("trash",Guid.NewGuid().ToString("N")));
+        var paths=sheets.Select(b=>CheckedPath(Path.Combine("pages",Guid.Parse(b.Id).ToString())))
+            .Concat(sheets.SelectMany(b=>Pages(b.Id)).Select(p=>CheckedPath(Path.Combine("processed",Guid.Parse(p.CaptureId).ToString())))).Where(Directory.Exists).ToArray();
+        var moved=new List<(string Original,string Temporary)>();
+        Directory.CreateDirectory(trash);
+        try
+        {
+            foreach(var path in paths)
+            {
+                if((File.GetAttributes(path)&FileAttributes.ReparsePoint)!=0)throw new IOException("请先处理本地文件夹的链接");
+                var target=Path.Combine(trash,moved.Count.ToString());
+                Directory.Move(path,target);moved.Add((path,target));
+            }
+            using var db=Open();using var tx=db.BeginTransaction();using var cmd=db.CreateCommand();
+            cmd.Transaction=tx;
+            foreach(var batch in sheets)
+            {
+                cmd.CommandText="DELETE FROM pages WHERE batch_id=$id; DELETE FROM batches WHERE id=$id";
+                cmd.Parameters.Clear();cmd.Parameters.AddWithValue("$id",batch.Id);cmd.ExecuteNonQuery();
+            }
+            tx.Commit();
+        }
+        catch
+        {
+            foreach(var pair in moved.AsEnumerable().Reverse())Directory.Move(pair.Temporary,pair.Original);
+            throw;
+        }
+        try
+        {
+            Directory.Delete(trash,true);
+            foreach(var pending in Directory.EnumerateDirectories(CheckedPath("trash")))
+                if((File.GetAttributes(pending)&FileAttributes.ReparsePoint)==0)Directory.Delete(pending,true);
+            return true;
+        }
+        catch(IOException){return false;}
+        catch(UnauthorizedAccessException){return false;}
+    }
+
     public void SaveCorrection(BatchRow batch,PageRow page,string recognition)
     {
         var pages=Pages(batch.Id).Where(p=>p.Status!="excluded").ToList();

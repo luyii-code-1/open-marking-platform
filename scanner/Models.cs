@@ -52,7 +52,7 @@ public sealed class PageRow
     {
         get
         {
-            if (QualityJson == "{}") return "旧记录，未执行本地检查";
+            if (QualityJson == "{}") return RecognitionJson=="{}"?"等待本地识读":"检查记录缺失";
             try { return System.Text.Json.JsonSerializer.Deserialize<QualityReport>(QualityJson, new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true })?.Summary ?? "检查记录缺失"; }
             catch (System.Text.Json.JsonException) { return "检查记录无法读取"; }
         }
