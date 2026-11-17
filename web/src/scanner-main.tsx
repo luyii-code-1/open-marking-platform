@@ -183,7 +183,7 @@ function Scanner() {
                 { key: 'refresh', label: '刷新服务端状态', disabled: locked || !state.online, onClick: () => action('refreshBatch', { batch_id: batchId }) },
               ] }}><Button icon={<DownOutlined />} iconPosition="end">更多操作</Button></Dropdown>
             </Space></div>
-              {roomSheets.some(r=>r.total>0)&&<Alert type={needsReview?'warning':'info'} message={needsReview?'本考场有待核对答卷':readyToUpload&&roomComplete?'已达到考场预期人数，请核对后开始上传':`${currentCounts.pending==null?'答卷已暂存':'已暂存 '+currentCounts.pending+' 份'}，请核对后开始上传`} action={<Button disabled={locked} onClick={reviewRoom}>核对答卷</Button>}/>}
+              {roomSheets.some(r=>r.total>0)&&<Alert type={needsReview?'warning':'info'} message={needsReview?'本考场有待核对答卷':readyToUpload&&roomComplete?'已达到考场预期人数，请核对后开始上传':`${currentCounts.pending==null?'答卷已暂存':'已暂存 '+currentCounts.pending+' 份'}，请核对后开始上传`} action={<Button disabled={locked} onClick={reviewRoom}>核对答卷并上传</Button>}/>}
               {batch.error && <Alert type="warning" message={batch.error} />}
               <Collapse defaultActiveKey={['device']} items={[{ key: 'device', label: '设备设置', children: <Space wrap size={12}><Select aria-label="分辨率" disabled={locked} value={state.scan_settings?.dpi||300} options={[150,200,300,600].map(value=>({value,label:value+' DPI'}))} onChange={dpi=>action('scanSettings',{dpi,color:state.scan_settings?.color||'gray'})}/><Select aria-label="颜色" disabled={locked} value={state.scan_settings?.color||'gray'} options={[{value:'gray',label:'灰度'},{value:'bw',label:'黑白'},{value:'color',label:'彩色'}]} onChange={color=>action('scanSettings',{dpi:state.scan_settings?.dpi||300,color})}/><Select aria-label="驱动接口" value={driver} disabled={locked} onChange={driver=>action('selectDriver',{driver})} options={[{value:'Hi5100S',label:'Hi-5100S（内置）'},{value:'Twain',label:'TWAIN'},{value:'Wia',label:'WIA'},{value:'Escl',label:'eSCL'},{value:'external',label:'外部插件'}]} />
                 {driver==='external' && <>
@@ -195,6 +195,8 @@ function Scanner() {
                 <Select aria-label="扫描仪" placeholder="选择扫描仪" disabled={locked} value={device||undefined} style={{minWidth:260}} options={prefs?.devices.map((d:Row)=>({value:d.id,label:d.name}))} onChange={id=>action('selectDevice',{id})}/>
                 {batch.capture_mode !== 'duplex' && batch.sides === 2 && <Select aria-label="扫描面" disabled={locked} value={side} onChange={setSide} options={[{ value: 'front', label: '正面' }, { value: 'back', label: '背面' }]} />}</Space> }]} />
               <Typography.Paragraph className="scanner-progress" type="secondary" role="status" aria-live="polite">{state.message || '\u00a0'}</Typography.Paragraph>
+              {state.syncing&&<Alert type="info" showIcon message={`正在上传本考场答卷 · 已上传 ${roomSheets.reduce((n,r)=>n+r.uploaded,0)} 面`}/>}
+              {!state.syncing&&roomSheets.some(r=>r.total>0)&&roomSheets.every(r=>r.status==='paired'||!r.total)&&<Alert type="success" showIcon message="本考场已扫答卷均已上传并由服务器确认"/>}
               <Space style={{marginBottom:16}}><Radio.Group value={scanView} onChange={e=>{setScanView(e.target.value);setPage(1)}} optionType="button" options={[{label:'本次扫描',value:'run',disabled:!runSheets.length},{label:'本考场全部',value:'room'}]}/></Space>
               <Descriptions size="small" column={{xs:2,sm:3,lg:6}} items={[
                 {label:'已采集',children:sumVisible('total')+' 面'},
@@ -210,7 +212,7 @@ function Scanner() {
               ]} />
             </section>}
     </main>
-    <Drawer title={`${batch?.room_tags?.[0]?.name||'未指定考场'} · 已扫答卷`} open={review!==null} onClose={()=>setReview(null)} width="min(850px,95vw)" footer={<Button type="primary" disabled={!readyToUpload||!state.online||locked||!review?.some(r=>r.status==='local_paired')} onClick={()=>action('upload',{batch_id:batchId},()=>setReview(null))}>核对完毕，开始上传</Button>}>
+    <Drawer title={`${batch?.room_tags?.[0]?.name||'未指定考场'} · 已扫答卷`} open={review!==null} onClose={()=>setReview(null)} width="min(850px,95vw)" footer={<Button type="primary" disabled={!readyToUpload||!state.online||locked||!review?.some(r=>r.status==='local_paired')} onClick={()=>action('upload',{batch_id:batchId},()=>setReview(null))}>核对完毕，上传 {currentCounts.pending??pendingSheets.length} 份</Button>}>
       <Table<Row> rowKey="id" dataSource={review||[]} onRow={r=>rowNavigation(()=>void openOriginal(r,0),r.candidate||'扫描原图')} columns={[
         {title:'准考证号',dataIndex:'candidate',render:v=>v||'未识读'},
         {title:'姓名',dataIndex:'name'},
