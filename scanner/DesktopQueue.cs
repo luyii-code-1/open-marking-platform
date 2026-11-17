@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using System.IO;
 using System.Text.Json;
 
 namespace OMP.Scanner;
@@ -49,6 +50,53 @@ public sealed partial class LocalQueue
         }
         return JsonSerializer.Serialize(pairs);
     }
+    public bool ClearLocalSheets(BatchRow[] sheets)
+    {
+        var root=Path.GetFullPath(Root)+Path.DirectorySeparatorChar;
+        string CheckedPath(string relative)
+        {
+            var path=Path.GetFullPath(Path.Combine(Root,relative));
+            if(!path.StartsWith(root,StringComparison.OrdinalIgnoreCase))throw new IOException("清理路径超出本地队列");
+            return path;
+        }
+        var trash=CheckedPath(Path.Combine("trash",Guid.NewGuid().ToString("N")));
+        var paths=sheets.Select(b=>CheckedPath(Path.Combine("pages",Guid.Parse(b.Id).ToString())))
+            .Concat(sheets.SelectMany(b=>Pages(b.Id)).Select(p=>CheckedPath(Path.Combine("processed",Guid.Parse(p.CaptureId).ToString())))).Where(Directory.Exists).ToArray();
+        var moved=new List<(string Original,string Temporary)>();
+        Directory.CreateDirectory(trash);
+        try
+        {
+            foreach(var path in paths)
+            {
+                if((File.GetAttributes(path)&FileAttributes.ReparsePoint)!=0)throw new IOException("请先处理本地文件夹的链接");
+                var target=Path.Combine(trash,moved.Count.ToString());
+                Directory.Move(path,target);moved.Add((path,target));
+            }
+            using var db=Open();using var tx=db.BeginTransaction();using var cmd=db.CreateCommand();
+            cmd.Transaction=tx;
+            foreach(var batch in sheets)
+            {
+                cmd.CommandText="DELETE FROM pages WHERE batch_id=$id; DELETE FROM batches WHERE id=$id";
+                cmd.Parameters.Clear();cmd.Parameters.AddWithValue("$id",batch.Id);cmd.ExecuteNonQuery();
+            }
+            tx.Commit();
+        }
+        catch
+        {
+            foreach(var pair in moved.AsEnumerable().Reverse())Directory.Move(pair.Temporary,pair.Original);
+            throw;
+        }
+        try
+        {
+            Directory.Delete(trash,true);
+            foreach(var pending in Directory.EnumerateDirectories(CheckedPath("trash")))
+                if((File.GetAttributes(pending)&FileAttributes.ReparsePoint)==0)Directory.Delete(pending,true);
+            return true;
+        }
+        catch(IOException){return false;}
+        catch(UnauthorizedAccessException){return false;}
+    }
+
     public void SaveCorrection(BatchRow batch,PageRow page,string recognition)
     {
         var pages=Pages(batch.Id).Where(p=>p.Status!="excluded").ToList();

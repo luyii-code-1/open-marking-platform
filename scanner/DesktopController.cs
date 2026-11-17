@@ -131,6 +131,20 @@ public sealed class DesktopController : IDisposable
                 }
                 return new{dpi=ScanSettings.Dpi,color=ScanSettings.Color};
             case "state":return State(args);
+            case "clearRoom":
+                if(Capturing||_tickRunning||_uploadGate.CurrentCount==0)throw new InvalidOperationException("请先停止进纸，并等待上传完成。");
+                var clearScope=Batch(Text(args,"batch_id"));
+                var oldSheets=RoomSheets(clearScope);
+                var oldIds=oldSheets.Select(b=>b.Id).OrderBy(id=>id).ToArray();
+                var oldPages=oldSheets.SelectMany(b=>_queue.Pages(b.Id)).ToArray();
+                var clearSignature=Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join(",",oldIds)+"|"+string.Join(",",oldPages.Select(p=>p.CaptureId+":"+p.Status).OrderBy(id=>id)))));
+                if(!args.TryGetProperty("confirm",out var confirmedClear)||confirmedClear.ValueKind!=JsonValueKind.True)
+                    return new{pages=oldPages.Length,pending=oldPages.Count(p=>p.Status is not ("uploaded" or "excluded")),signature=clearSignature};
+                if(Text(args,"signature")!=clearSignature)throw new InvalidOperationException("扫描记录已变化，请重新确认清理范围。");
+                var filesRemoved=_queue.ClearLocalSheets(oldSheets);
+                Notify(filesRemoved?"本地旧扫描记录及图片已清理，可以开始新扫描。":"本地扫描记录已清理，部分占用文件将在下次清理时重试。");
+                return new{cleared=true,files_removed=filesRemoved};
+
             case "connect":
                 if(_connecting)throw new InvalidOperationException("正在连接服务器，请稍后重试。");
                 _connecting=true;

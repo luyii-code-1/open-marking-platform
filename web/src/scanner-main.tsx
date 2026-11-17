@@ -113,6 +113,23 @@ function Scanner() {
     if(group.template.sides===2&&!firstSide){message.warning('请先选择已校准的双面出图顺序');return}
     await action('createBatch',{group_id:group.id,name:room?.name||'未指定考场',room_tag_ids:roomId?[roomId]:[],capture_mode:group.template.sides===2?'duplex':'separate',first_side:firstSide},r=>{setBatch(r.id);setPage(1)})
   }
+  async function clearRoom(){
+    const scope=batchId
+    const impact=await action('clearRoom',{batch_id:scope})
+    if(!impact)return
+    modal.confirm({
+      title:'清理本考场旧扫描数据？',
+      content:`将删除本机该考场的 ${impact.pages} 面原图及识读结果，其中 ${impact.pending} 面尚未上传。清理后从空列表开始扫描。服务器已接收的数据继续保留。`,
+      okText:'删除本地旧数据',okButtonProps:{danger:true},
+      onOk:async()=>{
+        const result=await scannerCall('clearRoom',{batch_id:scope,confirm:true,signature:impact.signature})
+        if(!result?.cleared)return
+        setScanRun(null);setScanView('room');setBatch('');setPage(1)
+        await reload()
+        message.success(result.files_removed?'本地旧数据已清理，请选择考场开始新扫描':'记录已清理，部分占用文件将在下次清理时重试')
+      },
+    })
+  }
   async function startScan(){
     let id=batchId
     if(batch.status!=='open'){
@@ -178,6 +195,12 @@ function Scanner() {
           {state.batches.some((b:Row)=>b.group_id===group.id&&(b.blocked||b.status==='frozen'))&&<Table<Row> rowKey="id" dataSource={state.batches.filter((b:Row)=>b.group_id===group.id&&(b.blocked||b.status==='frozen'))} columns={[{title:'待核对',dataIndex:'name'},{title:'原因',dataIndex:'error'},{title:'操作',render:(_,r)=><Button onClick={()=>{setScanView('room');setScanRun(null);setBatch(r.id)}}>查看原图</Button>}]}/>}</section>
             : <section className="scanner-section"><div className="scanner-title"><div><Space align="center"><Typography.Title level={2}>{batch.room_tags?.[0]?.name||'未指定考场'}</Typography.Title><Status value={batch.status} /></Space><Typography.Paragraph type="secondary">{batch.paper} · {batch.sides === 2 ? '双面' : '单面'} · {batch.capture_mode === 'duplex' ? '自动双面' : '分面采集'} · 本机已扫 {currentCounts.scanned??'—'} 份 · 已上传 {roomSheets.reduce((n,r)=>n+r.uploaded,0)}/{roomSheets.reduce((n,r)=>n+r.total,0)} 页</Typography.Paragraph></div><Space>
               <Button type="primary" loading={busyKey===actionKey('start',{batch_id:batchId})} disabled={locked || !device || group.frozen} onClick={startScan}>开始扫描</Button><Button danger loading={busyKey===actionKey('stop')} disabled={!state.capturing} onClick={() => action('stop')}>停止进纸</Button>
+              <Button disabled={locked} onClick={async()=>{
+                const next=await action('createBatch',{group_id:group.id,name:batch.name,room_tag_ids:batch.room_tags.map((t:Row)=>t.id),capture_mode:batch.capture_mode,first_side:firstSide})
+                if(!next)return
+                setBatch(next.id);setScanRun({anchorId:next.id,previousIds:state.batches.map((r:Row)=>r.id),groupId,room:roomKey(batch)});setScanView('run');setPage(1)
+              }}>开始新一轮</Button>
+              <Button danger disabled={locked} onClick={clearRoom}>清理本地旧数据</Button>
               <Dropdown menu={{ items: [
                 { key: 'import', label: '导入扫描图像', disabled: locked || batch.status !== 'open', onClick: () => action('import', { batch_id: batchId, side }) },
                 { key: 'refresh', label: '刷新服务端状态', disabled: locked || !state.online, onClick: () => action('refreshBatch', { batch_id: batchId }) },
@@ -197,7 +220,7 @@ function Scanner() {
               <Typography.Paragraph className="scanner-progress" type="secondary" role="status" aria-live="polite">{state.message || '\u00a0'}</Typography.Paragraph>
               {state.syncing&&<Alert type="info" showIcon message={`正在上传本考场答卷 · 已上传 ${roomSheets.reduce((n,r)=>n+r.uploaded,0)} 面`}/>}
               {!state.syncing&&roomSheets.some(r=>r.total>0)&&roomSheets.every(r=>r.status==='paired'||!r.total)&&<Alert type="success" showIcon message="本考场已扫答卷均已上传并由服务器确认"/>}
-              <Space style={{marginBottom:16}}><Radio.Group value={scanView} onChange={e=>{setScanView(e.target.value);setPage(1)}} optionType="button" options={[{label:'本次扫描',value:'run',disabled:!runSheets.length},{label:'本考场全部',value:'room'}]}/></Space>
+              <Space style={{marginBottom:16}}><Radio.Group value={scanView} onChange={e=>{setScanView(e.target.value);setPage(1)}} optionType="button" options={[{label:'本次扫描',value:'run',disabled:!scanRun},{label:'本考场全部',value:'room'}]}/></Space>
               <Descriptions size="small" column={{xs:2,sm:3,lg:6}} items={[
                 {label:'已采集',children:sumVisible('total')+' 面'},
                 {label:'正面',children:sumVisible('front_count')+' 面'},
