@@ -536,6 +536,9 @@ app.include_router(electives_router)
 from .record_deletion import router as record_deletion_router
 app.include_router(record_deletion_router)
 
+from .login_footer import router as login_footer_router
+app.include_router(login_footer_router)
+
 web_distribution=Path(__file__).resolve().parents[1]/'web'/'dist'
 if web_distribution.exists():
     app.mount('/',StaticFiles(directory=web_distribution,html=True),name='web')
