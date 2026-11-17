@@ -53,7 +53,7 @@ internal static class Program
             await scanner.Acquire(device, request.GetProperty("paper").GetString()!, feeder, async image =>
             {
                 var file = $"{Guid.NewGuid():N}.png";
-                image.Save(Path.Combine(folder, file), ImageFormat.Png);
+                using(var output=File.Create(Path.Combine(folder,file)))ScannerService.SaveImage(image,output);
                 Emit(new { type = "page", file });
                 using var ack = JsonDocument.Parse(await Console.In.ReadLineAsync() ?? "{}");
                 if (!ack.RootElement.TryGetProperty("continue", out var next) || next.ValueKind != JsonValueKind.True)

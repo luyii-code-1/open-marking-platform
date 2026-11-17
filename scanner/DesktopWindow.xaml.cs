@@ -30,22 +30,7 @@ public partial class DesktopWindow : Window
     private readonly DesktopController _controller=new();
     private readonly DispatcherTimer _timer=new(){Interval=TimeSpan.FromSeconds(8)};
     private bool _closing,_ready;
-    private bool _settingsReady;
-    public DesktopWindow(){InitializeComponent();RefreshScanSettings();}
-    private void RefreshScanSettings()
-    {
-        _settingsReady=false;
-        DpiChoice.SelectedValue=_controller.ScanSettings.Dpi.ToString();ColorChoice.SelectedValue=_controller.ScanSettings.Color;
-        DpiChoice.IsEnabled=ColorChoice.IsEnabled=!_controller.Capturing;
-        _settingsReady=true;
-    }
-    private async void ScanSettingsChanged(object sender,System.Windows.Controls.SelectionChangedEventArgs args)
-    {
-        if(!_settingsReady||_closing)return;
-        try{await _controller.Invoke("scanSettings",JsonSerializer.SerializeToElement(new{dpi=int.Parse(DpiChoice.SelectedValue.ToString()!),color=ColorChoice.SelectedValue.ToString()}));}
-        catch(Exception error){System.Windows.MessageBox.Show(this,error.Message,"扫描参数");}
-        finally{RefreshScanSettings();}
-    }
+    public DesktopWindow(){InitializeComponent();MinWidth=Math.Min(MinWidth,SystemParameters.WorkArea.Width);MinHeight=Math.Min(MinHeight,SystemParameters.WorkArea.Height);Width=Math.Min(Width,SystemParameters.WorkArea.Width);Height=Math.Min(Height,SystemParameters.WorkArea.Height);WindowStartupLocation=WindowStartupLocation.CenterScreen;}
     private bool Allowed(string source)
     {
         if(!Uri.TryCreate(source,UriKind.Absolute,out var value))return false;
@@ -75,19 +60,11 @@ public partial class DesktopWindow : Window
             Browser.CoreWebView2.WebMessageReceived+=Message;
             _controller.Changed=()=>Dispatcher.BeginInvoke(()=>
             {
-                RefreshScanSettings();
                 if(!_closing&&Allowed(Browser.Source?.AbsoluteUri??""))Browser.CoreWebView2.PostWebMessageAsJson("{\"event\":\"changed\",\"protocol\":\"omp-scanner-4\"}");
             });
             _timer.Tick+=async(_,_)=>await _controller.Tick();_timer.Start();
             Browser.CoreWebView2.Navigate(LocalPage);
-            // A bundled page is always available before an online navigation.
-            if(_controller.Server.Length>0)
-            {
-                await _controller.Tick();
-                Browser.CoreWebView2.PostWebMessageAsJson("{\"event\":\"changed\",\"protocol\":\"omp-scanner-4\"}");
-                using var timeout=new CancellationTokenSource(TimeSpan.FromSeconds(4));
-                try{using var http=new System.Net.Http.HttpClient();using var response=await http.GetAsync(_controller.PageUrl(),timeout.Token);if(response.IsSuccessStatusCode)Browser.CoreWebView2.Navigate(_controller.PageUrl());}catch(System.Net.Http.HttpRequestException){}catch(OperationCanceledException){}
-            }
+
         }
         catch(Exception error){if(!_closing){LoadingText.Text=error.Message;LoadingText.Visibility=Visibility.Visible;}return;}
         _pageReady=true;

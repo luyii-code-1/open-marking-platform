@@ -26,6 +26,21 @@ internal static class ScannerBridgeSelfTest
             Check(options.PaperSource==(duplex?PaperSource.Duplex:PaperSource.Feeder),"Batch duplex selection was lost.");
             Check(options.PageSize==(paper=="A3"?PageSize.A3:PageSize.A4),"Batch paper size was lost.");
         }
+        using(var buffer=new System.IO.MemoryStream())
+        {
+            using var original=new System.Drawing.Bitmap(32,32);
+            original.Save(buffer,System.Drawing.Imaging.ImageFormat.Png);
+            var bytes=buffer.ToArray();
+            var temporary=System.IO.Path.Combine(System.IO.Path.GetTempPath(),"omp-png-copy-"+Guid.NewGuid()+".png");
+            System.IO.File.WriteAllBytes(temporary,bytes);
+            try
+            {
+                using var loaded=System.Drawing.Image.FromFile(temporary);loaded.Tag=new ScannerImageFile(temporary);
+                using var output=new System.IO.MemoryStream();ScannerService.SaveImage(loaded,output);
+                Check(output.ToArray().SequenceEqual(bytes),"Raw PNG preservation recompressed or changed the scan.");
+            }
+            finally{System.IO.File.Delete(temporary);}
+        }
         var wia=ScannerService.CaptureOptions(new ScanDevice(Driver.Wia,"self-test","self-test"),"A4",true,false);
         Check(wia.Dpi==300,"WIA capture settings changed.");
         foreach(var dpi in new[]{150,200,300,600})

@@ -1,12 +1,12 @@
 import {useEffect,useRef,useState,type ReactNode} from 'react'
-import {Checkbox,Empty,Input,Pagination,Select} from 'antd'
+import {Checkbox,Empty,Input,Pagination,Select,Tabs} from 'antd'
 import {Button} from './Button'
 import {ArrowDownOutlined,ArrowUpOutlined,ZoomInOutlined,ZoomOutOutlined} from '@ant-design/icons'
 
 type Row=Record<string,any>&{id:string}
 type Props={
   rows:Row[];total:number;page:number;onPage:(page:number)=>void
-  selected?:Row|null;onSelect:(row:Row)=>void;capturing:boolean;syncing:boolean
+  selected?:Row|null;onSelect:(row:Row)=>void;capturing:boolean;syncing:boolean;processing:boolean;processingRemaining:number;needsReview:boolean
   scope:ReactNode;stats:{label:string;value:number|string}[];context:ReactNode
   actions:ReactNode;settings:ReactNode;image:ReactNode;imageTools:ReactNode;editor:ReactNode
   pageActions:ReactNode;feedback:ReactNode;upload:ReactNode
@@ -28,7 +28,7 @@ export function ScanDesk(p:Props){
   const current=p.rows.findIndex(r=>r.id===p.selected?.id)
   function choose(row:Row){setFollow(false);last.current=row.id;p.onSelect(row)}
   return <section className="scan-workspace">
-    <div className="scan-workspace-context">{p.context}<span className={'scan-live '+(p.capturing?'is-active':'')}>{p.capturing?'正在扫描':p.syncing?'正在上传':'准备就绪'}</span></div>
+    <div className="scan-workspace-context">{p.context}<span className={'scan-live '+(p.capturing?'is-active':'')}>{p.capturing?(p.total?'正在接收扫描图像':'等待扫描仪返回图像'):p.processing?'后台识读 · '+p.processingRemaining+' 面':p.syncing?'正在上传':p.needsReview?'需要核对':p.total?'采集完成':'准备扫描'}</span></div>
     <div className="scan-stats">{p.stats.map(s=><div key={s.label}><span>{s.label}</span><strong>{s.value}</strong></div>)}</div>
     <div className="scan-desk">
       <aside className="scan-paper-panel" aria-label="扫描纸张列表">
@@ -40,10 +40,10 @@ export function ScanDesk(p:Props){
         }}>
           {rows.length?rows.map(row=><button type="button" role="listitem" aria-current={row.id===p.selected?.id?'true':undefined} key={row.id} className={'scan-paper-item '+(row.id===p.selected?.id?'is-selected':'')} onClick={()=>choose(row)}>
             <span className={'scan-paper-symbol '+(row.status==='blocked'?'has-error':'')} aria-hidden="true">{row.sheet_number??row.sequence}</span>
-            <span className="scan-paper-meta"><strong>第 {row.sheet_number??row.sequence} 张 · {row.side==='front'?'正面':'背面'}</strong><span>{row.candidate||'考号待识读'}</span><span className={row.status==='blocked'?'scan-text-warning':''}>{row.status==='pending'&&!row.recognized?'正在识读':names[row.status]||row.status}</span>{row.error&&<span className="scan-paper-error">{row.error}</span>}</span>
+            <span className="scan-paper-meta"><strong>第 {row.sheet_number??row.sequence} 张 · {row.side==='front'?'正面':'背面'}</strong><span>{row.candidate||(row.side==='back'?'随正面配对':'考号待识读')}</span><span className={row.status==='blocked'?'scan-text-warning':''}>{row.status==='pending'&&!row.recognized?'正在识读':names[row.status]||row.status}</span>{row.error&&<span className="scan-paper-error">{row.error}</span>}</span>
           </button>):<Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={search||status!=='all'?'本页没有匹配的纸张':'扫描后，纸张将逐张显示在这里'}/>}
         </div>
-        <div className="scan-paper-footer"><span>共 {p.total} 面</span><Pagination simple current={p.page} pageSize={50} total={p.total} showSizeChanger={false} onChange={p.onPage}/></div>
+        <div className="scan-paper-footer"><span>共 {p.total} 面</span><Pagination simple={{readOnly:true}} current={p.page} pageSize={50} total={p.total} showSizeChanger={false} onChange={p.onPage}/></div>
       </aside>
       <section className="scan-image-panel" aria-label="答卷原图与核对">
         <div className="scan-image-toolbar"><div>{p.imageTools}</div><div className="scan-zoom"><Button type="text" icon={<ZoomOutOutlined/>} aria-label="缩小原图" disabled={!p.selected} onClick={()=>setZoom(n=>Math.max(50,n-25))}/><Button type="text" disabled={!p.selected} onClick={()=>setZoom(100)}>{zoom}%</Button><Button type="text" icon={<ZoomInOutlined/>} aria-label="放大原图" disabled={!p.selected} onClick={()=>setZoom(n=>Math.min(250,n+25))}/></div></div>
@@ -52,11 +52,15 @@ export function ScanDesk(p:Props){
         <div className="scan-image-footer"><Button icon={<ArrowUpOutlined/>} disabled={current<=0} onClick={()=>choose(p.rows[current-1])}>上一面</Button><span>{p.selected?'第 '+(p.selected.sheet_number??p.selected.sequence)+' 张 · '+(p.selected.side==='front'?'正面':'背面'):'等待扫描'}</span><Button icon={<ArrowDownOutlined/>} disabled={current<0||current>=p.rows.length-1} onClick={()=>choose(p.rows[current+1])}>下一面</Button></div>
       </section>
       <aside className="scan-operations" aria-label="扫描及上传操作">
-        <section className="scan-operation-card"><h3>扫描操作</h3><div className="scan-operation-buttons">{p.actions}</div></section>
-        <section className="scan-operation-card scan-upload-card"><h3>核对与上传</h3>{p.upload}</section>
-        {p.selected&&<section className="scan-operation-card"><h3>当前纸张</h3>{p.pageActions}</section>}
-        <section className="scan-operation-card"><h3>运行状态</h3><div role="status" aria-live="polite">{p.feedback}</div></section>
-        <section className="scan-operation-card scan-device-card">{p.settings}</section>
+        <Tabs defaultActiveKey="operations" items={[
+          {key:'operations',label:'扫描与上传',children:<div className="scan-operation-stack">
+            <section className="scan-operation-card"><h3>扫描操作</h3><div className="scan-operation-buttons">{p.actions}</div></section>
+            <section className="scan-operation-card scan-upload-card"><h3>核对与上传</h3>{p.upload}</section>
+            <section className="scan-operation-card"><h3>运行状态</h3><div role="status" aria-live="polite">{p.feedback}</div></section>
+          </div>},
+          {key:'page',label:'当前纸张',children:p.selected?<section className="scan-operation-card">{p.pageActions}</section>:<Empty description="选择一张纸后处理"/>}
+        ]}/>
+        <div className="scan-device-footer">{p.settings}</div>
       </aside>
     </div>
   </section>

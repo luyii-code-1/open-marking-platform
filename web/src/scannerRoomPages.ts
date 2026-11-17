@@ -6,7 +6,7 @@ export type ScanRun={anchorId:string;previousIds:string[]}
 
 export async function scannerRoomState(call:Call,batchId:string,page:number,run?:ScanRun){
   const offset=(page-1)*50
-  const state=await call('state',{batch_id:batchId,offset,page_scope:'room'})
+  const state=await call('state',{batch_id:batchId,offset,page_scope:'room',run:run||null})
   if(!batchId||state.room_pages)return state
   const selected=state.batches.find((b:Row)=>b.id===batchId)
   if(!selected)return state

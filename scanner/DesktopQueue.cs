@@ -50,6 +50,10 @@ public sealed partial class LocalQueue
         }
         return JsonSerializer.Serialize(pairs);
     }
+    public void SaveQuality(string id,QualityReport report)=>Execute(
+        "UPDATE pages SET quality_report=$quality WHERE capture_id=$id AND status IN ('pending','blocked')",
+        ("$id",id),("$quality",JsonSerializer.Serialize(report,System.Text.Json.JsonSerializerOptions.Web)));
+
     public bool ClearLocalSheets(BatchRow[] sheets)
     {
         var root=Path.GetFullPath(Root)+Path.DirectorySeparatorChar;

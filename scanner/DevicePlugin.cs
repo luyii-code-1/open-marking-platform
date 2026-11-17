@@ -32,7 +32,7 @@ internal static class DevicePlugin
                 var feeder=await scanner.UseFeeder(device,duplex);
                 await scanner.Acquire(device,r.GetProperty("paper").GetString()!,feeder,async image=>{
                     var name=Guid.NewGuid().ToString("N")+".png";
-                    image.Save(Path.Combine(folder,name),System.Drawing.Imaging.ImageFormat.Png);
+                    using(var output=File.Create(Path.Combine(folder,name)))ScannerService.SaveImage(image,output);
                     Emit(new{type="page",file=name});
                     if(await Console.In.ReadLineAsync()!="{\"continue\":true}")throw new OperationCanceledException();
                 },CancellationToken.None,duplex,new ScanCaptureSettings(r.GetProperty("dpi").GetInt32(),r.GetProperty("color").GetString()!));
@@ -77,7 +77,7 @@ internal static class DevicePlugin
                 var file=msg.GetProperty("file").GetString()!;
                 if(Path.GetFileName(file)!=file||file.Length==0)throw new IOException("插件返回的文件名无效");
                 var path=Path.Combine(directory.FullName,file);
-                using(var image=Image.FromFile(path))await receive(image);
+                using(var image=Image.FromFile(path)){image.Tag=new ScannerImageFile(path);await receive(image);}
                 File.Delete(path);
             },cancel);
         }
