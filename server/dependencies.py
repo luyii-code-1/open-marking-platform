@@ -12,15 +12,21 @@ def password_hash(password, salt=None):
     return salt + ':' + hashlib.scrypt(password.encode(),salt=salt.encode(),n=16384,r=8,p=1).hex()
 
 
-def user(authorization: Annotated[str | None, Header()] = None,request:Request=None):
+def authenticate_session(db, authorization, request=None):
     if not authorization or not authorization.startswith('Bearer '):
         raise HTTPException(401,'请先登录')
-    with connect() as db:
-        row=db.execute('SELECT u.id,u.username,u.name,u.role FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=? AND s.expires>?',(hashlib.sha256(authorization[7:].encode()).hexdigest(),time.time())).fetchone()
+    row=db.execute('SELECT u.id,u.username,u.name,u.role FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=? AND s.expires>?',(hashlib.sha256(authorization[7:].encode()).hexdigest(),time.time())).fetchone()
     if row is None:
         raise HTTPException(401,'登录已过期')
     if request is not None:request.state.actor=row['id']
     return dict(row)
+
+
+def user(authorization: Annotated[str | None, Header()] = None,request:Request=None):
+    if not authorization or not authorization.startswith('Bearer '):
+        raise HTTPException(401,'请先登录')
+    with connect() as db:
+        return authenticate_session(db, authorization, request)
 
 
 def admin(current=Depends(user)):

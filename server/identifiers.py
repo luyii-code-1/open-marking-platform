@@ -47,23 +47,12 @@ def initialize(db):
         CREATE INDEX IF NOT EXISTS identifier_owner ON identifiers(owner_id,kind);
         CREATE TABLE IF NOT EXISTS schema_migrations(name TEXT PRIMARY KEY);
     ''')
-    if not db.execute("SELECT 1 FROM schema_migrations WHERE name='identifiers-v1'").fetchone():
+    migration="SELECT 1 FROM schema_migrations WHERE name='identifiers-v1'"
+    if not db.execute(migration).fetchone():
         db.execute('BEGIN IMMEDIATE')
-        for row in db.execute('SELECT id FROM users').fetchall():reserve(db,row['id'],'users',row['id'])
-        rows=db.execute('SELECT id,kind,body,deleted FROM objects').fetchall()
-        for row in rows:reserve(db,row['id'],row['kind'],row['id'])
-        for row in rows:
-            if row['kind']=='templates':template_questions(db,json.loads(row['body']),None)
-        # Older drafts may already have removed questions. Their history also reserves IDs.
-        for row in db.execute("SELECT a.body,o.id FROM audit a JOIN objects o ON o.id=a.object_id WHERE o.kind='templates'").fetchall():
-            for q in json.loads(row['body']).get('questions',[]):reserve(db,q['id'],'questions',row['id'])
-        for row in rows:
-            if row['kind']=='templates':
-                active={q['id'] for q in json.loads(row['body']).get('questions',[])}
-                for q in db.execute("SELECT id FROM identifiers WHERE kind='questions' AND owner_id=?",(row['id'],)).fetchall():
-                    if row['deleted'] or q['id'] not in active:db.execute('UPDATE identifiers SET retired=1 WHERE id=?',(q['id'],))
-            if row['deleted']:db.execute('UPDATE identifiers SET retired=1 WHERE id=?',(row['id'],))
-        db.execute("INSERT INTO schema_migrations VALUES('identifiers-v1')")
+        if not db.execute(migration).fetchone():
+            backfill_identifiers(db)
+            db.execute("INSERT INTO schema_migrations VALUES('identifiers-v1')")
         db.commit()
     # Enforce cross-table ownership even for direct SQL, and keep hard-delete tombstones.
     db.executescript('''
@@ -93,3 +82,20 @@ def initialize(db):
           UPDATE identifiers SET retired=1 WHERE id=OLD.id;
         END;
     ''')
+
+
+def backfill_identifiers(db):
+    for row in db.execute('SELECT id FROM users').fetchall():reserve(db,row['id'],'users',row['id'])
+    rows=db.execute('SELECT id,kind,body,deleted FROM objects').fetchall()
+    for row in rows:reserve(db,row['id'],row['kind'],row['id'])
+    for row in rows:
+        if row['kind']=='templates':template_questions(db,json.loads(row['body']),None)
+    # Older drafts may already have removed questions. Their history also reserves IDs.
+    for row in db.execute("SELECT a.body,o.id FROM audit a JOIN objects o ON o.id=a.object_id WHERE o.kind='templates'").fetchall():
+        for q in json.loads(row['body']).get('questions',[]):reserve(db,q['id'],'questions',row['id'])
+    for row in rows:
+        if row['kind']=='templates':
+            active={q['id'] for q in json.loads(row['body']).get('questions',[])}
+            for q in db.execute("SELECT id FROM identifiers WHERE kind='questions' AND owner_id=?",(row['id'],)).fetchall():
+                if row['deleted'] or q['id'] not in active:db.execute('UPDATE identifiers SET retired=1 WHERE id=?',(q['id'],))
+        if row['deleted']:db.execute('UPDATE identifiers SET retired=1 WHERE id=?',(row['id'],))

@@ -27,7 +27,7 @@ def test_invalid_quality_report_is_rejected(invalid):
 
 def test_quality_evidence_freezes_until_admin_review_and_preserves_idempotency(tmp_path, monkeypatch):
     monkeypatch.setattr(db, 'ROOT', tmp_path)
-    monkeypatch.setattr(jobs, 'queue', lambda *args, **kwargs: None)
+    monkeypatch.setattr(jobs, 'dispatch', lambda *args, **kwargs: None)
     output = io.BytesIO(); Image.new('L', (1000, 1400), 255).save(output, format='PNG')
     with TestClient(app) as client:
         account = {'username': 'admin', 'password': 'administrator-password', 'name': '管理员'}
@@ -38,6 +38,7 @@ def test_quality_evidence_freezes_until_admin_review_and_preserves_idempotency(t
             subject = db.put(connection, 'subjects', {'project_id': project['id'], 'name': '数学'})
             group = db.put(connection, 'groups', {'subject_id': subject['id'], 'name': '组'})
             template = db.put(connection, 'templates', {'group_id': group['id'], 'revision': 1, 'sides': 1})
+            db.put(connection,'groups',{**group,'template_id':template['id']})
             batch = db.put(connection, 'scan-batches', {'group_id': group['id'], 'template_id': template['id'], 'status': 'front'})
         monkeypatch.setattr(paper, 'decode', lambda data,template=None: (None, paper.code(template, 'front')))
         capture = str(uuid4())
@@ -47,10 +48,20 @@ def test_quality_evidence_freezes_until_admin_review_and_preserves_idempotency(t
             return client.post(url + '/pages', data=form, files={'file': ('page.png', output.getvalue(), 'image/png')}, headers=headers)
         rejected = upload({**data, 'quality_report': 'null'})
         assert rejected.status_code == 422 and not (tmp_path / 'pages' / (capture + '.image')).exists()
+        with monkeypatch.context() as patch:
+            def unavailable(*args,**kwargs):raise RuntimeError('injected job registration failure')
+            patch.setattr(jobs,'create_job',unavailable)
+            with pytest.raises(RuntimeError,match='job registration failure'):upload()
+        with db.connect() as connection:
+            assert db.get(connection,capture,'pages') is None and not db.objects(connection,'exceptions')
+        assert not (tmp_path/'pages'/(capture+'.image')).exists()
         response = upload()
         assert response.status_code == 200 and response.json()['quality_review_required'] is True
         assert response.json()['scanner_quality'] == report()
         assert upload().status_code == 200
+        with db.connect() as connection:
+            tasks=[j for j in db.objects(connection,'jobs') if j['kind']=='process-page']
+            assert len(tasks)==1 and tasks[0]['payload']['page_id']==capture
         assert client.get(url, headers=headers).json()['status'] == 'frozen'
         exceptions = client.get('/api/v1/exceptions', params={'group_id': group['id']}, headers=headers).json()
         assert len(exceptions) == 1 and exceptions[0]['source'] == 'scanner'

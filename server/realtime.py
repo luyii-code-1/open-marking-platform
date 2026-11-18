@@ -50,7 +50,22 @@ def permissions(db,people):
     return scopes
 
 
+def task_topics(person, scope, previous, templates, owners):
+    if person['role'] in ('admin', 'manager'):
+        return ADMIN_ROOTS['tasks']
+    own = person['id'] in owners
+    assigned = not templates.isdisjoint(scope['templates']) or not templates.isdisjoint(previous['templates'])
+    if not (own or assigned):
+        return set()
+    roots = {'review-progress', 'dashboard', 'results', 'analysis'}
+    if own:
+        roots.add('tasks')
+    return roots
+
+
 def topics(person,scope,previous,kind,body):
+    if kind=='tasks':
+        return task_topics(person, scope, previous, {body.get('template_id')}, {body.get('user_id')})
     if person['role']=='manager' and kind in ('storage-connections','scanner-devices','score-conversions','database-backups','request-log'):return set()
     if person['role'] in ('admin','manager'):return ADMIN_ROOTS.get(kind,{kind})
     uid=person['id'];merged={k:scope[k]|previous[k] for k in scope}
@@ -59,7 +74,6 @@ def topics(person,scope,previous,kind,body):
     if kind=='account-events' and own:return {'auth'}
     if kind=='assignments' and (assigned or uid in body.get('user_ids',[])+body.get('arbitrator_ids',[])):
         return ADMIN_ROOTS['assignments']
-    if kind=='tasks' and (assigned or own):return {'review-progress','dashboard','results','analysis'}|({'tasks'} if own else set())
     if kind in ('submissions','templates') and assigned:return {'templates','review-progress','dashboard','results','analysis'}
     if kind=='groups' and (body.get('id') in merged['groups'] or scope['classes']):return {'groups','subjects','projects','review-progress','results','analysis'}
     if kind in ('subjects','projects') and body.get('id') in merged[kind]:return {kind}
@@ -124,12 +138,24 @@ class Hub:
             rows=db.execute('SELECT a.rowid,a.body,o.kind FROM audit a LEFT JOIN objects o ON o.id=a.object_id WHERE a.rowid>? ORDER BY a.rowid LIMIT 1500',(self.cursor,)).fetchall()
             scopes=permissions(db,{p['id'] for p in people.values()}) if rows else {}
             changes=[]
-            events=[(r['kind'],json.loads(r['body'])) for r in rows if r['kind']]
+            events = []
+            task_templates, task_owners = set(), set()
+            for row in rows:
+                if not row['kind']:
+                    continue
+                body = json.loads(row['body'])
+                if row['kind'] == 'tasks':
+                    task_templates.add(body.get('template_id'))
+                    task_owners.add(body.get('user_id'))
+                else:
+                    events.append((row['kind'], body))
             for client in clients:
                 person=people.get(client.digest)
                 if not person or person['role']!=client.person['role']:
                     changes.append((client,None,None,None));continue
                 scope=scopes.get(person['id'],client.scope);roots=set()
+                if task_templates:
+                    roots.update(task_topics(person, scope, client.scope, task_templates, task_owners))
                 if person['name']!=client.person['name']:roots.add('auth')
                 for kind,body in events:roots.update(topics(person,scope,client.scope,kind,body))
                 changes.append((client,person,scope,roots))

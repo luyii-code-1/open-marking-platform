@@ -64,7 +64,7 @@ export class UserActivity {
   }
   private queue(){
     if(this.stopped||this.flight||this.timer||!this.dirty)return
-    const delay=Math.max(0,1000-(this.now()-this.sent))
+    const delay=Math.max(0,30000-(this.now()-this.sent))
     if(delay)this.timer=this.schedule(()=>{this.timer=undefined;void this.flush()},delay)
     else void this.flush()
   }

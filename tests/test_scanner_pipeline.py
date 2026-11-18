@@ -107,6 +107,19 @@ def test_local_pipeline_rejects_changed_config_and_malformed_result(pipeline):
     response=f['upload'](page);assert response.status_code==200,response.text
 
 
+def test_replacing_template_before_first_capture_rejects_old_batch_uploads(pipeline):
+    f=pipeline;old=f['template'];post=f['post']
+    new=post('templates',{'name':'新版','group_id':f['group_id'],'paper':'A4','sides':2,
+        'questions':[{**q,'id':str(uuid4())} for q in old['questions']]})
+    post('templates/'+new['id']+'/publish',{'replace_id':old['id']})
+    page=f['pages'][0]
+    assert f['upload'](page).status_code==409
+    response=f['client'].post('/api/v1/scan-batches/'+f['batch_id']+'/pages',headers=f['headers'],
+        data={'side':'front','capture_id':str(uuid4()),'sequence':1},files={'file':('page.jpg',page['original'])})
+    assert response.status_code==409
+    with db.connect() as connection:assert not db.objects(connection,'pages')
+
+
 def test_project_storage_schedules_all_local_recognition_outputs(pipeline,monkeypatch):
     from pathlib import Path
     f=pipeline;monkeypatch.setenv('OMP_STORAGE','local')

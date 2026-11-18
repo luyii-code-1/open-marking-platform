@@ -6,6 +6,7 @@ import zipfile
 from itertools import islice
 from fastapi import HTTPException
 from .db import objects
+from .candidate_numbers import by_number
 from .school import student_view
 
 HEADERS={'准考证号':'candidate_number','考号':'candidate_number','candidate_number':'candidate_number','姓名':'name','name':'name'}
@@ -61,12 +62,14 @@ def read_rows(content,filename):
 
 
 def match_rows(db,group,rows):
-    students={s['candidate_number']:student_view(db,s) for s in objects(db,'students')}
+    students=by_number(student_view(db,s) for s in objects(db,'students'))
     errors=[];warnings=[];selected={};duplicates=0
     for row in rows:
         candidate=row['candidate_number'];student=students.get(candidate)
         if not re.fullmatch(r'[0-9]+',candidate):
             errors.append({**row,'reason':'准考证号应为数字文本，请保留前导零'});continue
+        if candidate in students and student is None:
+            errors.append({**row,'reason':'准考证号对应多个学生，请先核对学生资料'});continue
         if not student:
             errors.append({**row,'reason':'全局学生中未找到此准考证号，请先维护学生资料'});continue
         if student['id'] in selected:duplicates+=1

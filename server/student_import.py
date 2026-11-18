@@ -8,6 +8,7 @@ from collections import defaultdict
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from openpyxl import load_workbook
 from .db import connect, objects, put
+from .candidate_numbers import by_number
 from .dependencies import admin
 
 router = APIRouter(prefix='/api/v1/student-import')
@@ -94,7 +95,7 @@ def inspect(file: UploadFile = File(), current=Depends(admin)):
 def plan(db, tables, settings, commit, actor):
     grades = {g['name']: g for g in objects(db, 'grades') if not g.get('archived')}
     fixed_grade = next((g for g in grades.values() if g['id'] == settings.get('grade_id')), None)
-    existing = {s['candidate_number']: s for s in objects(db, 'students')}
+    existing = by_number(objects(db,'students'))
     classes = defaultdict(list)
     def class_key(name):
         number = re.fullmatch(r'0*(\d+)(?:班)?', name)
@@ -143,6 +144,9 @@ def plan(db, tables, settings, commit, actor):
                 continue
             cls = matches[0] if matches else None
             old = existing.get(candidate)
+            if candidate in existing and old is None:
+                report['errors'].append(source + '：准考证号对应多个学生，请先核对学生资料')
+                continue
             sample = dict(name=name, candidate_number=candidate, grade=grade['name'], class_name=cls['name'] if cls else key[1])
             if len(report['sample']) < 10:
                 report['sample'].append(sample)

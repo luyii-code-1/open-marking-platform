@@ -41,19 +41,26 @@ async def lifespan(app):
                 try:recover()
                 except Exception:pass
         recovery=threading.Thread(target=resume_local,daemon=True,name='omp-local-recovery');recovery.start()
-    try:yield
-    finally:
-        stop.set()
-        if recovery:recovery.join(timeout=1)
-        await app.state.event_hub.stop()
-        await asyncio.to_thread(app.state.request_journal.close)
+    # SQLite checkpoints and removes its WAL when the last database handle
+    # closes. Keep an idle handle between batches, without holding a transaction.
+    with connect() as wal_handle:
+        wal_handle.execute('SELECT count(*) FROM sqlite_master').fetchone()
+        from .review_writes import ReviewWriter
+        review_writer = ReviewWriter(database.ROOT, persistent=True)
+        try:yield {'review_writer': review_writer}
+        finally:
+            stop.set()
+            if recovery:recovery.join(timeout=1)
+            await review_writer.close()
+            await app.state.event_hub.stop()
+            await asyncio.to_thread(app.state.request_journal.close)
 
 
 app = FastAPI(title='Open Marking Platform',version='0.1.0',lifespan=lifespan)
 from .paper_fonts import router as paper_fonts_router
 app.include_router(paper_fonts_router)
-from .request_log import record_request
-app.middleware('http')(record_request)
+from .request_log import RequestLogMiddleware
+app.add_middleware(RequestLogMiddleware)
 
 from .identifiers import InvalidIdentifier,IdentifierConflict,prepare_questions
 
@@ -162,7 +169,8 @@ def list_route(kind):
             if kind=='projects':values=project_views(db,values)
             if kind=='groups':
                 grades={g['id']:g['name'] for g in objects(db,'grades')}
-                values=[{**v,'grade_name':grades.get(v.get('grade_id'),'')} for v in values]
+                scanned={r[0] for r in db.execute('SELECT group_id FROM scanned_groups')}
+                values=[{**v,'grade_name':grades.get(v.get('grade_id'),''),'template_locked':v['id'] in scanned} for v in values]
             if kind=='scan-batches':
                 from .room_tags import view as room_view
                 from .workflow import batch_progress
@@ -249,8 +257,8 @@ def create_route(kind):
                 previous=[a for a in objects(db,'assignments') if a['template_id']==value['template_id'] and a['question_id']==value['question_id']]
                 if previous: value['id']=previous[-1]['id']
             if kind=='students':
-                if not isinstance(value.get('candidate_number'),str) or not value['candidate_number'].isdigit(): raise HTTPException(422,'准考证号应为数字字符串')
-                if any(s['candidate_number']==value['candidate_number'] for s in objects(db,'students')): raise HTTPException(409,'准考证号已存在')
+                from .candidate_numbers import validate
+                validate(db,value.get('candidate_number'))
             if kind=='score-conversions':
                 from .conversion import validate_conversion
                 if not isinstance(value.get('name'),str) or not 1<=len(value['name'].strip())<=100:raise HTTPException(422,'请填写100字以内方案名称')
@@ -341,6 +349,8 @@ def publish(identifier:str,body:dict|None=None,current=Depends(admin)):
             if template['status']!='draft':raise HTTPException(409,'请选择草稿发布')
             if group.get('template_id')!=(body or {}).get('replace_id'):
                 raise HTTPException(409,'当前正式版本已变化，请重新载入后确认替换')
+            from .templates import require_replaceable
+            require_replaceable(db,group['id'])
         from .template_checks import issues,asset_ids
         errors=issues(template,complete=True,require_answers=False)
         if errors:raise HTTPException(422,'；'.join(errors))
@@ -416,7 +426,9 @@ def upload_page(identifier:str,file:UploadFile=File(),capture_id:str=Form(),side
             if existing['sha256']!=digest or existing['batch_id']!=identifier or existing['side']!=side or existing['sequence']!=sequence: raise HTTPException(409,'采集编号冲突')
             if existing['status']=='quarantined': return JSONResponse(status_code=409,content={**existing,'detail':'该页已隔离，批次冻结'})
             return existing
-        if require(db,batch['group_id'],'groups').get('frozen'):raise HTTPException(409,'成绩已冻结，请先发起复核')
+        group=require(db,batch['group_id'],'groups')
+        if group.get('frozen'):raise HTTPException(409,'成绩已冻结，请先发起复核')
+        if group.get('template_id')!=batch['template_id']:raise HTTPException(409,'本批次题卡已更换，请使用当前正式题卡新建批次')
         if batch['status'] in ('frozen','paired'): raise HTTPException(409,'批次已冻结或已确认')
         template=require(db,batch['template_id'],'templates')
         try:image,value=paper.decode(data,template)
@@ -425,9 +437,6 @@ def upload_page(identifier:str,file:UploadFile=File(),capture_id:str=Form(),side
         if any(p['batch_id']==identifier and p['side']==side and p['sequence']==sequence and not p.get('excluded') for p in objects(db,'pages')): raise HTTPException(409,'该顺序已采集，请处理补扫')
         from .lifecycle import writable
         writable(db,'scan-batches',batch)
-        storage=database.ROOT/'pages'; storage.mkdir(parents=True,exist_ok=True)
-        path=storage/(capture_id+'.image')
-        temporary=path.with_suffix('.tmp'); temporary.write_bytes(data); temporary.replace(path)
         page={'id':capture_id,'batch_id':identifier,'side':side,'sequence':sequence,'sha256':digest,'status':'received','candidate_number':None,'image_url':f'/api/v1/pages/{capture_id}/image'}
         if quality:
             page['scanner_quality']=quality
@@ -442,9 +451,19 @@ def upload_page(identifier:str,file:UploadFile=File(),capture_id:str=Form(),side
             put(db,'exceptions',{'batch_id':identifier,'page_id':capture_id,'kind':'wrong_paper','status':'open','reason':'二维码与所选考卷或面不符'},current['id'])
             status=409
         put(db,'pages',page,current['id'])
+        if status==200:
+            from .jobs import create_job
+            job=create_job(db,'process-page',{'page_id':capture_id})
+        storage=database.ROOT/'pages';storage.mkdir(parents=True,exist_ok=True)
+        path=storage/(capture_id+'.image');temporary=path.with_suffix('.tmp')
+        try:
+            temporary.write_bytes(data)
+            temporary.replace(path)
+        finally:
+            temporary.unlink(missing_ok=True)
     if status==200:
-        from .jobs import queue
-        queue('process-page',{'page_id':capture_id})
+        from .jobs import dispatch
+        dispatch(job['id'])
         with connect() as db:page=require(db,capture_id,'pages')
     return JSONResponse(status_code=status,content={**page,'quality_review_required':bool(quality and quality['issues'])} if status==200 else {**page,'detail':'扫描中断：二维码不符，批次已冻结'})
 
@@ -481,13 +500,17 @@ def pair(identifier:str,body:dict|None=Body(default=None),current=Depends(scan_a
         if body and 'local_pairs' in body:
             local=[{'candidate_number':front['candidate_number'],'pages':[front['id']]+([backs[i]['id']] if template['sides']==2 else [])} for i,front in enumerate(fronts)]
             if body['local_pairs']!=local:raise HTTPException(409,'本地配页清单与服务器页面记录不一致，请核查后重新确认')
-        students={s['candidate_number']:s for s in objects(db,'students')}
         group=require(db,batch['group_id'],'groups')
+        from .candidate_numbers import by_number,check_scanned_numbers
         from .school import group_students
         roster_students=group_students(db,group)
-        if group.get('grade_id') or group.get('roster_mode')=='selected':students={s['candidate_number']:s for s in roster_students}
-        elif roster_students is not None:students.update({s['candidate_number']:s for s in roster_students})
+        if group.get('grade_id') or group.get('roster_mode')=='selected':
+            check_scanned_numbers(db,numbers)
+            students=by_number(roster_students)
+        else:
+            students=by_number([*objects(db,'students'),*(roster_students or [])])
         if any(number not in students for number in numbers): raise HTTPException(409,'考号不在学生名单中')
+        if any(students[number] is None for number in numbers):raise HTTPException(409,'准考证号对应多个学生，请先核对学生资料和应考名单')
         for index,front in enumerate(fronts):
             student=students[front['candidate_number']]
             from .student_history import snapshot

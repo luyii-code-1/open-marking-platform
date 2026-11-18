@@ -1,4 +1,5 @@
 import json
+import multiprocessing
 import sqlite3
 from uuid import uuid4
 import pytest
@@ -6,6 +7,50 @@ from fastapi.testclient import TestClient
 from server import db
 from server.main import app
 from server.identifiers import IdentifierConflict
+
+
+def start_database(root,barrier,api):
+    db.ROOT=root
+    barrier.wait(timeout=45)
+    db.initialize()
+    if api:
+        from server.school import migrate
+        migrate()
+
+
+@pytest.mark.parametrize('legacy',[False,True],ids=['empty','legacy'])
+def test_simultaneous_api_and_worker_startup(tmp_path,legacy):
+    if legacy:
+        db.initialize(tmp_path)
+        question=str(uuid4())
+        with db.connect(tmp_path) as con:
+            cls=db.put(con,'classes',{'name':'保留的班级','grade':'高一'})
+            template=db.put(con,'templates',{'questions':[{'id':question}]})
+            db.put(con,'templates',{**template,'questions':[]})
+            con.execute('DELETE FROM identifiers')
+            con.execute("DELETE FROM schema_migrations WHERE name='identifiers-v1'")
+            con.execute('DROP TABLE scanned_groups')
+        with db.connect(tmp_path) as con:
+            assert con.execute('PRAGMA journal_mode=DELETE').fetchone()[0]=='delete'
+    context=multiprocessing.get_context('spawn');barrier=context.Barrier(3)
+    processes=[context.Process(target=start_database,args=(tmp_path,barrier,api)) for api in (True,True,False)]
+    try:
+        for process in processes:process.start()
+        for process in processes:
+            process.join(75)
+            assert process.exitcode==0
+    finally:
+        for process in processes:
+            if process.is_alive():process.terminate();process.join()
+    with db.connect(tmp_path) as con:
+        assert con.execute('PRAGMA journal_mode').fetchone()[0]=='wal'
+        assert con.execute("SELECT COUNT(*) FROM schema_migrations WHERE name='identifiers-v1'").fetchone()[0]==1
+        assert con.execute('SELECT COUNT(*) FROM scanned_groups').fetchone()[0]==0
+        if legacy:
+            assert con.execute('SELECT retired FROM identifiers WHERE id=?',(question,)).fetchone()[0]==1
+            assert db.get(con,template['id'])['questions']==[]
+            grades=db.objects(con,'grades')
+            assert len(grades)==1 and db.get(con,cls['id'])['grade_id']==grades[0]['id']
 
 
 def test_question_ids_global_retired_and_transactional_through_api(tmp_path,monkeypatch):

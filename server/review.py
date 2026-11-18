@@ -5,14 +5,16 @@ import time
 from decimal import Decimal
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import Response
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import JSONResponse, Response
 from PIL import Image
 from .db import connect, get, objects, put,find
 from . import db as database
 from .dependencies import user,admin,require
 from .scoring import cents,final_score,objective_score
 from .allocation import participants,ensure,allocate_arbitration,progress as allocation_progress,pools
+
+from .review_writes import submit as submit_write
 
 router=APIRouter(prefix='/api/v1')
 
@@ -34,13 +36,13 @@ def own_task(db,identifier,current):
     return task
 
 
-def public_task(task,db=None):
+def public_task(task,db=None,submission=None,group=None):
     value={k:v for k,v in task.items() if k not in ('student_id','candidate_number')}
     if db is not None:
         allocated=db.execute('SELECT round FROM review_allocations WHERE submission_id=? AND question_id=? AND user_id=?',(task['submission_id'],task['question_id'],task['user_id'])).fetchone()
         value['review_role']='arbitration' if allocated and allocated['round']==3 else 'ordinary'
-        submission=get(db,task.get('submission_id'),'submissions') or {}
-        group=get(db,submission.get('group_id'),'groups') or {}
+        if submission is None:submission=get(db,task.get('submission_id'),'submissions') or {}
+        if group is None:group=get(db,submission.get('group_id'),'groups') or {}
         if group.get('grade_id'):
             from .room_tags import view
             value.update(grade_id=group['grade_id'],grade_name=(get(db,group['grade_id'],'grades') or {}).get('name',''),room_tags=view(db,submission.get('room_tags',[])))
@@ -51,7 +53,7 @@ def completed(db,submission_id,question_id):
     return sorted(find(db,'tasks',submission_id=submission_id,question_id=question_id,status='completed'),key=lambda t:t['created_at'])
 
 
-def result_for(db,submission,question):
+def result_for(db,submission,question,scored_task=None):
     if submission['status']=='absent': return 0
     if question['type']!='subjective':
         if not question.get('answer'):return None
@@ -61,6 +63,14 @@ def result_for(db,submission,question):
             selected.extend(require(db,page_id,'pages').get('selections',{}).get(question['id'],[]))
         return objective_score(selected,question.get('answer',[]),question['points'],question.get('rule'))
     tasks=completed(db,submission['id'],question['id'])
+    if scored_task is not None:
+        for index, previous in enumerate(tasks):
+            if previous['id'] == scored_task['id']:
+                tasks[index] = scored_task
+                break
+        else:
+            tasks.append(scored_task)
+            tasks.sort(key=lambda task: task['created_at'])
     return final_score([t['score_cents'] for t in tasks],question.get('review_mode','single'),question.get('threshold',0))
 
 
@@ -86,53 +96,60 @@ def history(template_id:str|None=None,question_id:str|None=None,current=Depends(
 
 @router.get('/review-progress')
 def progress(template_id:str,question_id:str,current=Depends(user)):
-    with connect() as db:
+    from .allocation import read_progress
+    from .progress_cache import SharedProgress
+    shared = None
+    def read(db, prepare):
+        nonlocal shared
         template,question=question_for(db,template_id,question_id)
         assignments=find(db,'assignments',template_id=template_id,question_id=question_id)
         if current['role'] not in ('admin','manager') and not any(current['id'] in participants(a) for a in assignments):raise HTTPException(403,'未分配此题')
+        if shared is None:
+            shared = SharedProgress(db, template_id, question_id)
         if assignments:
-            db.execute('BEGIN IMMEDIATE')
-            ensure(db,template,question,assignments[-1])
-            allocate_arbitration(db,template,question,assignments[-1])
+            prepare(db, template, question, assignments[-1])
         my_total=db.execute('SELECT COUNT(*) FROM review_allocations WHERE template_id=? AND question_id=? AND user_id=?',(template_id,question_id,current['id'])).fetchone()[0]
-        count=db.execute("SELECT COUNT(*) FROM objects INDEXED BY object_submission WHERE kind='submissions' AND deleted=0 AND json_extract(body,'$.template_id')=? AND json_extract(body,'$.status')='ready'",(template_id,)).fetchone()[0]
-        finalized=db.execute("SELECT COUNT(*) FROM review_results r JOIN objects s ON s.id=r.submission_id WHERE r.question_id=? AND r.final_cents IS NOT NULL AND s.deleted=0 AND json_extract(s.body,'$.template_id')=?",(question_id,template_id)).fetchone()[0]
+        count, finalized, all_final = shared.counts(db)
         mine=find(db,'tasks',user_id=current['id'],template_id=template_id,question_id=question_id)
         regrade_count=db.execute('SELECT COUNT(*) FROM regrade_queue WHERE user_id=? AND template_id=? AND question_id=?',(current['id'],template_id,question_id)).fetchone()[0]
-        all_final=db.execute("SELECT COUNT(*) FROM review_results r JOIN objects s ON s.id=r.submission_id WHERE r.final_cents IS NOT NULL AND s.deleted=0 AND json_extract(s.body,'$.template_id')=?",(template_id,)).fetchone()[0]
         objective=sum(1 for q in template['questions'] if q['type']!='subjective' and q.get('answer'))
-        personal=next((r for r in allocation_progress(db,template_id,question_id,assignments[-1]) if r['user_id']==current['id']),{}) if assignments else {}
+        personal=next(iter(allocation_progress(db,template_id,question_id,assignments[-1],user_id=current['id'])),{}) if assignments else {}
         return {**{'my_'+key:value for key,value in personal.items() if key!='user_id'},'can_arbitrate':bool(assignments and current['id'] in pools(assignments[-1])[1]),'my_regrade_pending':regrade_count,'my_total':my_total,'my_progress':round(100*sum(t['status']=='completed' for t in mine)/my_total,1) if my_total else 0,'total_submissions':count,'my_completed':sum(t['status']=='completed' for t in mine),'my_in_progress':sum(t['status']=='claimed' and t['expires_at']>time.time() for t in mine),'question_completed':finalized,'question_progress':round(100*finalized/count,1) if count else 0,'paper_progress':round(100*(all_final+objective*count)/(len(template['questions'])*count),1) if count and template['questions'] else 0}
+    result = read_progress(read)
+    shared.publish()
+    return result
 
 
 @router.get('/review-allocation-progress')
 def allocation_summary(template_id:str,current=Depends(admin)):
-    with connect() as db:
-        db.execute('BEGIN IMMEDIATE')
+    from .allocation import read_progress
+    def read(db, prepare):
         template=require(db,template_id,'templates')
         rows=[]
         for assignment in find(db,'assignments',template_id=template_id):
             question=next((q for q in template['questions'] if q['id']==assignment['question_id']),None)
             if not question:continue
-            ensure(db,template,question,assignment);allocate_arbitration(db,template,question,assignment)
+            prepare(db,template,question,assignment)
             rows.append({'question_id':question['id'],'teachers':allocation_progress(db,template_id,question['id'],assignment)})
         return rows
+    return read_progress(read)
 
 
 @router.get('/review-task-progress')
 def task_summary(current=Depends(user)):
-    with connect() as db:
-        db.execute('BEGIN IMMEDIATE')
+    from .allocation import read_progress
+    def read(db, prepare):
         rows=[]
         for assignment in objects(db,'assignments'):
             if current['id'] not in participants(assignment):continue
             template=get(db,assignment['template_id'],'templates')
             question=next((q for q in (template or {}).get('questions',[]) if q['id']==assignment['question_id']),None)
             if not question:continue
-            ensure(db,template,question,assignment);allocate_arbitration(db,template,question,assignment)
-            personal=next((r for r in allocation_progress(db,template['id'],question['id'],assignment) if r['user_id']==current['id']),{})
+            prepare(db,template,question,assignment)
+            personal=allocation_progress(db,template['id'],question['id'],assignment,user_id=current['id'])[0]
             rows.append({**personal,'template_id':template['id'],'question_id':question['id'],'can_arbitrate':current['id'] in pools(assignment)[1]})
         return rows
+    return read_progress(read)
 
 
 @router.get('/tasks/{identifier}')
@@ -141,121 +158,152 @@ def details(identifier:str,current=Depends(user)):
 
 
 @router.post('/tasks/claim')
-def claim(body:dict,current=Depends(user)):
+async def claim(body: dict, request: Request):
+    return JSONResponse(await submit_write(request, claim_in_transaction, body))
+
+
+def claim_in_transaction(db, prepared, current, body):
     held=body.get('pending_task_ids',[])
     if not isinstance(held,list) or any(not isinstance(value,str) for value in held):
         raise HTTPException(422,'本地作答编号列表无效')
     held=set(held)
-    with connect() as db:
-        db.execute('BEGIN IMMEDIATE')
-        template,question=question_for(db,body.get('template_id'),body.get('question_id'))
-        if question['type']!='subjective': raise HTTPException(422,'客观题由系统给分')
-        group=require(db,template['group_id'],'groups')
-        if group.get('frozen'):raise HTTPException(409,'成绩已冻结')
-        assignments=find(db,'assignments',template_id=template['id'],question_id=question['id'])
-        if not assignments:raise HTTPException(409,'请先配置阅卷教师')
-        assignment=assignments[-1]
-        if current['id'] not in participants(assignment):raise HTTPException(403,'尚未分配该题')
-        ensure(db,template,question,assignment)
-        allocate_arbitration(db,template,question,assignment)
-        own_progress=next((r for r in allocation_progress(db,template['id'],question['id'],assignment) if r['user_id']==current['id']),{})
-        arbitration_pending=own_progress.get('arbitration_pending',0)>0
-        queued=db.execute('SELECT task_id FROM regrade_queue WHERE user_id=? AND template_id=? AND question_id=? ORDER BY position,task_id',(current['id'],template['id'],question['id'])).fetchall()
-        # Each pending ID still belongs to its teacher. Both regrades and ordinary
-        # claims must pass over these papers until their local score arrives.
-        for row in ([] if arbitration_pending else queued):
-            if row[0] in held:continue
-            task=require(db,row[0],'tasks')
-            if task['status']=='completed':return public_task({**task,'regrading':True},db)
-            db.execute('DELETE FROM regrade_queue WHERE task_id=?',(row[0],))
-        existing=find(db,'tasks',user_id=current['id'],template_id=template['id'],question_id=question['id'],status='claimed')
-        for task in existing:
-            if task['user_id']==current['id'] and task['question_id']==question['id'] and task['status']=='claimed':
-                if task['expires_at']>time.time():
-                    if task['id'] in held:continue
-                    allocated=db.execute('SELECT round FROM review_allocations WHERE submission_id=? AND question_id=? AND user_id=?',(task['submission_id'],question['id'],current['id'])).fetchone()
-                    if arbitration_pending and (not allocated or allocated['round']!=3):continue
-                    task['expires_at']=time.time()+900
-                    return public_task(put(db,'tasks',task,current['id']),db)
-                task['status']='expired';put(db,'tasks',task,current['id'])
-        # Remove TEXT column affinity on the correlated UUID so SQLite can
-        # seek the JSON expression index rather than scan every task.
-        rows=db.execute('''SELECT s.body FROM objects s INDEXED BY object_submission WHERE s.kind='submissions' AND s.deleted=0
-            AND json_extract(s.body,'$.template_id')=? AND json_extract(s.body,'$.status')='ready'
-            AND EXISTS(SELECT 1 FROM review_allocations a WHERE a.submission_id=s.id AND a.question_id=? AND a.user_id=?
-                AND (a.round<3 OR (SELECT COUNT(*) FROM objects t INDEXED BY object_task_answer WHERE t.kind='tasks' AND t.deleted=0 AND json_extract(t.body,'$.submission_id')=+s.id AND json_extract(t.body,'$.question_id')=a.question_id AND json_extract(t.body,'$.status')='completed')=2))
-            AND NOT EXISTS(SELECT 1 FROM review_results r WHERE r.submission_id=s.id AND r.question_id=? AND r.final_cents IS NOT NULL)
-            AND NOT EXISTS(SELECT 1 FROM objects t INDEXED BY object_task_answer WHERE t.kind='tasks' AND t.deleted=0
-                AND json_extract(t.body,'$.submission_id')=+s.id AND json_extract(t.body,'$.question_id')=?
-                AND json_extract(t.body,'$.user_id')=? AND (json_extract(t.body,'$.status')='completed'
-                  OR t.id IN (SELECT value FROM json_each(?))))
-            AND (SELECT COUNT(*) FROM objects t INDEXED BY object_task_answer WHERE t.kind='tasks' AND t.deleted=0
-                AND json_extract(t.body,'$.submission_id')=+s.id AND json_extract(t.body,'$.question_id')=?
-                AND (json_extract(t.body,'$.status')='completed' OR (json_extract(t.body,'$.status')='claimed' AND json_extract(t.body,'$.expires_at')>?)))
-                < CASE WHEN ?='single' THEN 1 ELSE
-                    CASE WHEN (SELECT COUNT(*) FROM objects t INDEXED BY object_task_answer WHERE t.kind='tasks' AND t.deleted=0
-                        AND json_extract(t.body,'$.submission_id')=+s.id AND json_extract(t.body,'$.question_id')=? AND json_extract(t.body,'$.status')='completed')<2 THEN 2 ELSE 3 END END
-            ORDER BY (SELECT MAX(a.round) FROM review_allocations a WHERE a.submission_id=s.id AND a.question_id=? AND a.user_id=?) DESC,COALESCE((SELECT MAX(json_extract(t.body,'$.skipped_at')) FROM objects t INDEXED BY object_task_answer WHERE t.kind='tasks' AND t.deleted=0 AND json_extract(t.body,'$.submission_id')=+s.id AND json_extract(t.body,'$.question_id')=? AND json_extract(t.body,'$.status')='skipped' AND json_extract(t.body,'$.user_id')=?),0)
-            LIMIT 1''',(template['id'],question['id'],current['id'],question['id'],question['id'],current['id'],json.dumps(list(held)),question['id'],time.time(),question.get('review_mode','single'),question['id'],question['id'],current['id'],question['id'],current['id'])).fetchall()
-        for row in rows:
-            submission=json.loads(row['body'])
-            relevant=find(db,'tasks',submission_id=submission['id'],question_id=question['id'])
-            if any(t['user_id']==current['id'] and t['status']=='completed' for t in relevant): continue
-            if result_for(db,submission,question) is not None: continue
-            done=[t for t in relevant if t['status']=='completed']
-            live=[t for t in relevant if t['status']=='claimed' and t['expires_at']>time.time()]
-            slots=1 if question.get('review_mode','single')=='single' else (2 if len(done)<2 else 3)
-            if len(done)+len(live)>=slots: continue
-            for stale in relevant:
-                if stale['status']=='claimed' and stale['expires_at']<=time.time():
-                    stale['status']='expired'; put(db,'tasks',stale,current['id'])
-            from .answer_slices import sync
-            submission=sync(db,submission,template,current['id'])
-            task=put(db,'tasks',{'template_id':template['id'],'question_id':question['id'],'submission_id':submission['id'],'student_id':submission['student_id'],'student_name':'匿名作答','user_id':current['id'],'status':'claimed','created_at':time.time(),'expires_at':time.time()+900,'score':None,'final_score':None,'regions':question['regions']},current['id'])
-            task['answer_slice_id']=submission.get('answer_slice_ids',{}).get(question['id'])
-            task['image_url']=f"/api/v1/tasks/{task['id']}/image"
-            return public_task(put(db,'tasks',task,current['id']),db)
-        return None
+    tid, qid = body.get('template_id'), body.get('question_id')
+    if not isinstance(tid, str) or not isinstance(qid, str):
+        raise HTTPException(422, '需要有效的题卡与题目编号')
+    key = ('claim', tid, qid)
+    config = prepared.get(key)
+    if config is None:
+        template, question = question_for(db, tid, qid)
+        if question['type'] != 'subjective':
+            raise HTTPException(422, '客观题由系统给分')
+        if require(db, template['group_id'], 'groups').get('frozen'):
+            raise HTTPException(409, '成绩已冻结')
+        assignments = find(db, 'assignments', template_id=tid, question_id=qid)
+        if not assignments:
+            raise HTTPException(409, '请先配置阅卷教师')
+        assignment = assignments[-1]
+        config = template, question, assignment, participants(assignment)
+    template, question, assignment, teachers = config
+    if current['id'] not in teachers:
+        raise HTTPException(403, '尚未分配该题')
+    if key not in prepared:
+        ensure(db, template, question, assignment)
+        prepared[key] = config
+    arbitration_pending = False
+    if question.get('review_mode') == 'double':
+        allocate_arbitration(db, template, question, assignment)
+        arbitration_pending = db.execute("""SELECT 1 FROM review_allocations a JOIN objects s ON s.id=a.submission_id
+            WHERE a.user_id=? AND a.question_id=? AND a.template_id=? AND a.round=3 AND s.deleted=0
+            AND json_extract(s.body,'$.status')='ready' AND NOT EXISTS (
+                SELECT 1 FROM objects t INDEXED BY object_task_answer WHERE t.kind='tasks' AND t.deleted=0
+                AND json_extract(t.body,'$.submission_id')=+a.submission_id AND json_extract(t.body,'$.question_id')=a.question_id
+                AND json_extract(t.body,'$.status')='completed' AND json_extract(t.body,'$.user_id')=a.user_id) LIMIT 1""",
+            (current['id'], qid, tid)).fetchone() is not None
+    queued=db.execute('SELECT task_id FROM regrade_queue WHERE user_id=? AND template_id=? AND question_id=? ORDER BY position,task_id',(current['id'],template['id'],question['id'])).fetchall()
+    # Each pending ID still belongs to its teacher. Both regrades and ordinary
+    # claims must pass over these papers until their local score arrives.
+    for row in ([] if arbitration_pending else queued):
+        if row[0] in held:continue
+        task=require(db,row[0],'tasks')
+        if task['status']=='completed':return public_task({**task,'regrading':True},db)
+        db.execute('DELETE FROM regrade_queue WHERE task_id=?',(row[0],))
+    existing=find(db,'tasks',user_id=current['id'],template_id=template['id'],question_id=question['id'],status='claimed')
+    for task in existing:
+        if task['user_id']==current['id'] and task['question_id']==question['id'] and task['status']=='claimed':
+            if task['expires_at']>time.time():
+                if task['id'] in held:continue
+                allocated=db.execute('SELECT round FROM review_allocations WHERE submission_id=? AND question_id=? AND user_id=?',(task['submission_id'],question['id'],current['id'])).fetchone()
+                if arbitration_pending and (not allocated or allocated['round']!=3):continue
+                task['expires_at']=time.time()+900
+                return public_task(put(db,'tasks',task,current['id']),db)
+            task['status']='expired';put(db,'tasks',task,current['id'])
+    # Remove TEXT column affinity on the correlated UUID so SQLite can
+    # seek the JSON expression index rather than scan every task.
+    rows=db.execute('''SELECT s.body FROM review_allocations mine INDEXED BY allocation_user
+        CROSS JOIN objects s ON s.id=mine.submission_id
+        WHERE mine.user_id=? AND mine.question_id=? AND mine.template_id=? AND json_extract(s.body,'$.template_id')=mine.template_id
+        AND s.kind='submissions' AND s.deleted=0 AND json_extract(s.body,'$.status')='ready'
+        AND (mine.round<3 OR (SELECT COUNT(*) FROM objects t INDEXED BY object_task_answer
+            WHERE t.kind='tasks' AND t.deleted=0 AND json_extract(t.body,'$.submission_id')=+s.id
+            AND json_extract(t.body,'$.question_id')=mine.question_id AND json_extract(t.body,'$.status')='completed')=2)
+        AND NOT EXISTS(SELECT 1 FROM review_results r WHERE r.submission_id=s.id AND r.question_id=? AND r.final_cents IS NOT NULL)
+        AND NOT EXISTS(SELECT 1 FROM objects t INDEXED BY object_task_answer WHERE t.kind='tasks' AND t.deleted=0
+            AND json_extract(t.body,'$.submission_id')=+s.id AND json_extract(t.body,'$.question_id')=?
+            AND json_extract(t.body,'$.user_id')=? AND (json_extract(t.body,'$.status')='completed'
+              OR t.id IN (SELECT value FROM json_each(?))))
+        AND (SELECT COUNT(*) FROM objects t INDEXED BY object_task_answer WHERE t.kind='tasks' AND t.deleted=0
+            AND json_extract(t.body,'$.submission_id')=+s.id AND json_extract(t.body,'$.question_id')=?
+            AND (json_extract(t.body,'$.status')='completed' OR (json_extract(t.body,'$.status')='claimed' AND json_extract(t.body,'$.expires_at')>?)))
+            < CASE WHEN ?='single' THEN 1 ELSE
+                CASE WHEN (SELECT COUNT(*) FROM objects t INDEXED BY object_task_answer WHERE t.kind='tasks' AND t.deleted=0
+                    AND json_extract(t.body,'$.submission_id')=+s.id AND json_extract(t.body,'$.question_id')=? AND json_extract(t.body,'$.status')='completed')<2 THEN 2 ELSE 3 END END
+        ORDER BY mine.round DESC,COALESCE((SELECT MAX(json_extract(t.body,'$.skipped_at')) FROM objects t INDEXED BY object_task_answer WHERE t.kind='tasks' AND t.deleted=0 AND json_extract(t.body,'$.submission_id')=+s.id AND json_extract(t.body,'$.question_id')=? AND json_extract(t.body,'$.status')='skipped' AND json_extract(t.body,'$.user_id')=?),0)
+        LIMIT 1''',(current['id'],qid,tid,qid,qid,current['id'],json.dumps(list(held)),qid,time.time(),question.get('review_mode','single'),qid,qid,current['id'])).fetchall()
+    for row in rows:
+        submission=json.loads(row['body'])
+        relevant=find(db,'tasks',submission_id=submission['id'],question_id=question['id'])
+        if any(t['user_id']==current['id'] and t['status']=='completed' for t in relevant): continue
+        if result_for(db,submission,question) is not None: continue
+        done=[t for t in relevant if t['status']=='completed']
+        live=[t for t in relevant if t['status']=='claimed' and t['expires_at']>time.time()]
+        slots=1 if question.get('review_mode','single')=='single' else (2 if len(done)<2 else 3)
+        if len(done)+len(live)>=slots: continue
+        for stale in relevant:
+            if stale['status']=='claimed' and stale['expires_at']<=time.time():
+                stale['status']='expired'; put(db,'tasks',stale,current['id'])
+        from .answer_slices import sync
+        submission=sync(db,submission,template,current['id'])
+        task={'id':str(uuid4()),'template_id':template['id'],'question_id':question['id'],'submission_id':submission['id'],'student_id':submission['student_id'],'student_name':'匿名作答','user_id':current['id'],'status':'claimed','created_at':time.time(),'expires_at':time.time()+900,'score':None,'final_score':None,'regions':question['regions']}
+        task['answer_slice_id']=submission.get('answer_slice_ids',{}).get(question['id'])
+        task['image_url']=f"/api/v1/tasks/{task['id']}/image"
+        return public_task(put(db,'tasks',task,current['id']),db,submission=submission)
+    return None
 
 
 @router.post('/tasks/{identifier}/score')
-def score(identifier:str,body:dict,current=Depends(user)):
+async def score(identifier: str, body: dict, request: Request):
+    return JSONResponse(await submit_write(request, score_in_transaction, identifier, body))
+
+
+def score_in_transaction(db, prepared, current, identifier, body):
     try:
         amount=cents(body['score'])
         if Decimal(str(body['score']))!=Decimal(amount)/100:raise ValueError
     except (KeyError,ValueError,ArithmeticError): raise HTTPException(422,'分值无效')
     key=str(body.get('idempotency_key',''))
     if not 1<=len(key)<=200: raise HTTPException(422,'需要提交幂等编号')
-    with connect() as db:
-        db.execute('BEGIN IMMEDIATE')
-        task=own_task(db,identifier,current)
-        if task['status']=='invalidated': raise HTTPException(409,'作答已更正，需要重新评阅')
-        prior=db.execute('SELECT * FROM scores WHERE user_id=? AND idempotency_key=?',(current['id'],key)).fetchone()
-        if prior:
-            if prior['task_id']!=identifier or prior['score']!=amount: raise HTTPException(409,'提交编号已用于其他评分')
-            return {**public_task(task,db),'accepted_operation':{'id':key,'score':amount/100}}
-        template,question=question_for(db,task['template_id'],task['question_id'])
-        group=require(db,template['group_id'],'groups')
-        if group.get('frozen'): raise HTTPException(409,'成绩已冻结，请联系管理员复核')
-        if task['status'] not in ('claimed','completed') or (task['status']=='claimed' and task['expires_at']<time.time()): raise HTTPException(409,'任务已失效，请重新领取')
-        if 'offline_protocol' in body:
-            if type(body['offline_protocol']) is not int or body['offline_protocol']!=1:raise HTTPException(422,'离线评分协议不受支持')
-            revision=body.get('base_score_revision')
-            if type(revision) is not int or revision<0:raise HTTPException(422,'缺少有效的评分版本')
-            if revision!=task.get('score_revision',0):raise HTTPException(409,'评分已在其他窗口更新，本地记录已保留，请核对后再评阅')
-        if not 0<=amount<=cents(question['points']): raise HTTPException(422,'分值超出范围')
-        step=cents(question.get('step',.5))
-        if step<=0 or amount%step: raise HTTPException(422,'分值不符合评分步长')
-        task.update(status='completed',score_cents=amount,score=amount/100,score_revision=task.get('score_revision',0)+1)
-        put(db,'tasks',task,current['id'])
-        submission=require(db,task['submission_id'],'submissions')
-        final=result_for(db,submission,question)
-        db.execute('INSERT INTO review_results VALUES(?,?,?) ON CONFLICT(submission_id,question_id) DO UPDATE SET final_cents=excluded.final_cents',(submission['id'],question['id'],final))
-        task['final_score']=final/100 if final is not None else None
-        put(db,'tasks',task,current['id'])
-        db.execute('INSERT INTO scores VALUES(?,?,?,?,?)',(str(uuid4()),identifier,current['id'],amount,key))
-        db.execute('DELETE FROM regrade_queue WHERE task_id=?',(identifier,))
+    task=own_task(db,identifier,current)
+    if task['status']=='invalidated': raise HTTPException(409,'作答已更正，需要重新评阅')
+    prior=db.execute('SELECT * FROM scores WHERE user_id=? AND idempotency_key=?',(current['id'],key)).fetchone()
+    if prior:
+        if prior['task_id']!=identifier or prior['score']!=amount: raise HTTPException(409,'提交编号已用于其他评分')
         return {**public_task(task,db),'accepted_operation':{'id':key,'score':amount/100}}
+    config_key = ('score', task['template_id'], task['question_id'])
+    config = prepared.get(config_key)
+    if config is None:
+        template, question = question_for(db, task['template_id'], task['question_id'])
+        group = require(db, template['group_id'], 'groups')
+        config = prepared[config_key] = question, group
+    question, group = config
+    if group.get('frozen'): raise HTTPException(409,'成绩已冻结，请联系管理员复核')
+    if task['status'] not in ('claimed','completed') or (task['status']=='claimed' and task['expires_at']<time.time()): raise HTTPException(409,'任务已失效，请重新领取')
+    if 'offline_protocol' in body:
+        if type(body['offline_protocol']) is not int or body['offline_protocol']!=1:raise HTTPException(422,'离线评分协议不受支持')
+        revision=body.get('base_score_revision')
+        if type(revision) is not int or revision<0:raise HTTPException(422,'缺少有效的评分版本')
+        if revision!=task.get('score_revision',0):raise HTTPException(409,'评分已在其他窗口更新，本地记录已保留，请核对后再评阅')
+    if not 0<=amount<=cents(question['points']): raise HTTPException(422,'分值超出范围')
+    step=cents(question.get('step',.5))
+    if step<=0 or amount%step: raise HTTPException(422,'分值不符合评分步长')
+    task.update(status='completed',score_cents=amount,score=amount/100,score_revision=task.get('score_revision',0)+1)
+    submission=require(db,task['submission_id'],'submissions')
+    final=result_for(db,submission,question,scored_task=task)
+    db.execute('INSERT INTO review_results VALUES(?,?,?) ON CONFLICT(submission_id,question_id) DO UPDATE SET final_cents=excluded.final_cents',(submission['id'],question['id'],final))
+    task['final_score']=final/100 if final is not None else None
+    put(db,'tasks',task,current['id'])
+    db.execute('INSERT INTO scores VALUES(?,?,?,?,?)',(str(uuid4()),identifier,current['id'],amount,key))
+    db.execute('DELETE FROM regrade_queue WHERE task_id=?',(identifier,))
+    return {**public_task(task,db,submission=submission,group=group),'accepted_operation':{'id':key,'score':amount/100}}
 
 
 @router.get('/review/offline-capabilities')

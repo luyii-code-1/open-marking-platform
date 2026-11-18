@@ -3,6 +3,7 @@ import os
 import sqlite3
 import re
 import threading
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from uuid import uuid4
@@ -20,17 +21,31 @@ class Connection(sqlite3.Connection):
     def close(self):
         try:super().close()
         finally:
-            if self.writer_owned:self.writer_owned=False;WRITE_LOCK.release()
+            self.release_writer()
+
+    def release_writer(self):
+        if self.writer_owned:
+            self.writer_owned=False
+            WRITE_LOCK.release()
+
+
+def open_connection(root=None):
+    directory=Path(root) if root is not None else ROOT
+    directory.mkdir(parents=True, exist_ok=True)
+    db = sqlite3.connect(directory / 'omp.sqlite3', timeout=5,factory=Connection)
+    try:
+        db.row_factory = sqlite3.Row
+        db.execute('PRAGMA foreign_keys=ON')
+        db.execute('PRAGMA busy_timeout=5000')
+        return db
+    except BaseException:
+        db.close()
+        raise
 
 
 @contextmanager
 def connect(root=None):
-    directory=Path(root) if root is not None else ROOT
-    directory.mkdir(parents=True, exist_ok=True)
-    db = sqlite3.connect(directory / 'omp.sqlite3', timeout=5,factory=Connection)
-    db.row_factory = sqlite3.Row
-    db.execute('PRAGMA foreign_keys=ON')
-    db.execute('PRAGMA busy_timeout=5000')
+    db = open_connection(root)
     try:
         with db:
             yield db
@@ -38,9 +53,26 @@ def connect(root=None):
         db.close()
 
 
+def enable_wal(db):
+    # SQLite can report BUSY immediately when two processes switch journal modes.
+    deadline=time.monotonic()+60
+    while True:
+        try:
+            if db.execute('PRAGMA journal_mode').fetchone()[0]=='wal':
+                return
+            if db.execute('PRAGMA journal_mode=WAL').fetchone()[0]!='wal':
+                raise RuntimeError('数据目录无法启用 SQLite WAL')
+            return
+        except sqlite3.OperationalError as error:
+            if (error.sqlite_errorcode & 255) not in (sqlite3.SQLITE_BUSY,sqlite3.SQLITE_LOCKED) or time.monotonic()>=deadline:
+                raise
+            time.sleep(.05)
+
+
 def initialize(root=None):
     with connect(root) as db:
-        db.execute('PRAGMA journal_mode=WAL')
+        db.execute('PRAGMA busy_timeout=60000')
+        enable_wal(db)
         db.executescript('''
         CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY,username TEXT UNIQUE NOT NULL,name TEXT NOT NULL,role TEXT NOT NULL,password TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY,user_id TEXT REFERENCES users(id),expires REAL NOT NULL);
@@ -66,11 +98,53 @@ def initialize(root=None):
         CREATE INDEX IF NOT EXISTS object_relative ON objects(kind,deleted,json_extract(body,'$.relative'));
         CREATE INDEX IF NOT EXISTS object_token_hash ON objects(kind,deleted,json_extract(body,'$.token_hash'));
         CREATE INDEX IF NOT EXISTS object_deleted_plan ON objects(json_extract(body,'$.deletion_plan_id')) WHERE deleted=1;
+        CREATE INDEX IF NOT EXISTS student_candidate_lookup ON objects(CAST(json_extract(body,'$.candidate_number') AS TEXT))
+            WHERE kind='students' AND deleted=0;
+        CREATE TRIGGER IF NOT EXISTS student_candidate_insert AFTER INSERT ON objects
+        WHEN NEW.kind='students' AND NEW.deleted=0 BEGIN
+            SELECT RAISE(ABORT,'duplicate student candidate number') WHERE EXISTS (
+                SELECT 1 FROM objects WHERE kind='students' AND deleted=0 AND id<>NEW.id
+                AND CAST(json_extract(body,'$.candidate_number') AS TEXT)=CAST(json_extract(NEW.body,'$.candidate_number') AS TEXT));
+        END;
+        CREATE TRIGGER IF NOT EXISTS student_candidate_update AFTER UPDATE OF body,deleted ON objects
+        WHEN NEW.kind='students' AND NEW.deleted=0 AND
+            (OLD.deleted<>0 OR json_extract(OLD.body,'$.candidate_number') IS NOT json_extract(NEW.body,'$.candidate_number')) BEGIN
+            SELECT RAISE(ABORT,'duplicate student candidate number') WHERE EXISTS (
+                SELECT 1 FROM objects WHERE kind='students' AND deleted=0 AND id<>NEW.id
+                AND CAST(json_extract(body,'$.candidate_number') AS TEXT)=CAST(json_extract(NEW.body,'$.candidate_number') AS TEXT));
+        END;
+        CREATE INDEX IF NOT EXISTS received_scan_pages ON objects(id) WHERE kind='pages' AND deleted=0 AND json_extract(body,'$.status')='received';
+        CREATE INDEX IF NOT EXISTS page_processing_jobs ON objects(json_extract(body,'$.payload.page_id'))
+            WHERE kind='jobs' AND deleted=0 AND json_extract(body,'$.kind')='process-page';
         CREATE TABLE IF NOT EXISTS deletion_locks(project_id TEXT PRIMARY KEY,plan_id TEXT UNIQUE NOT NULL,created_at REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS deletion_files(plan_id TEXT NOT NULL,relative TEXT NOT NULL,sha256 TEXT NOT NULL,size INTEGER NOT NULL,remote_refs TEXT NOT NULL,done INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(plan_id,relative));
         ''')
         from .identifiers import initialize as initialize_identifiers
         initialize_identifiers(db)
+        from .allocation import initialize_invalidation
+        initialize_invalidation(db)
+        initialize_scan_history(db)
+
+
+def initialize_scan_history(db):
+    exists="SELECT 1 FROM sqlite_master WHERE type='table' AND name='scanned_groups'"
+    if db.execute(exists).fetchone():
+        return
+    if not db.in_transaction:
+        db.execute('BEGIN IMMEDIATE')
+    if db.execute(exists).fetchone():
+        return
+    db.execute('CREATE TABLE IF NOT EXISTS scanned_groups(group_id TEXT PRIMARY KEY NOT NULL)')
+    # Earlier releases kept scan records as tombstones when their files were cleared.
+    db.execute("""INSERT OR IGNORE INTO scanned_groups
+        SELECT json_extract(body,'$.group_id') FROM objects WHERE kind='submissions'
+        UNION SELECT json_extract(b.body,'$.group_id') FROM objects p JOIN objects b
+        ON b.id=json_extract(p.body,'$.batch_id') AND b.kind='scan-batches' WHERE p.kind='pages'""")
+    db.execute("""CREATE TRIGGER IF NOT EXISTS mark_scanned_submission AFTER INSERT ON objects WHEN NEW.kind='submissions'
+        BEGIN INSERT OR IGNORE INTO scanned_groups VALUES(json_extract(NEW.body,'$.group_id')); END""")
+    db.execute("""CREATE TRIGGER IF NOT EXISTS mark_scanned_page AFTER INSERT ON objects WHEN NEW.kind='pages'
+        BEGIN INSERT OR IGNORE INTO scanned_groups SELECT json_extract(body,'$.group_id') FROM objects
+        WHERE kind='scan-batches' AND id=json_extract(NEW.body,'$.batch_id'); END""")
 
 
 def objects(db, kind):
@@ -94,7 +168,7 @@ def get(db, identifier, kind=None):
 def put(db, kind, body, actor=None):
     if not db.in_transaction: db.execute('BEGIN IMMEDIATE')
     body = dict(body)
-    body.setdefault('id', str(uuid4()))
+    if 'id' not in body:body['id']=str(uuid4())
     old = db.execute('SELECT kind,deleted,body FROM objects WHERE id=?',(body['id'],)).fetchone()
     if old and (old['kind'] != kind or old['deleted']):
         from .identifiers import IdentifierConflict
@@ -105,6 +179,10 @@ def put(db, kind, body, actor=None):
     from .identifiers import reserve,template_questions
     reserve(db,body['id'],kind,body['id'])
     if kind=='templates':template_questions(db,body,json.loads(old['body']) if old else None)
-    db.execute('INSERT INTO objects(id,kind,body) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body',(body['id'],kind,json.dumps(body,ensure_ascii=False)))
-    db.execute('INSERT INTO audit(id,actor,action,object_id,body) VALUES(?,?,?,?,?)',(str(uuid4()),actor,'update' if old else 'create',body['id'],json.dumps(body,ensure_ascii=False)))
+    encoded=json.dumps(body,ensure_ascii=False)
+    if old:
+        db.execute('UPDATE objects SET body=? WHERE id=?',(encoded,body['id']))
+    else:
+        db.execute('INSERT INTO objects(id,kind,body) VALUES(?,?,?)',(body['id'],kind,encoded))
+    db.execute('INSERT INTO audit(id,actor,action,object_id,body) VALUES(?,?,?,?,?)',(str(uuid4()),actor,'update' if old else 'create',body['id'],encoded))
     return body

@@ -55,6 +55,59 @@ def test_current_grade_membership_and_id_mapped_results(school):
     r('PUT','groups/'+group['id']+'/roster',{'student_ids':[]},409)
 
 
+@pytest.mark.parametrize('first_record',['pages','submissions'])
+def test_first_scan_permanently_locks_current_template(school,first_record):
+    r=school['request']; group=school['groups'][0]; official=school['templates'][0]
+    draft=r('POST','templates',{'group_id':group['id'],'name':'新版','paper':'A4','sides':1,
+        'questions':[{**official['questions'][0],'id':str(uuid4())}]})
+    batch=r('POST','scan-batches',{'group_id':group['id']})
+    def locked():return next(g for g in r('GET','groups') if g['id']==group['id'])['template_locked']
+    assert not locked()
+    with db.connect() as connection:
+        record=db.put(connection,first_record,{'batch_id':batch['id']} if first_record=='pages' else {'group_id':group['id']})
+        connection.execute('UPDATE objects SET deleted=1 WHERE id=?',(record['id'],))
+        # Simulate an old database with retained records but no scan history table.
+        connection.execute('DROP TABLE scanned_groups')
+    db.initialize()
+    assert locked()
+    with db.connect() as connection:
+        connection.execute('DELETE FROM objects WHERE id=?',(record['id'],))
+    assert locked()
+    r('POST','templates/'+draft['id']+'/publish',{'replace_id':official['id']},409)
+    r('DELETE','templates/'+official['id'],status=409)
+    r('POST','templates/'+official['id']+'/publish')
+
+
+def test_concurrent_candidate_edits_and_legacy_duplicate_pairing(school):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+    f=school;r=f['request'];students=f['students'];number='000000009';barrier=Barrier(2)
+    def change(student):
+        barrier.wait()
+        return f['client'].put('/api/v1/students/'+student['id'],json={'candidate_number':number},headers=f['headers']).status_code
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        assert sorted(pool.map(change,students[:2]))==[200,409]
+    with db.connect() as connection:
+        connection.execute('DROP TRIGGER student_candidate_update')
+        connection.execute("UPDATE objects SET body=json_set(body,'$.candidate_number',?) WHERE id IN (?,?)",
+                           (number,students[0]['id'],students[1]['id']))
+        connection.execute("UPDATE objects SET body=json_set(body,'$.class_id',?) WHERE id=?",
+                           (f['other_cls']['id'],students[0]['id']))
+    db.initialize()
+    group=f['groups'][0]
+    batch=r('POST','scan-batches',{'group_id':group['id']})
+    with db.connect() as connection:
+        db.put(connection,'pages',{'batch_id':batch['id'],'side':'front','sequence':1,'status':'recognized',
+               'candidate_number':number,'selections':{}})
+    r('POST','scan-batches/'+batch['id']+'/pair',status=409)
+    with db.connect() as connection:
+        assert not db.objects(connection,'submissions')
+    r('PUT','students/'+students[0]['id'],{'candidate_number':'000000010'})
+    r('POST','scan-batches/'+batch['id']+'/pair')
+    with db.connect() as connection:
+        assert db.objects(connection,'submissions')[0]['student_id']==students[1]['id']
+
+
 def test_room_scope_expected_count_and_duplicate_guard(school):
     f=school;r=f['request'];group=f['groups'][0];room=f['rooms'][0]
     # Same physical room number is valid for a different grade/card group.

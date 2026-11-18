@@ -29,6 +29,50 @@ def seed(count, mode='single'):
     return {'template_id':template['id'],'question_id':question['id']}
 
 
+def test_hot_progress_reads_and_equal_size_roster_change(tmp_path, monkeypatch):
+    from server.request_log import Journal
+    # Suppress the independent log writer and background recovery in this SQL trace.
+    monkeypatch.setattr(Journal, 'write', lambda self, batch: True)
+    monkeypatch.setenv('OMP_TASK_MODE', 'test')
+    monkeypatch.setattr(db, 'ROOT', tmp_path)
+    with TestClient(app) as client:
+        admin, teachers = setup(client, 1)
+        scope = seed(3)
+        with db.connect() as conn:
+            ids = [r[0] for r in conn.execute("SELECT id FROM objects WHERE kind='submissions' ORDER BY rowid")]
+            first, second = [db.get(conn, key) for key in ids[:2]]
+            db.put(conn, 'submissions', {**first, 'status': 'absent'})
+        client.post('/api/v1/assignments', json={**scope, 'user_ids': [teachers[0][0]]}, headers=admin).raise_for_status()
+        verbs = []
+        original = db.Connection.execute
+        def trace(conn, sql, *args, **kwargs):
+            if sql.startswith('BEGIN'):
+                verbs.append(sql)
+            return original(conn, sql, *args, **kwargs)
+        monkeypatch.setattr(db.Connection, 'execute', trace)
+        for path, params, headers in (
+            ('/review-progress', scope, teachers[0][1]),
+            ('/review-task-progress', {}, teachers[0][1]),
+            ('/review-allocation-progress', {'template_id': scope['template_id']}, admin)):
+            verbs.clear()
+            client.get('/api/v1'+path, params=params, headers=headers).raise_for_status()
+            assert verbs == ['BEGIN']
+
+        with db.connect() as conn:
+            db.put(conn, 'submissions', {**first, 'status': 'ready'})
+            db.put(conn, 'submissions', {**second, 'status': 'absent'})
+        verbs.clear()
+        client.get('/api/v1/review-progress', params=scope, headers=teachers[0][1]).raise_for_status()
+        assert verbs == ['BEGIN', 'BEGIN IMMEDIATE']
+        with db.connect() as conn:
+            actual = {r[0] for r in conn.execute('SELECT submission_id FROM review_allocations WHERE question_id=?', (scope['question_id'],))}
+            assert actual == {ids[0], ids[2]}
+        db.initialize()
+        verbs.clear()
+        client.get('/api/v1/review-progress', params=scope, headers=teachers[0][1]).raise_for_status()
+        assert verbs == ['BEGIN']
+
+
 def test_claim_ahead_during_upload_and_regrading(tmp_path,monkeypatch):
     monkeypatch.setattr(db,'ROOT',tmp_path)
     with TestClient(app) as client:

@@ -9,8 +9,14 @@ services:
   api:
     image: ${OMP_IMAGE:?Set OMP_IMAGE to the verified application image}
     pull_policy: never
+    environment:
+      WEB_CONCURRENCY: "2"
+    ulimits:
+      nofile:
+        soft: 16384
+        hard: 65536
     mem_limit: 1536m
-    cpus: 1.5
+    cpus: 2.0
     logging: *production-logging
   worker:
     image: ${OMP_IMAGE:?Set OMP_IMAGE to the verified application image}
@@ -33,6 +39,6 @@ services:
   proxy:
     image: ${OMP_CADDY_IMAGE:?Set OMP_CADDY_IMAGE to the imported Caddy image}
     pull_policy: never
-    mem_limit: 256m
-    cpus: 0.15
+    mem_limit: 512m
+    cpus: 1.0
     logging: *production-logging

@@ -15,6 +15,8 @@ export function useReviewWorkspace(){const value=useContext(Context);if(!value)t
 export function ReviewWorkspace({user,offline,onVerified,onLoginRequired,children}:{user:User;offline:boolean;onVerified:(user:User)=>void;onLoginRequired:()=>void;children:ReactNode}){
   const [records,setRecords]=useState<ReviewRecord[]>([]),[storageError,setStorageError]=useState(''),[locked,setLocked]=useState(isReviewUpdateLocked()),[status,setStatus]=useState<SyncReport>({state:offline?'offline':'ready',sent:0})
   const [ready,setReady]=useState(false)
+  const retryNeeded=useRef(false)
+  retryNeeded.current=offline||status.state==='offline'||records.some(record=>record.status==='queued')
   const {message}=App.useApp()
   useUnsavedChanges(records.some(hasUnsentReview),true)
   const [queueTarget,setQueueTarget]=useState<HTMLDivElement|null>(null)
@@ -63,7 +65,7 @@ export function ReviewWorkspace({user,offline,onVerified,onLoginRequired,childre
     const retry=()=>{if(document.visibilityState!=='hidden')void sync()}
     const unwatch=watchReviewChanges(change)
     void reload();void sync()
-    const timer=setInterval(retry,15000)
+    const timer=setInterval(()=>{if(retryNeeded.current)retry()},15000)
     window.addEventListener('online',retry);document.addEventListener('visibilitychange',retry)
     return()=>{mounted.current=false;clearInterval(timer);unwatch();window.removeEventListener('online',retry);document.removeEventListener('visibilitychange',retry)}
   },[reload,sync])

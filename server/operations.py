@@ -93,12 +93,14 @@ def edit_class(identifier:str,body:dict,current=Depends(admin)):
 @router.put('/students/{identifier}')
 def edit_student(identifier:str,body:dict,current=Depends(admin)):
     with connect() as db:
+        db.execute('BEGIN IMMEDIATE')
         item=require(db,identifier,'students')
         for key in ('name','candidate_number','class_id'):
             if key in body: item[key]=body[key]
         require(db,item['class_id'],'classes')
         if not item.get('name') or not item.get('candidate_number'): raise HTTPException(422,'姓名及考号不能为空')
-        if any(s['id']!=identifier and s['candidate_number']==item['candidate_number'] for s in objects(db,'students')): raise HTTPException(409,'准考证号已存在')
+        from .candidate_numbers import validate
+        validate(db,item['candidate_number'],identifier)
         return put(db,'students',item,current['id'])
 
 
@@ -204,15 +206,41 @@ def backup(current=Depends(system_admin)):
 
 @router.get('/system/backups')
 def backup_list(current=Depends(system_admin)):
+    from .backups import inventory
     with connect() as db:
-        return [{**record,'available':(database.ROOT/'backups'/(record['id']+'.sqlite3')).is_file()} for record in objects(db,'database-backups')]
+        return inventory(db)
+
+
+@router.get('/system/backup-settings')
+def backup_settings(current=Depends(system_admin)):
+    from .backups import policy
+    with connect() as db:
+        return policy(db)
+
+
+@router.put('/system/backup-settings')
+def update_backup_settings(body:dict,current=Depends(system_admin)):
+    from .backups import set_enabled
+    if type(body.get('enabled')) is not bool:
+        raise HTTPException(422, '请选择自动备份状态')
+    return set_enabled(body['enabled'], current['id'])
 
 
 @router.get('/system/backups/{identifier}/download')
 def download_backup(identifier:str,current=Depends(system_admin)):
-    from .backups import checksum
-    with connect() as db:record=require(db,identifier,'database-backups')
-    path=database.ROOT/'backups'/(record['id']+'.sqlite3')
-    if not path.is_file():raise HTTPException(404,'备份文件不存在')
-    if checksum(path)!=record['sha256']:raise HTTPException(409,'备份校验不一致')
-    return FileResponse(path,media_type='application/vnd.sqlite3',filename='omp-'+record['id']+'.sqlite3',headers={'Cache-Control':'private, no-store'})
+    from fastapi.responses import StreamingResponse
+    from starlette.background import BackgroundTask
+    from urllib.parse import quote
+    from .backups import open_download
+    stream, filename, size = open_download(identifier)
+    name = filename if identifier.startswith('file-') else 'omp-' + filename
+    headers = {'Cache-Control': 'private, no-store', 'Content-Length': str(size),
+               'Content-Disposition': "attachment; filename*=UTF-8''" + quote(name, safe='')}
+    return StreamingResponse(iter(lambda: stream.read(256 * 1024), b''), media_type='application/vnd.sqlite3',
+                             headers=headers, background=BackgroundTask(stream.close))
+
+
+@router.delete('/system/backups/{identifier}')
+def delete_backup(identifier:str,current=Depends(system_admin)):
+    from .backups import delete
+    return delete(identifier, current['id'])

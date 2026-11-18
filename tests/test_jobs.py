@@ -2,6 +2,23 @@ from server import db,jobs,storage
 import pytest
 
 
+def test_recovery_registers_only_pages_without_any_processing_job(tmp_path,monkeypatch):
+    monkeypatch.setattr(db,'ROOT',tmp_path);db.initialize()
+    with db.connect() as connection:
+        p=db.put(connection,'projects',{})
+        s=db.put(connection,'subjects',{'project_id':p['id']})
+        g=db.put(connection,'groups',{'subject_id':s['id']})
+        b=db.put(connection,'scan-batches',{'group_id':g['id']})
+        orphan,failed=[db.put(connection,'pages',{'batch_id':b['id'],'status':'received'}) for _ in range(2)]
+        job=jobs.create_job(connection,'process-page',{'page_id':failed['id']})
+        db.put(connection,'jobs',{**job,'status':'failed'})
+    jobs.recover_unqueued_pages();jobs.recover_unqueued_pages()
+    with db.connect() as connection:
+        saved={j['payload']['page_id']:j['status'] for j in db.objects(connection,'jobs')}
+        assert len(db.objects(connection,'jobs'))==2
+        assert saved=={orphan['id']:'pending',failed['id']:'failed'}
+
+
 def test_failed_job_stale_delivery_requires_explicit_retry(tmp_path,monkeypatch):
     monkeypatch.setattr(db,'ROOT',tmp_path);db.initialize()
     with db.connect() as connection:

@@ -4,6 +4,53 @@ from server import db
 from server.main import app
 
 
+def test_review_batch_writability_and_legacy_submission_fallback(tmp_path,monkeypatch):
+    from types import SimpleNamespace
+    from server import lifecycle,review_writes
+    from fastapi import HTTPException
+    db.initialize(tmp_path)
+    with db.connect(tmp_path) as con:
+        def hierarchy():
+            project=db.put(con,'projects',{})
+            subject=db.put(con,'subjects',{'project_id':project['id']})
+            group=db.put(con,'groups',{'subject_id':subject['id']})
+            template=db.put(con,'templates',{'group_id':group['id']})
+            submission=db.put(con,'submissions',{'group_id':group['id']})
+            return project,template,submission
+        project,template,submission=hierarchy()
+        purged,_,other=hierarchy()
+        db.put(con,'projects',{**purged,'scans_purged':{'plan_id':str(uuid.uuid4())}})
+
+    visited=[]
+    verify=lifecycle.project_writable
+    def count(con,identifier):
+        visited.append(identifier)
+        return verify(con,identifier)
+    monkeypatch.setattr(lifecycle,'project_writable',count)
+    monkeypatch.setattr(review_writes,'authenticate_session',lambda *args:{})
+    def check(con,prepared,current,task,fail):
+        lifecycle.writable(con,'tasks',task)
+        if fail:raise RuntimeError('rollback')
+        return True
+    request=SimpleNamespace(headers={})
+    def op(task,fail=False):return SimpleNamespace(request=request,handler=check,args=(task,fail))
+    task={'template_id':template['id'],'submission_id':submission['id']}
+    results=review_writes.commit_batch(tmp_path,[op(task),op(task),op(task,True),op(task)])
+    assert [value for value,_ in results]==[True,True,None,True]
+    assert visited==[project['id'],project['id']]
+
+    # These legacy tasks share a missing template but belong to different projects.
+    stale_template=str(uuid.uuid4())
+    outcomes=review_writes.commit_batch(tmp_path,[op({'template_id':stale_template,'submission_id':s['id']})
+                                                 for s in (submission,other)])
+    assert outcomes[0]==(True,None)
+    assert isinstance(outcomes[1][1],HTTPException) and outcomes[1][1].status_code==410
+    with db.connect(tmp_path) as con:
+        con.execute('INSERT INTO deletion_locks VALUES(?,?,0)',(project['id'],str(uuid.uuid4())))
+    blocked=review_writes.commit_batch(tmp_path,[op(task)])[0][1]
+    assert isinstance(blocked,HTTPException) and blocked.status_code==409
+
+
 def test_double_review_arbitration_idempotency_and_freeze(tmp_path,monkeypatch):
     monkeypatch.setattr(db,'ROOT',tmp_path)
     with TestClient(app) as client:

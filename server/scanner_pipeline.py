@@ -210,6 +210,7 @@ def upload_processed(identifier: str, file: UploadFile = File(), normalized: Upl
             if existing:
                 if any(existing.get(k) != value for k, value in (('batch_id', identifier), ('side', side), ('sequence', sequence), ('sha256', result['source_sha256']), ('normalized_sha256', result['normalized_sha256']), ('local_cuts_sha256', result['local_cuts_sha256']))): raise HTTPException(409, '捕获编号已用于其他页面内容')
                 return existing
+            if group.get('template_id')!=template['id']:raise HTTPException(409,'本批次题卡已更换，请使用当前正式题卡新建批次')
             if batch['status'] in ('paired', 'frozen'): raise HTTPException(409, '批次已确认或冻结')
             if any(p['side'] == side and p['sequence'] == sequence and not p.get('excluded') for p in find(db, 'pages', batch_id=identifier)): raise HTTPException(409, '该顺序已有页面，请先排除原页面')
             from .scan_files import write_atomic

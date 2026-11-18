@@ -1,6 +1,7 @@
 """Fence an exam while its archived scan files are being removed."""
 from contextlib import contextmanager
 from contextvars import ContextVar
+import json
 from fastapi import HTTPException
 
 _operation = ContextVar('omp_deletion_operation', default=None)
@@ -18,16 +19,15 @@ PARENTS = {
 
 
 def project_for(db, kind, body, visited=None):
-    from .db import get
     if kind == 'projects': return body.get('id')
     visited = set() if visited is None else visited
     for field in PARENTS.get(kind, ()):
         identifier = body.get(field)
         if not identifier or identifier in visited: continue
         visited.add(identifier)
-        row = db.execute('SELECT kind FROM objects WHERE id=? AND deleted=0', (identifier,)).fetchone()
+        row = db.execute('SELECT kind,body FROM objects WHERE id=? AND deleted=0', (identifier,)).fetchone()
         if row:
-            project = project_for(db, row['kind'], get(db, identifier), visited)
+            project = project_for(db, row['kind'], json.loads(row['body']), visited)
             if project: return project
     return None
 
@@ -49,6 +49,21 @@ def project_writable(db, project_id):
 
 
 def writable(db, kind, body):
+    checked = getattr(db, 'review_writable_templates', None)
+    if checked is not None and kind == 'tasks':
+        from .db import get
+        template_id = body.get('template_id')
+        if template_id in checked:
+            return
+        template = get(db, template_id, 'templates')
+        if template:
+            project = project_for(db, 'templates', template)
+            if project:
+                project_writable(db, project)
+                checked.add(template_id)
+                return
+        # A legacy task can derive its project from the submission instead.
+        # That result belongs to this task and cannot authorize its peers.
     project_writable(db, project_for(db, kind, body))
 
 

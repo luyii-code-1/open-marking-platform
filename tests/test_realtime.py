@@ -81,3 +81,30 @@ def test_peer_disconnect_during_close_is_handled(monkeypatch):
         async def close(self,code):raise WebSocketDisconnect(code=1006)
     asyncio.run(events(Disconnected()))
 
+
+def test_grouped_review_updates_keep_teacher_scope(tmp_path, monkeypatch):
+    import hashlib
+    import time
+
+    monkeypatch.setattr(db, 'ROOT', tmp_path)
+    db.initialize()
+    teacher_ids = [str(uuid4()) for _ in range(3)]
+    tokens = [str(uuid4()) for _ in teacher_ids]
+    with db.connect() as conn:
+        for uid, token in zip(teacher_ids, tokens):
+            conn.execute('INSERT INTO users VALUES(?,?,?,?,?)', (uid, uid, uid, 'teacher', 'unused'))
+            conn.execute('INSERT INTO sessions VALUES(?,?,?)', (hashlib.sha256(token.encode()).hexdigest(), uid, time.time()+600))
+        template = db.put(conn, 'templates', {'questions': []})
+        db.put(conn, 'assignments', {'template_id': template['id'], 'user_ids': teacher_ids[:2]})
+    clients = [realtime.authenticate(token) for token in tokens]
+    hub = realtime.Hub()
+    hub.cursor = clients[0].start_cursor
+    with db.connect() as conn:
+        for _ in range(3):
+            db.put(conn, 'tasks', {'template_id': template['id'], 'user_id': teacher_ids[0]})
+    _, changes = hub.collect(clients)
+    roots = {client.person['id']: updated for client, _, _, updated in changes}
+    assert roots[teacher_ids[0]] == {'tasks', 'dashboard', 'review-progress', 'results', 'analysis'}
+    assert roots[teacher_ids[1]] == {'dashboard', 'review-progress', 'results', 'analysis'}
+    assert roots[teacher_ids[2]] == set()
+

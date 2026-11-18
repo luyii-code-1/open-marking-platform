@@ -138,3 +138,86 @@ def test_recovery_module_cli_restores_to_new_directory(tmp_path,monkeypatch):
     report=json.loads(process.stdout)
     assert report['source_sha256']==record['sha256'] and report['files']['scope']=='database-only'
     assert (target/'recovery-report.json').is_file() and backups.inspect(target/'omp.sqlite3')['scores']==1
+
+
+def test_restore_honors_completed_purge_and_checks_other_pages(tmp_path, monkeypatch):
+    root = tmp_path / 'source'
+    monkeypatch.setattr(db, 'ROOT', root)
+    with TestClient(app) as client:
+        _, headers, project, _, page, _ = seed(client, root)
+        url = '/api/v1/projects/' + project['id']
+        plan = client.post(url + '/release-preview', json={'action': 'purge'}, headers=headers).json()
+        done = client.post(url + '/release', json={'plan_id': plan['id'], 'confirm': True}, headers=headers)
+        assert done.json()['status'] == 'completed'
+        with db.connect() as conn:
+            project2 = db.put(conn, 'projects', {'name': '其他考试'})
+            subject = db.put(conn, 'subjects', {'project_id': project2['id']})
+            group = db.put(conn, 'groups', {'subject_id': subject['id']})
+            batch = db.put(conn, 'scan-batches', {'group_id': group['id']})
+            other = db.put(conn, 'pages', {'batch_id': batch['id'], 'status': 'received'})
+        path = root / 'pages' / (other['id'] + '.image')
+        backup = client.post('/api/v1/system/backup', headers=headers).json()
+    source = root / 'backups' / (backup['id'] + '.sqlite3')
+    with pytest.raises(ValueError, match=other['id']):
+        recovery.restore(source, tmp_path / 'restored', root)
+    path.write_bytes(b'other paper')
+    target = tmp_path / 'restored'
+    recovery.restore(source, target, root)
+    assert (target / 'pages' / path.name).read_bytes() == b'other paper'
+    assert not (target / 'pages' / (page['id'] + '.image')).exists()
+
+
+def test_manage_registered_and_external_backup_files(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, 'ROOT', tmp_path)
+    with TestClient(app) as client:
+        _, headers, *_ = seed(client, tmp_path)
+        backup = client.post('/api/v1/system/backup', headers=headers).json()
+        directory = tmp_path / 'backups'
+        registered = directory / (backup['id'] + '.sqlite3')
+        external = directory / 'pre-release.sqlite3'
+        shutil.copyfile(registered, external)
+        (directory / 'unfinished.tmp').touch()
+        base = '/api/v1/system/backups'
+        rows = client.get(base, headers=headers).json()
+        assert len(rows) == 2
+        imported = next(row for row in rows if row['origin'] == 'deployment')
+        assert client.get(imported['download_url'], headers=headers).content == external.read_bytes()
+        assert client.delete(base + '/' + imported['id'], headers=headers).status_code == 200
+        assert not external.exists() and registered.exists()
+        assert client.delete(base + '/' + backup['id'], headers=headers).status_code == 200
+        assert client.get(base, headers=headers).json() == []
+        assert client.get(backup['download_url'], headers=headers).status_code == 404
+        assert not registered.exists()
+
+
+def test_automatic_backup_is_singleton_skips_disabled_jobs_and_keeps_manual_backup(tmp_path, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    monkeypatch.setattr(db, 'ROOT', tmp_path)
+    monkeypatch.setenv('OMP_TASK_MODE', 'celery')
+    with TestClient(app) as client:
+        _, headers, *_ = seed(client, tmp_path)
+        url = '/api/v1/system/backup-settings'
+        assert not client.get(url, headers=headers).json()['enabled']
+        assert client.put(url, json={'enabled': 'true'}, headers=headers).status_code == 422
+        policy = client.put(url, json={'enabled': True}, headers=headers).json()
+        assert policy['enabled'] and policy['next_run'] > time.time()
+        with db.connect() as conn:
+            saved = backups.policy(conn)
+            db.put(conn, 'backup-policy', {**saved, 'next_run': 1})
+        def enqueue():
+            with db.connect() as conn:
+                backups.enqueue_due(conn)
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            list(pool.map(lambda _: enqueue(), range(3)))
+        with db.connect() as conn:
+            scheduled, = [job for job in db.objects(conn, 'jobs') if job['kind'] == 'scheduled-backup']
+        jobs.execute(scheduled['id'])
+        backups.create(None, scheduled=scheduled['payload'])
+        rows = client.get('/api/v1/system/backups', headers=headers).json()
+        assert [row['origin'] for row in rows] == ['automatic']
+        assert client.delete('/api/v1/system/backups/' + rows[0]['id'], headers=headers).status_code == 200
+        backups.create(None, scheduled=scheduled['payload'])
+        client.put(url, json={'enabled': False}, headers=headers)
+        backups.create(None, scheduled={**scheduled['payload'], 'backup_id': str(uuid4())})
+        assert client.get('/api/v1/system/backups', headers=headers).json() == []
+        assert client.post('/api/v1/system/backup', headers=headers).json()['origin'] == 'manual'

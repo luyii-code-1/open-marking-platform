@@ -48,6 +48,11 @@ def save_draft(group_id:str,identifier:str,body:dict,current=Depends(admin)):
         return put(db,'templates',value,current['id'])
 
 
+def require_replaceable(db,group_id):
+    if db.execute('SELECT 1 FROM scanned_groups WHERE group_id=?',(group_id,)).fetchone():
+        raise HTTPException(409,'本题卡组已有扫描数据，正式题卡已锁定')
+
+
 @router.delete('/templates/{identifier}')
 def delete_template(identifier:str,draft_version:int|None=None,expected_status:str|None=None,current=Depends(admin)):
     with connect() as db:
@@ -62,6 +67,7 @@ def delete_template(identifier:str,draft_version:int|None=None,expected_status:s
         used=db.execute("SELECT 1 FROM objects WHERE deleted=0 AND kind IN ('scan-batches','pages','submissions','tasks','answer-slices') AND json_extract(body,'$.template_id')=? LIMIT 1",(identifier,)).fetchone()
         if used:raise HTTPException(409,'本版本已用于扫描或阅卷，需保留业务记录')
         if group.get('template_id')==identifier:
+            require_replaceable(db,group['id'])
             put(db,'groups',{**group,'template_id':None},current['id'])
         assignments=find(db,'assignments',template_id=identifier)
         for object_id in [a['id'] for a in assignments]+[identifier]:

@@ -59,6 +59,9 @@ def _reset_runtime(root,reason):
 def _restore_files(root,source):
     with connect(root) as db:
         records={kind:objects(db,kind) for kind in ('pages','assets','archives','archive-files')}
+        purged = {entry['relative'] for plan in objects(db, 'release-plans')
+                  if plan.get('action') == 'purge' and plan['status'] == 'completed'
+                  for entry in plan['files']}
     needed={};archived={}
     for entry in sorted(records['archive-files'],key=lambda r:r.get('created_at',0),reverse=True):archived.setdefault(entry['relative'],[]).append(entry)
     for kind in ('pages','assets','archives'):
@@ -69,6 +72,8 @@ def _restore_files(root,source):
             if kind=='pages' and '.png' not in suffixes and source and (source/'pages'/(identifier+'.png')).is_file():suffixes+=('.png',)
             for suffix in suffixes:
                 relative=f'{kind}/{identifier}{suffix}'
+                if kind == 'pages' and relative in purged:
+                    continue
                 from .scan_files import hash_field
                 expected=body.get(hash_field(suffix) if kind=='pages' else 'sha256')
                 if not expected and archived.get(relative):expected=archived[relative][0]['sha256']

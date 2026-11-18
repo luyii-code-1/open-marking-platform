@@ -155,6 +155,9 @@ def execute(identifier):
             elif job['kind']=='delete-hierarchy':
                 from .deletion import perform
                 result=perform(job,execution.progress)
+            elif job['kind']=='scheduled-backup':
+                from .backups import create
+                create(None, scheduled=job['payload'], ownership=(identifier, token))
             else:raise ValueError('任务类型无效')
     except LostLease:return
     except Exception as error:
@@ -178,8 +181,33 @@ def run(identifier):
     initialize();execute(identifier)
 
 
+def recover_unqueued_pages():
+    # A page accepted by an older server could be committed before its job.
+    missing="""SELECT page.id,project.id FROM objects page
+        JOIN objects batch ON batch.id=json_extract(page.body,'$.batch_id') AND batch.deleted=0
+        JOIN objects grp ON grp.id=json_extract(batch.body,'$.group_id') AND grp.deleted=0
+        JOIN objects subject ON subject.id=json_extract(grp.body,'$.subject_id') AND subject.deleted=0
+        JOIN objects project ON project.id=json_extract(subject.body,'$.project_id') AND project.deleted=0
+        WHERE page.kind='pages' AND page.deleted=0 AND json_extract(page.body,'$.status')='received'
+        AND json_extract(project.body,'$.scans_purged') IS NULL
+        AND NOT EXISTS (SELECT 1 FROM deletion_locks WHERE project_id=project.id)
+        AND NOT EXISTS (SELECT 1 FROM objects job WHERE job.kind='jobs' AND job.deleted=0
+            AND json_extract(job.body,'$.kind')='process-page' AND json_extract(job.body,'$.payload.page_id')=page.id)
+        LIMIT 100"""
+    with connect() as db:
+        if not db.execute(missing).fetchone():
+            return
+        db.execute('BEGIN IMMEDIATE')
+        for page_id,project_id in db.execute(missing).fetchall():
+            create_job(db,'process-page',{'page_id':page_id},project_id=project_id)
+
+
 @celery.task(name='omp.recover')
 def recover():
     initialize()
-    with connect() as db:pending=[j['id'] for j in objects(db,'jobs') if j['status']!='completed' and j['status']!='failed' and j.get('available_at',0)<=time.time() and (j['status']!='running' or j['lease_until']<time.time())]
+    recover_unqueued_pages()
+    from .backups import enqueue_due
+    with connect() as db:
+        enqueue_due(db)
+        pending=[j['id'] for j in objects(db,'jobs') if j['status']!='completed' and j['status']!='failed' and j.get('available_at',0)<=time.time() and (j['status']!='running' or j['lease_until']<time.time())]
     for identifier in pending:dispatch(identifier,background=True)
