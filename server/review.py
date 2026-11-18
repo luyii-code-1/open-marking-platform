@@ -374,6 +374,9 @@ def render_answer_image(submission,question,answer):
         region=source['region']
         page=int(region['page'])-1
         if page>=len(submission['pages']): raise HTTPException(409,'答卷缺页')
+        with connect() as db:
+            if (get(db,source.get('page_id',submission['pages'][page]),'pages') or {}).get('upload_format')=='jpeg-sheet-1':
+                raise HTTPException(409,'请通过整页图片清单加载答卷，在浏览器中显示作答区域')
         from .scanner_pipeline import local_piece
         prepared=local_piece(source.get('page_id',submission['pages'][page]),question['id'],region,source.get('normalized_sha256'))
         if prepared is not None:

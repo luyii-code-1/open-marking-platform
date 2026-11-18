@@ -612,7 +612,8 @@ public sealed class DesktopController : IDisposable
                         foreach(var page in excluded)await _api.Post($"scanner/batches/{batch.Id}/exclude",new{page_ids=new[]{page.CaptureId},reason="操作员排除页面并保留本地原图"},_lifetime.Token);
                         foreach(var page in pages.Where(p=>p.Status=="pending"&&p.RecognitionJson!="{}"))
                         {
-                            var accepted=await _api.UploadProcessed(page,_queue.Root,_lifetime.Token);ApplyRemote(page,accepted);Notify();
+                            var sheet=await _worker.PrepareUpload(page,_lifetime.Token);
+                            var accepted=await _api.UploadProcessed(page,_queue.Root,sheet,_lifetime.Token);ApplyRemote(page,accepted);Notify();
                         }
                         if(batch.Status=="local_paired"&&_queue.Pages(batch.Id).All(p=>p.Status is "uploaded" or "excluded"))
                         {

@@ -363,9 +363,7 @@ def answer_details(group_id:str,question_id:str,room_tag_id:str|None=None,includ
         return {'rows':rows_out,'counts':counts,'respondents':respondents,'blank':blank,'answer':q.get('answer',[])}
 
 
-@router.get('/analysis/groups/{group_id}/answers/{submission_id}/{question_id}/image')
-def detail_image(group_id:str,submission_id:str,question_id:str,current=Depends(user)):
-    from .review import render_answer_image
+def detail_image_context(group_id,submission_id,question_id,current):
     with connect() as db:
         db.execute('BEGIN')
         sub=require(db,submission_id,'submissions')
@@ -376,4 +374,30 @@ def detail_image(group_id:str,submission_id:str,question_id:str,current=Depends(
         q=next((v for v in require(db,sub['template_id'],'templates')['questions'] if v['id']==question_id and v['type']=='subjective'),None)
         if not q:raise HTTPException(404,'主观题不存在')
         answer=get(db,sub.get('answer_slice_ids',{}).get(question_id),'answer-slices')
+        template=require(db,sub['template_id'],'templates')
+    return sub,template,q,answer
+
+
+@router.get('/analysis/groups/{group_id}/answers/{submission_id}/{question_id}/image')
+def detail_image(group_id:str,submission_id:str,question_id:str,current=Depends(user)):
+    from .review import render_answer_image
+    sub,_,q,answer=detail_image_context(group_id,submission_id,question_id,current)
     return render_answer_image(sub,q,answer)
+
+
+@router.get('/analysis/groups/{group_id}/answers/{submission_id}/{question_id}/image-manifest')
+def detail_image_manifest(group_id:str,submission_id:str,question_id:str,current=Depends(user)):
+    from .review_images import answer_sources,manifest_for
+    from fastapi.responses import JSONResponse
+    sub,template,q,answer=detail_image_context(group_id,submission_id,question_id,current)
+    with connect() as db:mode,rows=answer_sources(db,sub,template,q,answer)
+    base=f'/analysis/groups/{group_id}/answers/{submission_id}/{question_id}'
+    return JSONResponse(manifest_for(mode,rows,base),headers={'Cache-Control':'private, no-store'})
+
+
+@router.get('/analysis/groups/{group_id}/answers/{submission_id}/{question_id}/image-source/{index}')
+def detail_image_source(group_id:str,submission_id:str,question_id:str,index:int,version:str='',current=Depends(user)):
+    from .review_images import answer_sources,proxy_for
+    sub,template,q,answer=detail_image_context(group_id,submission_id,question_id,current)
+    with connect() as db:_,rows=answer_sources(db,sub,template,q,answer)
+    return proxy_for(rows,index,version)

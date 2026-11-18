@@ -14,6 +14,7 @@ import uuid
 import zipfile
 from server.scan_files import write_atomic
 import cv2
+import numpy as np
 from server.omr import ENGINE_VERSION, absent_mark, code, decode, recognize, manual_binding
 
 MAX_MESSAGE = 2 * 1024 * 1024
@@ -71,6 +72,18 @@ def receive(stream, count):
     return bytes(value)
 
 
+def prepare_upload(root, request):
+    capture_id = str(uuid.UUID(request['capture_id']))
+    directory = root / 'processed' / capture_id
+    content = (directory / 'normalized.png').read_bytes()
+    if digest(content) != request['normalized_sha256']: raise ValueError('本地校正图校验失败')
+    image = cv2.imdecode(np.frombuffer(content, np.uint8), cv2.IMREAD_GRAYSCALE)
+    if image is None: raise ValueError('本地校正图无法解码')
+    encoded = cv2.imencode('.jpg', image, [cv2.IMWRITE_JPEG_QUALITY, 80, cv2.IMWRITE_JPEG_OPTIMIZE, 1])[1].tobytes()
+    write_atomic(directory / 'sheet.jpg', encoded)
+    return {'sha256': digest(encoded), 'size': len(encoded), 'quality': 80}
+
+
 def serve(root, token):
     root = root.resolve(strict=True)
     cv2.setNumThreads(2)
@@ -98,6 +111,7 @@ def serve(root, token):
                     if method == 'stop':
                         response = {'ok': True, 'result': {}}
                     elif method == 'recognize': response = {'ok': True, 'result': process(root, request['args'])}
+                    elif method == 'prepare-upload': response = {'ok': True, 'result': prepare_upload(root, request['args'])}
                     elif method == 'ping': response = {'ok': True, 'result': {'engine_version': ENGINE_VERSION}}
                     else: raise ValueError('不支持的识读命令')
                 except (ValueError, KeyError, OSError, EOFError, cv2.error) as error:

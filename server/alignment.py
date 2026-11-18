@@ -10,6 +10,7 @@ from . import paper
 from .db import connect,put,find
 from .dependencies import admin,require
 from .storage import local_path,materialize
+from .scan_files import normalized_relative
 
 router=APIRouter(prefix='/api/v1')
 
@@ -18,7 +19,8 @@ def load(identifier,rotation):
     if type(rotation) is not int or not 0<=rotation<=3:raise HTTPException(422,'旋转方向无效')
     with connect() as db:
         page=require(db,identifier,'pages');batch=require(db,page['batch_id'],'scan-batches');template=require(db,batch['template_id'],'templates')
-    try:image,value=paper.decode(materialize('pages/'+identifier+'.image').read_bytes())
+    relative=normalized_relative(page) if page.get('upload_format')=='jpeg-sheet-1' else 'pages/'+identifier+'.image'
+    try:image,value=paper.decode(materialize(relative).read_bytes())
     except (ValueError,FileNotFoundError) as error:raise HTTPException(409,str(error))
     if rotation:image=np.ascontiguousarray(np.rot90(image,-rotation))
     return page,batch,template,image,value
@@ -58,7 +60,8 @@ def align_page(identifier:str,body:dict,current=Depends(admin)):
     if value!=paper.code(template,page['side']) and body.get('confirm_template') is not True:raise HTTPException(422,'缺少可匹配的题卡二维码，需人工确认所选考卷和正反面')
     try:normalized,candidate,selections=paper.recognize(image,template,page['side'],body['corners'])
     except (ValueError,KeyError,TypeError) as error:raise HTTPException(422,str(error))
-    content=cv2.imencode('.png',normalized)[1].tobytes();path=local_path('pages/'+identifier+'.png')
+    suffix='.jpg' if page.get('upload_format')=='jpeg-sheet-1' else '.png'
+    content=cv2.imencode(suffix,normalized,[cv2.IMWRITE_JPEG_QUALITY,80,cv2.IMWRITE_JPEG_OPTIMIZE,1] if suffix=='.jpg' else [])[1].tobytes();path=local_path(normalized_relative(page))
     temporary=path.with_name(identifier+'.'+str(uuid4())+'.tmp.png');temporary.parent.mkdir(parents=True,exist_ok=True);temporary.write_bytes(content)
     old_asset=None;old_content=None;replaced=False
     try:
@@ -71,8 +74,10 @@ def align_page(identifier:str,body:dict,current=Depends(admin)):
             if group.get('frozen') or batch['status']=='paired':raise HTTPException(409,'已配对或发布的页面请使用补扫替换，发布后需先复核')
             if page['status']=='received':raise HTTPException(425,'页面正在识别，请稍后再调整')
             if path.exists():
-                old_content=path.read_bytes();asset_id=str(uuid4());asset_path=local_path('assets/'+asset_id+'.png');asset_path.parent.mkdir(parents=True,exist_ok=True);asset_path.write_bytes(old_content)
-                old_asset=put(db,'assets',{'id':asset_id,'width':normalized.shape[1],'height':normalized.shape[0],'sha256':hashlib.sha256(old_content).hexdigest(),'purpose':'alignment_history','image_url':f'/api/v1/assets/{asset_id}'},current['id'])
+                old_content=path.read_bytes();asset_id=str(uuid4());asset_path=local_path('assets/'+asset_id+'.png');asset_path.parent.mkdir(parents=True,exist_ok=True)
+                history_content=cv2.imencode('.png',cv2.imdecode(np.frombuffer(old_content,np.uint8),cv2.IMREAD_GRAYSCALE))[1].tobytes() if suffix=='.jpg' else old_content
+                asset_path.write_bytes(history_content)
+                old_asset=put(db,'assets',{'id':asset_id,'width':normalized.shape[1],'height':normalized.shape[0],'sha256':hashlib.sha256(history_content).hexdigest(),'purpose':'alignment_history','image_url':f'/api/v1/assets/{asset_id}'},current['id'])
             temporary.replace(path);replaced=True
             put(db,'page-alignments',{'id':body['request_id'],'page_id':identifier,'fingerprint':fingerprint,'corners':body['corners'],'rotation':body.get('rotation',0),'reason':body['reason'],'previous_asset_id':old_asset['id'] if old_asset else None,'previous_recognition':{k:page.get(k) for k in ('candidate_number','selections','absent_mark','status')},'created_at':time.time()},current['id'])
             page.update(status='recognized',candidate_number=candidate,selections=selections,absent_mark=paper.absent_mark(normalized,page['side'],template),normalized_sha256=hashlib.sha256(content).hexdigest(),alignment_request_id=body['request_id'],alignment_reason=body['reason'])
@@ -90,6 +95,8 @@ def align_page(identifier:str,body:dict,current=Depends(admin)):
         raise
     finally:temporary.unlink(missing_ok=True)
     from .jobs import queue
-    queue('mirror',{'relative':'pages/'+identifier+'.png'})
-    if old_asset:queue('mirror',{'relative':'assets/'+old_asset['id']+'.png'})
+    from .jobs import project_for_page
+    with connect() as db:project_id=project_for_page(db,result)
+    queue('mirror',{'relative':normalized_relative(result),'project_id':project_id})
+    if old_asset:queue('mirror',{'relative':'assets/'+old_asset['id']+'.png','project_id':project_id})
     return result

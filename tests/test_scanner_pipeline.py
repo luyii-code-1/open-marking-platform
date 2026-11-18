@@ -8,7 +8,7 @@ from uuid import uuid4
 import cv2
 import pytest
 from fastapi.testclient import TestClient
-from scanner_engine.main import process
+from scanner_engine.main import process, prepare_upload
 from server import db, jobs, paper, storage
 from server.main import app
 from server.scanner_pipeline import configuration
@@ -164,3 +164,88 @@ def test_reviewed_absence_and_replayed_upload(pipeline):
     assert response.json()['absent_mark'] and response.json()['operator_correction']==correction
     assert f['upload'](page,result).status_code==200
     assert f['upload'](page,{**result,'absent_mark':False}).status_code==409
+
+
+def test_single_jpeg_upload_review_archive_and_cleanup(pipeline,monkeypatch):
+    import io
+    from pathlib import Path
+    from PIL import Image
+    from server.archive import verify
+    f=pipeline;client=f['client'];headers=f['headers'];post=f['post'];remote={}
+    class S3:
+        def upload_file(self,source,bucket,key):remote[(bucket,key)]=Path(source).read_bytes()
+        def download_file(self,bucket,key,target):Path(target).write_bytes(remote[(bucket,key)])
+        def delete_object(self,Bucket,Key):remote.pop((Bucket,Key),None)
+        def generate_presigned_url(self,*args,**kwargs):return 'https://media.example.test/full-sheet.jpg'
+    monkeypatch.setattr(storage.Storage,'s3',lambda self:S3())
+    connection=post('storage-connections',{'name':'整页JPEG','kind':'ros','endpoint':'https://s3.example.test','bucket':'exam-bucket','prefix':'exam','access_key':'fake-access','secret_key':'fake-secret'},status=201)
+    client.put('/api/v1/projects/'+f['project']['id']+'/storage',headers=headers,json={'connection_id':connection['id'],'review_image_delivery':'direct'}).raise_for_status()
+    contents={}
+    for page in f['pages']:
+        prepared=prepare_upload(f['root'],{'capture_id':page['id'],'normalized_sha256':page['result']['normalized_sha256']})
+        content=(f['root']/'processed'/page['id']/'sheet.jpg').read_bytes();contents[page['id']]=content
+        with Image.open(io.BytesIO(content)) as image:assert image.format=='JPEG' and image.mode=='L' and image.size==(840,1188)
+        result={k:v for k,v in page['result'].items() if k not in ('cuts','local_cuts_sha256')}
+        result.update(upload_format='jpeg-sheet-1',normalized_sha256=prepared['sha256'])
+        def upload(value=result,picture=content):
+            return client.post('/api/v1/scanner/batches/'+f['batch_id']+'/pages',headers=headers,
+                data={'capture_id':page['id'],'side':page['side'],'sequence':1,'manifest':json.dumps(value)},files={'normalized':('sheet.jpg',picture,'image/jpeg')})
+        assert upload({**result,'normalized_sha256':'0'*64}).status_code==422
+        assert upload(picture=(f['root']/'processed'/page['id']/'normalized.png').read_bytes()).status_code==422
+        uploaded=upload();assert uploaded.status_code==200,uploaded.text
+        assert uploaded.json()['upload_format']=='jpeg-sheet-1' and 'local_cuts' not in uploaded.json()
+        assert upload().status_code==200
+        assert list((db.ROOT/'pages').glob(page['id']+'.*'))==[db.ROOT/'pages'/(page['id']+'.jpg')]
+    with db.connect() as conn:queued=db.find(conn,'jobs',project_id=f['project']['id'])
+    assert len(queued)==2
+    for job in queued:jobs.execute(job['id'])
+    assert len(remote)==2 and all(key.endswith('.jpg') for bucket,key in remote)
+    post('scan-batches/'+f['batch_id']+'/pair',{'local_pairs':[{'candidate_number':'123','pages':[p['id'] for p in f['pages']]}]})
+    q=f['template']['questions'][1];task=post('tasks/claim',{'template_id':f['template']['id'],'question_id':q['id']})
+    base='/api/v1/tasks/'+task['id']
+    def no_crop(*args,**kwargs):raise AssertionError('整页图片不得在服务端裁切')
+    with monkeypatch.context() as patch:
+        patch.setattr(Image.Image,'crop',no_crop)
+        manifest=client.get(base+'/image-manifest',headers=headers).json()
+        assert len(manifest['pages'])==2 and len(manifest['regions'])==2
+        for source in manifest['pages']:
+            assert source['direct_url'].endswith('full-sheet.jpg')
+            response=client.get('/api/v1'+source['proxy_url'],headers=headers)
+            assert response.status_code==200 and response.headers['content-type']=='image/jpeg'
+            assert response.content in contents.values()
+        assert client.get(base+'/image',headers=headers).status_code==409
+    post('tasks/'+task['id']+'/score',{'score':2,'idempotency_key':'jpeg-graded'})
+    close_scanning(client,f['group_id'],headers);post('results/publish',{'group_id':f['group_id']})
+    with db.connect() as conn:sub=db.find(conn,'submissions',group_id=f['group_id'])[0]
+    analysis=f"/api/v1/analysis/groups/{f['group_id']}/answers/{sub['id']}/{q['id']}"
+    with monkeypatch.context() as patch:
+        patch.setattr(Image.Image,'crop',no_crop)
+        response=client.get(analysis+'/image-manifest',headers=headers);assert response.status_code==200,response.text
+        for source in response.json()['pages']:
+            assert client.get('/api/v1'+source['proxy_url'],headers=headers).content in contents.values()
+        assert client.get(analysis+'/image-manifest').status_code==401
+    archived=post('projects/'+f['project']['id']+'/archive');_,manifest,_=verify(archived['id'])
+    assert {e['path'] for e in manifest if e['path'].startswith('pages/')}=={'pages/'+p['id']+'.jpg' for p in f['pages']}
+    from server.recovery import restore
+    backup=post('system/backup');target=f['tmp_path']/'restored'
+    restore(db.ROOT/'backups'/(backup['id']+'.sqlite3'),target,db.ROOT,backup['sha256'])
+    assert {path.name for path in (target/'pages').iterdir()}=={p['id']+'.jpg' for p in f['pages']}
+    for page in f['pages']:assert (target/'pages'/(page['id']+'.jpg')).read_bytes()==contents[page['id']]
+    release=post('projects/'+f['project']['id']+'/release-preview',{'archive_id':archived['id'],'mode':'local'});assert release['file_count']==2
+    post('projects/'+f['project']['id']+'/release',{'plan_id':release['id'],'confirm':True})
+    for page in f['pages']:
+        assert not (db.ROOT/'pages'/(page['id']+'.jpg')).exists()
+        assert storage.materialize('pages/'+page['id']+'.jpg').read_bytes()==contents[page['id']]
+    plan=post('projects/'+f['project']['id']+'/deletion-preview')
+    job=post('deletion-plans/'+plan['id']+'/confirm',{'confirm':True,'reason':'整页JPEG验证'},status=202);jobs.execute(job['job_id'])
+    with db.connect() as conn:assert db.get(conn,plan['id'])['status']=='completed'
+    assert not remote and not list((db.ROOT/'pages').glob('*.jpg'))
+
+
+def test_jpeg_preparation_preserves_local_scans_and_rejects_changed_image(pipeline):
+    f=pipeline;page=f['pages'][0];folder=f['root']/'processed'/page['id']
+    prepared=prepare_upload(f['root'],{'capture_id':page['id'],'normalized_sha256':page['result']['normalized_sha256']})
+    assert prepared['quality']==80 and (folder/'normalized.png').is_file() and (folder/'cuts.zip').is_file()
+    assert (f['root']/'pages'/f['batch_id']/(page['id']+'.jpg')).read_bytes()==page['original']
+    with pytest.raises(ValueError,match='校正图校验失败'):
+        prepare_upload(f['root'],{'capture_id':page['id'],'normalized_sha256':'0'*64})

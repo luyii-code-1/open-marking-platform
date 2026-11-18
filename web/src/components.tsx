@@ -1,5 +1,5 @@
 import {ReviewImage} from './ReviewImage'
-import {loadReviewSheet,type ReviewSheet} from './reviewImages'
+import {loadImageSheet,type ReviewSheet} from './reviewImages'
 import { requestBlob } from './api'
 import { useEffect, useState } from 'react'
 import { Alert, Card, Spin, type CardProps } from 'antd'
@@ -14,8 +14,8 @@ export function AssetImage({ src, className, style }: { src: string; className?:
     if (!src) return
     const target = new URL(src, location.origin)
     const sameOrigin = target.origin === location.origin
-    const task=target.pathname.match(/^\/api\/v1\/tasks\/([^/]+)\/image$/)
-    if(sameOrigin&&task){void loadReviewSheet(task[1]).then(value=>{if(!cancelled)setSheet(value)}).catch(e=>{if(!cancelled)setError(e.message)});return()=>{cancelled=true}}
+    const sheet=/^\/api\/v1\/(?:tasks\/[^/]+|analysis\/groups\/[^/]+\/answers\/[^/]+\/[^/]+)\/image$/.test(target.pathname)
+    if(sameOrigin&&sheet){void loadImageSheet(target.pathname.slice('/api/v1'.length)).then(value=>{if(!cancelled)setSheet(value)}).catch(e=>{if(!cancelled)setError(e.message)});return()=>{cancelled=true}}
     void (sameOrigin&&target.pathname.startsWith('/api/v1/')?requestBlob(target.pathname.slice('/api/v1'.length)+target.search):fetch(target.href).then(async response=>{if(!response.ok)throw new Error(`图像加载失败（${response.status}）`);return response.blob()})).then(blob => { if (!cancelled) { objectUrl = URL.createObjectURL(blob); setUrl(objectUrl) } }).catch(e => { if (!cancelled) setError(e.message) })
     return () => { cancelled = true; if (objectUrl) URL.revokeObjectURL(objectUrl) }
   }, [src])
