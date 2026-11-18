@@ -451,9 +451,10 @@ def upload_page(identifier:str,file:UploadFile=File(),capture_id:str=Form(),side
 
 @app.get('/api/v1/pages/{identifier}/image')
 def page_image(identifier:str,current=Depends(admin)):
-    with connect() as db: require(db,identifier,'pages')
+    with connect() as db: page=require(db,identifier,'pages')
     from .storage import materialize
-    try:path=materialize('pages/'+identifier+'.png')
+    from .scan_files import normalized_relative
+    try:path=materialize(normalized_relative(page))
     except FileNotFoundError:path=materialize('pages/'+identifier+'.image')
     return FileResponse(path)
 

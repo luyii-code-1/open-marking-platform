@@ -30,9 +30,11 @@ def perform(job,progress):
             alignment=get(db,page.get('alignment_request_id'),'page-alignments') or {}
         if not any(q['type']!='subjective' for q in template.get('questions',[])):continue
         try:
-            image,_=decode(materialize('pages/'+page['id']+'.image').read_bytes(),template)
-            if alignment.get('rotation'):image=np.ascontiguousarray(np.rot90(image,-alignment['rotation']))
-            _,_,selections=recognize(image,template,page['side'],alignment.get('corners'))
+            from .scan_files import normalized_relative
+            sheet_only=page.get('upload_format')=='jpeg-sheet-1'
+            image,_=decode(materialize(normalized_relative(page) if sheet_only else 'pages/'+page['id']+'.image').read_bytes(),template)
+            if not sheet_only and alignment.get('rotation'):image=np.ascontiguousarray(np.rot90(image,-alignment['rotation']))
+            _,_,selections=recognize(image,template,page['side'],None if sheet_only else alignment.get('corners'))
         except (ValueError,FileNotFoundError) as error:
             failed.append({'page_id':page['id'],'reason':str(error)})
             progress(index+1,len(pages),'重新识别客观题填涂');continue

@@ -112,7 +112,7 @@ def register_batch(identifier: str, body: dict, current=Depends(scan_admin)):
                                       'status': 'front', **({'scanner_device_id': current['id']} if current['role'] == 'scanner' else {})}, current['id'])
 
 
-def image_bytes(file, expected_shape=None):
+def image_bytes(file, expected_shape=None, image_format='PNG'):
     content = file.file.read(LIMIT + 1)
     if len(content) > LIMIT: raise HTTPException(413, '单个扫描文件超过30MB')
     # Inspect dimensions before allocating a decoded image.
@@ -121,7 +121,8 @@ def image_bytes(file, expected_shape=None):
         with Image.open(io.BytesIO(content)) as probe:
             if probe.width * probe.height > 40_000_000: raise ValueError('图片像素过多')
             if expected_shape and probe.size != expected_shape: raise ValueError('校正图尺寸与题卡不一致')
-            if expected_shape and probe.format != 'PNG': raise ValueError('校正图需要PNG格式')
+            if expected_shape and probe.format != image_format: raise ValueError('校正图需要'+image_format+'格式')
+            if expected_shape and image_format == 'JPEG' and probe.mode != 'L': raise ValueError('校正JPEG需要灰度格式')
             probe.verify()
     except (ValueError, OSError, Image.DecompressionBombError) as error: raise HTTPException(422, str(error))
     return content
@@ -142,7 +143,8 @@ def verified_absence(template, side, result, normalized):
 def verify_result(template, side, result, original, normalized, cuts):
     supported={ENGINE_VERSION} if template.get('layout_version',2)>=3 or any(q.get('choice_style')=='compact' for q in template['questions']) else {ENGINE_VERSION,'omp-omr-2'} if any(q.get('choice_style')=='bracket' for q in template['questions']) else {ENGINE_VERSION,'omp-omr-2','omp-omr-1'}
     if result.get('engine_version') not in supported or result.get('template_id') != template['id'] or result.get('template_revision') != template['revision'] or result.get('config_sha256') != config_hash(template): raise HTTPException(409, '本地识读引擎或题卡版本不匹配，请更新扫描端并下载配置')
-    if any(result.get(key) != checksum(data) for key, data in (('source_sha256', original), ('normalized_sha256', normalized), ('local_cuts_sha256', cuts))): raise HTTPException(422, '上传文件与本地识读校验值不一致')
+    checks = (('normalized_sha256', normalized),) if result.get('upload_format') == 'jpeg-sheet-1' else (('source_sha256', original), ('normalized_sha256', normalized), ('local_cuts_sha256', cuts))
+    if any(result.get(key) != checksum(data) for key, data in checks): raise HTTPException(422, '上传文件与本地识读校验值不一致')
     candidate = result.get('candidate_number')
     if side == 'front' and (not isinstance(candidate, str) or len(candidate) != template.get('candidate_length', 8) or any(c not in '0123456789?' for c in candidate)): raise HTTPException(422, '本地考号识读结果无效')
     if side == 'back' and candidate is not None: raise HTTPException(422, '背面不应包含独立考号')
@@ -153,6 +155,9 @@ def verify_result(template, side, result, original, normalized, cuts):
     if not isinstance(selected, dict) or set(selected) != set(questions): raise HTTPException(422, '客观题识读范围与题卡不一致')
     for qid, values in selected.items():
         if not isinstance(values, list) or len(values) > 5 or len(set(str(v) for v in values)) != len(values) or any(not isinstance(v, str) or len(v) != 1 or v not in 'ABCDE'[:questions[qid].get('options', 4)] for v in values): raise HTTPException(422, '客观题选项无效')
+    if result.get('upload_format') == 'jpeg-sheet-1':
+        if not isinstance(result.get('source_sha256'),str) or len(result['source_sha256'])!=64 or any(c not in '0123456789abcdef' for c in result['source_sha256']): raise HTTPException(422,'扫描原图校验值无效')
+        return
     expected = {q['id'] + '.' + str(i) + '.png': (q['id'], i, r) for q in template['questions'] for i, r in enumerate(q['regions']) if r['page'] == page}
     entries = result.get('cuts', [])
     if not isinstance(entries, list) or len(entries) != len(expected) or {e.get('entry') for e in entries if isinstance(e, dict)} != set(expected): raise HTTPException(422, '切题清单不完整')
@@ -174,7 +179,7 @@ def verify_result(template, side, result, original, normalized, cuts):
 
 
 @router.post('/batches/{identifier}/pages')
-def upload_processed(identifier: str, file: UploadFile = File(), normalized: UploadFile = File(), cuts: UploadFile = File(),
+def upload_processed(identifier: str, normalized: UploadFile = File(), file: UploadFile | None = File(default=None), cuts: UploadFile | None = File(default=None),
                      capture_id: str = Form(), side: str = Form(), sequence: int = Form(), manifest: str = Form(), current=Depends(scan_admin)):
     try:
         capture_id = str(UUID(capture_id))
@@ -189,7 +194,13 @@ def upload_processed(identifier: str, file: UploadFile = File(), normalized: Upl
             db.execute('BEGIN IMMEDIATE'); batch, group, template = batch_context(db, identifier, current)
             width, height = dimensions(template)
             if side == 'back' and template['sides'] != 2: raise HTTPException(422, '单面题卡不接受背面')
-            original = image_bytes(file); corrected = image_bytes(normalized, (width * 4, height * 4)); packed = cuts.file.read(LIMIT + 1)
+            sheet_only = result.get('upload_format') == 'jpeg-sheet-1'
+            if result.get('upload_format') not in (None,'jpeg-sheet-1'): raise HTTPException(422,'上传图片格式版本无效')
+            if sheet_only and (file is not None or cuts is not None): raise HTTPException(422,'整页JPEG上传只接受校正图')
+            if not sheet_only and (file is None or cuts is None): raise HTTPException(422,'扫描上传缺少原图或切题包，请更新扫描端')
+            original = None if sheet_only else image_bytes(file)
+            corrected = image_bytes(normalized, (width * 4, height * 4), 'JPEG' if sheet_only else 'PNG')
+            packed = b'' if sheet_only else cuts.file.read(LIMIT + 1)
             if len(packed) > LIMIT: raise HTTPException(413, '切题包超过30MB')
             try: verify_result(template, side, result, original, corrected, packed)
             except (TypeError, KeyError, cv2.error): raise HTTPException(422, '本地识读清单结构无效')
@@ -208,19 +219,22 @@ def upload_processed(identifier: str, file: UploadFile = File(), normalized: Upl
                     if any(s.get('pages') or s.get('status')=='absent' for s in find(db,'submissions',group_id=group['id'],candidate_number=result['candidate_number'])):
                         raise HTTPException(409,'此考生已有答卷')
             if existing:
-                if any(existing.get(k) != value for k, value in (('batch_id', identifier), ('side', side), ('sequence', sequence), ('sha256', result['source_sha256']), ('normalized_sha256', result['normalized_sha256']), ('local_cuts_sha256', result['local_cuts_sha256']))): raise HTTPException(409, '捕获编号已用于其他页面内容')
+                fields = [('batch_id', identifier), ('side', side), ('sequence', sequence), ('sha256', result['source_sha256']), ('normalized_sha256', result['normalized_sha256']), ('upload_format', result.get('upload_format'))]
+                if not sheet_only: fields.append(('local_cuts_sha256', result['local_cuts_sha256']))
+                if any(existing.get(k) != value for k, value in fields): raise HTTPException(409, '捕获编号已用于其他页面内容')
                 return existing
             if batch['status'] in ('paired', 'frozen'): raise HTTPException(409, '批次已确认或冻结')
             if any(p['side'] == side and p['sequence'] == sequence and not p.get('excluded') for p in find(db, 'pages', batch_id=identifier)): raise HTTPException(409, '该顺序已有页面，请先排除原页面')
             from .scan_files import write_atomic
-            for suffix, content in (('.image', original), ('.png', corrected), ('.cuts.zip', packed)):
+            outputs = (('.jpg', corrected),) if sheet_only else (('.image', original), ('.png', corrected), ('.cuts.zip', packed))
+            for suffix, content in outputs:
                 relative = 'pages/' + capture_id + suffix; path = local_path(relative)
                 write_atomic(path, content); written.append(path)
             page = put(db, 'pages', {'id': capture_id, 'batch_id': identifier, 'side': side, 'sequence': sequence, 'status': 'recognized',
                                    'sha256': result['source_sha256'], 'normalized_sha256': result['normalized_sha256'],
-                                   'local_cuts_sha256': result['local_cuts_sha256'], 'local_cuts_normalized_sha256': result['normalized_sha256'],
+                                   **({'upload_format':'jpeg-sheet-1'} if sheet_only else {'local_cuts_sha256': result['local_cuts_sha256'], 'local_cuts_normalized_sha256': result['normalized_sha256'], 'local_cuts':result['cuts']}),
                                    **({'operator_correction':correction,'corrected_by':current['id']} if correction else {}),
-                                   'local_cuts': result['cuts'], 'candidate_number': result['candidate_number'], 'selections': result['selections'],
+                                   'candidate_number': result['candidate_number'], 'selections': result['selections'],
                                    'absent_mark': verified_absence(template,side,result,corrected), 'recognition_engine': result['engine_version'], 'recognition_source': 'device',
                                    'image_url': f'/api/v1/pages/{capture_id}/image'}, current['id'])
             from .anomalies import check_candidate

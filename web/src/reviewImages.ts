@@ -9,7 +9,10 @@ export async function validatePage(blob:Blob,source:Source){
   finally{bitmap.close()}
 }
 export async function loadReviewSheet(taskId:string):Promise<ReviewSheet>{
-  const manifest=await request<ImageManifest>(`/tasks/${taskId}/image-manifest`,{signal:AbortSignal.timeout(15000)})
+  return loadImageSheet(`/tasks/${taskId}/image`)
+}
+export async function loadImageSheet(imagePath:string):Promise<ReviewSheet>{
+  const manifest=await request<ImageManifest>(imagePath.replace(/\/image$/,'/image-manifest'),{signal:AbortSignal.timeout(15000)})
   return downloadReviewSheet(manifest)
 }
 export async function downloadReviewSheet(manifest:ImageManifest):Promise<ReviewSheet>{

@@ -13,8 +13,14 @@ def write_atomic(path, data):
 
 
 def page_suffixes(page):
+    if page.get('upload_format') == 'jpeg-sheet-1': return ('.jpg',)
     return ('.image', '.png', '.cuts.zip') if page.get('local_cuts_sha256') else ('.image', '.png')
 
 
+def normalized_relative(page):
+    suffix = '.jpg' if page.get('upload_format') == 'jpeg-sheet-1' else '.png'
+    return 'pages/' + page['id'] + suffix
+
+
 def hash_field(suffix):
-    return {'.png': 'normalized_sha256', '.cuts.zip': 'local_cuts_sha256'}.get(suffix, 'sha256')
+    return {'.png': 'normalized_sha256', '.jpg': 'normalized_sha256', '.cuts.zip': 'local_cuts_sha256'}.get(suffix, 'sha256')

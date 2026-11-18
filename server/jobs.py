@@ -76,6 +76,10 @@ def process_page(identifier,ownership=None):
         if not page or page['status']=='quarantined':return
         batch=get(db,page['batch_id'],'scan-batches');template=get(db,batch['template_id'],'templates');project_id=project_for_page(db,page)
     if page['status']!='received':
+        if page.get('upload_format')=='jpeg-sheet-1':
+            from .scan_files import normalized_relative
+            mirror(normalized_relative(page),project_id)
+            return
         mirror('pages/'+identifier+'.image',project_id)
         if (database.ROOT/'pages'/(identifier+'.png')).exists():mirror('pages/'+identifier+'.png',project_id)
         return

@@ -64,8 +64,8 @@ def _restore_files(root,source):
     for kind in ('pages','assets','archives'):
         for body in records[kind]:
             identifier=canonical(body['id'])
-            suffixes=('.image','.png') if kind=='pages' and body.get('status')=='recognized' else ('.image',) if kind=='pages' else ('.png',) if kind=='assets' else ('.zip',)
-            if kind=='pages' and body.get('local_cuts_sha256'):suffixes+=('.cuts.zip',)
+            from .scan_files import page_suffixes
+            suffixes=page_suffixes(body) if kind=='pages' and body.get('status')=='recognized' else ('.image',) if kind=='pages' else ('.png',) if kind=='assets' else ('.zip',)
             if kind=='pages' and '.png' not in suffixes and source and (source/'pages'/(identifier+'.png')).is_file():suffixes+=('.png',)
             for suffix in suffixes:
                 relative=f'{kind}/{identifier}{suffix}'
