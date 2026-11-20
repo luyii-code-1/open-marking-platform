@@ -71,7 +71,17 @@ python -m server.database_transfer /path/to/omp.sqlite3
 
 Linux容器部署、持久队列与外部存储配置见 [部署与存储](docs/部署与存储.md)。
 
-升级前通过系统设置创建数据库备份，并保存同期业务文件。切换 PostgreSQL 后，发布脚本应使用新版备份入口；保留在数据目录内的旧 SQLite 文件只记录切换前的状态。
+常规代码和界面发布跳过数据库快照。涉及数据库结构或批量数据变更时，为该发布创建一份校验通过的 PostgreSQL 恢复点；同一次发布重试时复用它。变更也会改写扫描文件时，另行保管对应的文件快照。发布通过健康检查和业务核验后，清理已被取代的发布备份。
+
+生产 Compose 项目使用以下两个命令。`RELEASE_SHA` 取待发布版本的完整 Git 提交哈希。先在数据变更前运行 `prepare`，验收成功后再运行 `complete`。从发布宿主机操作时，脚本路径为 `/opt/openmarkingplatform/tools/database_backup.py`。
+
+```sh
+docker exec -i omp-production-api-1 python - prepare "$RELEASE_SHA" < deploy/database_backup.py
+# 发布并完成健康检查和业务核验后执行
+docker exec -i omp-production-api-1 python - complete "$RELEASE_SHA" < deploy/database_backup.py
+```
+
+系统管理员在“系统设置 → 数据库备份”中独立控制每日自动备份。发布清理只针对部署工具生成的备份，管理员手动创建的备份、每日自动备份和迁移基线均由后台单独管理。
 
 管理员日志检索和任教成绩范围见 [操作日志](docs/操作日志.md)。
 
