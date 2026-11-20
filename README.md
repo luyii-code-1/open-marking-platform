@@ -6,17 +6,21 @@
 
 ## 开发
 
+服务端使用 PostgreSQL 16。直接运行 Python 服务时，先创建 UTF-8 数据库，给应用角色授予该库内建表和创建函数的权限，然后把连接串放入环境变量 `OMP_DATABASE_URL`。例如本机开发库连接串的形式为 `postgresql://omp:<password>@127.0.0.1:5432/omp`。
+
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 .\.venv\Scripts\python.exe -m uvicorn server.main:app --host 127.0.0.1 --port 8000 --no-access-log
 ```
 
-首次启动通过 `/api/v1/auth/bootstrap` 创建管理员。数据默认保存在 `data/`，可通过 `OMP_DATA` 设置本地数据目录。
+首次启动通过 `/api/v1/auth/bootstrap` 创建管理员。账号、会话、成绩、任务和审计记录保存在 PostgreSQL。扫描文件、归档和备份文件保存在 `OMP_DATA`，默认目录为 `data/`。
 
 考试组接收首笔扫描页或答卷后锁定正式题卡。系统管理员可在“系统设置 → 数据库备份”创建、下载和删除指定备份，或启用每日北京时间 03:00 的自动备份。自动备份初始关闭。整库恢复需同时保管对应的扫描文件快照、归档和存储密钥。
 
 ## 验证
+
+将 `OMP_TEST_DATABASE_URL` 指向独立的 PostgreSQL 测试库，并赋予测试角色创建 schema 的权限。测试和压测按运行创建临时 schema。
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -q
@@ -31,7 +35,7 @@ python -m tools.benchmark_burst --users 1000 --papers 10800 --workers 2 --target
 
 输出包含各阶段的客户端 P95、连接状态和服务停止后的成绩核对结果。成功条件包括交分 P95 不超过 2 秒、每位教师各领一份答卷、幂等重放后分数与最终结果各有 1,000 笔。省略 `--caddy` 可单独测量 API。图片传输、扫描识别和公网链路应按现场数据另行计量。
 
-领题和交分在 API 内按批提交，每个请求独立校验并使用 SQLite 保存点，成功回执在事务提交后返回。Redis 复用同一题卡和题目的共享进度计数，成绩、领取租约和评分幂等键由 SQLite 持久化。生产部署应同时更新 API、Worker、调度器镜像以及 Compose 中 API 和反代的资源设置。
+领题和交分在 API 内按批提交，每个请求独立校验并使用 PostgreSQL 保存点，成功回执在事务提交后返回。Redis 复用同一题卡和题目的共享进度计数，成绩、领取租约和评分幂等键由 PostgreSQL 持久化。生产部署应同时更新 API、Worker、调度器镜像以及 Compose 中 API 和反代的资源设置。
 
 Web 和 Windows 扫描客户端分别位于 `web/`、`scanner/`。设备兼容及完整业务验收状态记录在开发进度中。
 
@@ -52,9 +56,22 @@ Default组、题卡库、打印预览与审查发布见 [制卡工作流](docs/�
 
 ## 部署
 
+Compose 在项目私有网络中运行 PostgreSQL，使用命名卷 `postgres-data` 保存数据库。在 `.env` 中设置随机的 URL 安全密码 `OMP_POSTGRES_PASSWORD`，可用 `python -c "import secrets; print(secrets.token_hex(32))"` 生成。生产环境可用 `OMP_POSTGRES_IMAGE` 指定已校验的数据库镜像。API、Worker 和调度器使用同一数据库和业务文件目录。
+
+**从旧版 SQLite 迁移**。先停止旧 API、Worker 和调度器，保留原数据库、扫描文件与旧发布版本。使用 SQLite 在线备份接口生成一致快照，或在完全停写后复制完整数据库。准备一个空的 PostgreSQL 数据库，让 `OMP_DATABASE_URL` 指向目标。先运行演练，再正式导入。
+
+```sh
+python -m server.database_transfer /path/to/omp.sqlite3 --check-only
+python -m server.database_transfer /path/to/omp.sqlite3
+```
+
+核对迁移输出中的记录数，再启动新版服务。首次导入会保留审计顺序、会话及已退役的业务编号。切换后产生的新写入只保存在 PostgreSQL，回到旧快照前需要先处理这些差异。
+
+自动和手动备份生成 `.ompdb`。恢复演练时，设置 `OMP_RESTORE_DATABASE_URL` 指向另一空库，并使用新的文件目录。例如 `python -m server.recovery backup.ompdb --target /restore/omp --files-from /snapshots/omp-data`。旧版 `.sqlite3` 备份也可导入。
+
 Linux容器部署、持久队列与外部存储配置见 [部署与存储](docs/部署与存储.md)。
 
-备份登记、下载、新目录恢复及数据目录切换见 [备份与恢复](docs/备份与恢复.md)。
+升级前通过系统设置创建数据库备份，并保存同期业务文件。切换 PostgreSQL 后，发布脚本应使用新版备份入口；保留在数据目录内的旧 SQLite 文件只记录切换前的状态。
 
 管理员日志检索和任教成绩范围见 [操作日志](docs/操作日志.md)。
 

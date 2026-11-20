@@ -63,11 +63,16 @@ def test_first_scan_permanently_locks_current_template(school,first_record):
     batch=r('POST','scan-batches',{'group_id':group['id']})
     def locked():return next(g for g in r('GET','groups') if g['id']==group['id'])['template_locked']
     assert not locked()
+    source={'batch_id':batch['id']} if first_record=='pages' else {'group_id':group['id']}
     with db.connect() as connection:
-        record=db.put(connection,first_record,{'batch_id':batch['id']} if first_record=='pages' else {'group_id':group['id']})
+        db.put(connection,first_record,source)
+        connection.rollback()
+    assert not locked()
+    with db.connect() as connection:
+        record=db.put(connection,first_record,source)
+    assert locked()
+    with db.connect() as connection:
         connection.execute('UPDATE objects SET deleted=1 WHERE id=?',(record['id'],))
-        # Simulate an old database with retained records but no scan history table.
-        connection.execute('DROP TABLE scanned_groups')
     db.initialize()
     assert locked()
     with db.connect() as connection:
@@ -88,12 +93,14 @@ def test_concurrent_candidate_edits_and_legacy_duplicate_pairing(school):
     with ThreadPoolExecutor(max_workers=2) as pool:
         assert sorted(pool.map(change,students[:2]))==[200,409]
     with db.connect() as connection:
-        connection.execute('DROP TRIGGER student_candidate_update')
-        connection.execute("UPDATE objects SET body=json_set(body,'$.candidate_number',?) WHERE id IN (?,?)",
-                           (number,students[0]['id'],students[1]['id']))
-        connection.execute("UPDATE objects SET body=json_set(body,'$.class_id',?) WHERE id=?",
-                           (f['other_cls']['id'],students[0]['id']))
-    db.initialize()
+        # Recreate the two rows an old installation imported, in this test schema.
+        connection.execute('ALTER TABLE objects DISABLE TRIGGER student_candidate_update')
+        for student in students[:2]:
+            value=db.get(connection,student['id'],'students')
+            db.put(connection,'students',{**value,'candidate_number':number})
+        connection.execute('ALTER TABLE objects ENABLE TRIGGER student_candidate_update')
+        value=db.get(connection,students[0]['id'],'students')
+        db.put(connection,'students',{**value,'class_id':f['other_cls']['id']})
     group=f['groups'][0]
     batch=r('POST','scan-batches',{'group_id':group['id']})
     with db.connect() as connection:

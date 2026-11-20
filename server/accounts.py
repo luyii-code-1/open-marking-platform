@@ -38,7 +38,7 @@ def browser_activity(body:BrowserActivity,authorization:str=Header(),current=Dep
         # Coalesced browser events report elapsed idle time, so a delayed trailing
         # request does not extend the lease beyond the last actual interaction.
         expires=now+SESSION_SECONDS-body.idle_ms/1000
-        updated=db.execute('UPDATE sessions SET expires=MAX(expires,?) WHERE token=? AND user_id=? AND expires>?',(expires,key,current['id'],now))
+        updated=db.execute('UPDATE sessions SET expires=GREATEST(expires,?) WHERE token=? AND user_id=? AND expires>?',(expires,key,current['id'],now))
         if updated.rowcount!=1:raise HTTPException(401,'登录已过期')
         row=db.execute('SELECT expires FROM sessions WHERE token=?',(key,)).fetchone()
         return {'expires_at':row['expires'],'server_time':now}

@@ -72,8 +72,8 @@ def test_http_review_writer_reuses_one_unlocked_connection_per_lifespan(tmp_path
     original = ReviewConnection.commit
     def observe(self, batch):
         result = original(self, batch)
-        samples.append((self, self.db, get_ident(), self.db.execute('PRAGMA cache_size').fetchone()[0]))
-        assert not self.db.in_transaction and not self.db.writer_owned
+        samples.append((self, self.db, get_ident(), self.db.raw.info.backend_pid))
+        assert not self.db.in_transaction
         return result
     monkeypatch.setattr(ReviewConnection, 'commit', observe)
 
@@ -84,18 +84,16 @@ def test_http_review_writer_reuses_one_unlocked_connection_per_lifespan(tmp_path
                     json={**scope, 'user_ids': [teachers[0][0]]}).raise_for_status()
         headers = teachers[0][1]
         task = client.post('/api/v1/tasks/claim', headers=headers, json=scope).json()
-        assert db.WRITE_LOCK.acquire(timeout=2), 'idle review connection retained the write lock'
-        try:
-            with db.connect() as other:
-                other.execute('BEGIN IMMEDIATE')
-                db.put(other, 'account-events', {'user_id': teachers[0][0], 'action': 'external_write'})
-        finally:
-            db.WRITE_LOCK.release()
+        with db.connect() as other, other.raw.transaction():
+            assert other.raw.info.backend_pid != samples[0][3]
+            other.execute("SET LOCAL lock_timeout = '2s'")
+            other.execute('BEGIN IMMEDIATE')
+            db.put(other, 'account-events', {'user_id': teachers[0][0], 'action': 'external_write'})
         url = '/api/v1/tasks/'+task['id']+'/score'
         payload = {'score': 10, 'idempotency_key': str(uuid4())}
         client.post(url, headers=headers, json=payload).raise_for_status()
         client.post(url, headers=headers, json=payload).raise_for_status()
-        assert len(samples) == 3 and len(set(samples)) == 1 and samples[0][3] == -32768
+        assert len(samples) == 3 and len(set(samples)) == 1
     assert samples[0][0].db is None
     with TestClient(app) as reopened:
         reopened.post(url, headers=headers, json=payload).raise_for_status()
@@ -103,3 +101,31 @@ def test_http_review_writer_reuses_one_unlocked_connection_per_lifespan(tmp_path
     assert samples[-1][0].db is None
     with db.connect() as conn:
         assert conn.execute('SELECT COUNT(*) FROM scores').fetchone()[0] == 1
+
+
+def test_pipelined_score_constraint_error_rolls_back_only_one_request(tmp_path, monkeypatch):
+    from psycopg.errors import CheckViolation
+    from server.review import score_in_transaction
+    from server.review_writes import Operation, apply_batch
+
+    monkeypatch.setattr(db, 'ROOT', tmp_path)
+    with TestClient(app) as client:
+        admin, teachers = setup(client, 1)
+        scope = seed(1)
+        teacher, headers = teachers[0]
+        client.post('/api/v1/assignments', headers=admin, json={**scope, 'user_ids': [teacher]}).raise_for_status()
+        task = client.post('/api/v1/tasks/claim', headers=headers, json=scope).json()
+        with db.connect() as conn:
+            conn.execute("ALTER TABLE scores ADD CHECK (idempotency_key <> 'rejected')")
+        request = SimpleNamespace(headers={'authorization': headers['Authorization']}, state=SimpleNamespace())
+        batch = [
+            Operation(request, score_in_transaction, (task['id'], {'score': score, 'idempotency_key': key}), None)
+            for score, key in ((3, 'rejected'), (8, 'accepted'))
+        ]
+        with db.connect() as conn:
+            failed, succeeded = apply_batch(conn, batch)
+        assert isinstance(failed[1], CheckViolation)
+        assert succeeded[1] is None and succeeded[0]['score_revision'] == 1
+        with db.connect() as conn:
+            assert conn.execute('SELECT score FROM scores').fetchall() == [(800,)]
+            assert conn.execute('SELECT final_cents FROM review_results').fetchall() == [(800,)]

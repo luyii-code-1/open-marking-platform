@@ -48,9 +48,10 @@ def delete_record(kind: KINDS, identifier: str, current=Depends(admin)):
             if cls.get('grade_id') and any(g.get('roster_mode')!='selected' for g in find(db,'groups',grade_id=cls['grade_id'])):
                 raise HTTPException(409,'学生已纳入题卡的年级应考名单')
         # References may be nested in snapshots, lists or maps keyed by the record ID.
-        refs=db.execute("""SELECT DISTINCT o.kind FROM objects o,json_tree(o.body) j
+        refs=db.execute("""SELECT DISTINCT o.kind FROM objects o
             WHERE o.deleted=0 AND o.id<>? AND o.kind NOT IN ('account-events','passkey','auth-challenge','recovery-code')
-            AND (j.atom=? OR j.key=?)""",(identifier,identifier,identifier)).fetchall()
+            AND (jsonb_path_exists(o.body::jsonb,'strict $.** ? (@ == $id)', jsonb_build_object('id',?::text), true)
+                 OR jsonb_path_exists(o.body::jsonb,'strict $.** ? (@.type() == "object").keyvalue() ? (@.key == $id)', jsonb_build_object('id',?::text), true))""",(identifier,identifier,identifier)).fetchall()
         if refs:
             raise HTTPException(409,'记录已被引用：'+'、'.join(LABELS.get(r[0],r[0]) for r in refs))
         if kind=='users':

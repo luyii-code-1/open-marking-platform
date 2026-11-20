@@ -316,7 +316,7 @@ def test_retirement_transaction_failure_can_resume_after_files_removed(populated
     with db.connect() as connection:assert db.get(connection,plan['id'])['status']=='completed'
 
 
-def test_backup_during_partial_deletion_restores_and_resumes_same_plan(populated,monkeypatch):
+def test_backup_during_partial_deletion_restores_and_resumes_same_plan(populated,monkeypatch,pg_database_url):
     f=populated;monkeypatch.setenv('OMP_STORAGE','ros');failing=True
     with db.connect() as connection:
         task=db.get(connection,f['task']['id']);task.update(status='claimed',expires_at=time.time()+300);db.put(connection,'tasks',task)
@@ -330,10 +330,11 @@ def test_backup_during_partial_deletion_restores_and_resumes_same_plan(populated
     assert not (f['tmp_path']/'pages'/(f['page']['id']+'.image')).exists()
     from server import backups,recovery
     snapshot=backups.create(f['owner']['id']);destination=f['tmp_path'].parent/(f['tmp_path'].name+'-restored')
-    report=recovery.restore(f['tmp_path']/'backups'/(snapshot['id']+'.sqlite3'),destination,files_from=f['tmp_path'],expected_sha256=snapshot['sha256'])
+    restored_url = pg_database_url()
+    report=recovery.restore(f['tmp_path']/'backups'/snapshot['filename'],destination,files_from=f['tmp_path'],expected_sha256=snapshot['sha256'],database_url=restored_url)
     assert report['runtime_reset']['deletion_files_reset']==1
     assert (destination/'pages'/(f['page']['id']+'.image')).exists()
-    monkeypatch.setattr(db,'ROOT',destination);failing=False
+    monkeypatch.setattr(db,'ROOT',destination);monkeypatch.setenv('OMP_DATABASE_URL',restored_url);failing=False
     with db.connect() as connection:
         assert db.get(connection,f['task']['id'])['status']=='claimed'
         job=db.get(connection,plan['job_id']);assert job['status']=='failed'

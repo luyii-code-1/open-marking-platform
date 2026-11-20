@@ -1,6 +1,5 @@
 import hashlib
 import json
-import sqlite3
 import time
 import zipfile
 import secrets
@@ -236,7 +235,7 @@ def download_backup(identifier:str,current=Depends(system_admin)):
     name = filename if identifier.startswith('file-') else 'omp-' + filename
     headers = {'Cache-Control': 'private, no-store', 'Content-Length': str(size),
                'Content-Disposition': "attachment; filename*=UTF-8''" + quote(name, safe='')}
-    return StreamingResponse(iter(lambda: stream.read(256 * 1024), b''), media_type='application/vnd.sqlite3',
+    return StreamingResponse(iter(lambda: stream.read(256 * 1024), b''), media_type='application/vnd.sqlite3' if name.endswith('.sqlite3') else 'application/zip',
                              headers=headers, background=BackgroundTask(stream.close))
 
 

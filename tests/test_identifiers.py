@@ -1,7 +1,7 @@
 import json
 import multiprocessing
-import sqlite3
 from uuid import uuid4
+import psycopg
 import pytest
 from fastapi.testclient import TestClient
 from server import db
@@ -18,20 +18,15 @@ def start_database(root,barrier,api):
         migrate()
 
 
-@pytest.mark.parametrize('legacy',[False,True],ids=['empty','legacy'])
-def test_simultaneous_api_and_worker_startup(tmp_path,legacy):
-    if legacy:
+@pytest.mark.parametrize('populated',[False,True],ids=['empty','existing'])
+def test_simultaneous_api_and_worker_startup(tmp_path,populated):
+    if populated:
         db.initialize(tmp_path)
         question=str(uuid4())
         with db.connect(tmp_path) as con:
             cls=db.put(con,'classes',{'name':'保留的班级','grade':'高一'})
             template=db.put(con,'templates',{'questions':[{'id':question}]})
             db.put(con,'templates',{**template,'questions':[]})
-            con.execute('DELETE FROM identifiers')
-            con.execute("DELETE FROM schema_migrations WHERE name='identifiers-v1'")
-            con.execute('DROP TABLE scanned_groups')
-        with db.connect(tmp_path) as con:
-            assert con.execute('PRAGMA journal_mode=DELETE').fetchone()[0]=='delete'
     context=multiprocessing.get_context('spawn');barrier=context.Barrier(3)
     processes=[context.Process(target=start_database,args=(tmp_path,barrier,api)) for api in (True,True,False)]
     try:
@@ -43,10 +38,10 @@ def test_simultaneous_api_and_worker_startup(tmp_path,legacy):
         for process in processes:
             if process.is_alive():process.terminate();process.join()
     with db.connect(tmp_path) as con:
-        assert con.execute('PRAGMA journal_mode').fetchone()[0]=='wal'
+        assert con.execute("SELECT COUNT(*) FROM schema_migrations WHERE name='postgres-v1'").fetchone()[0]==1
         assert con.execute("SELECT COUNT(*) FROM schema_migrations WHERE name='identifiers-v1'").fetchone()[0]==1
         assert con.execute('SELECT COUNT(*) FROM scanned_groups').fetchone()[0]==0
-        if legacy:
+        if populated:
             assert con.execute('SELECT retired FROM identifiers WHERE id=?',(question,)).fetchone()[0]==1
             assert db.get(con,template['id'])['questions']==[]
             grades=db.objects(con,'grades')
@@ -99,22 +94,25 @@ def test_question_ids_global_retired_and_transactional_through_api(tmp_path,monk
 
 def test_user_object_delete_tombstones_and_direct_sql_collision(tmp_path,monkeypatch):
     monkeypatch.setattr(db,'ROOT',tmp_path);db.initialize()
+    for invalid in (None,'invalid',str(uuid4()).upper()):
+        with pytest.raises(psycopg.IntegrityError), db.connect() as connection:
+            connection.execute('INSERT INTO users VALUES(?,?,?,?,?)',(invalid,'bad','name','teacher','hash'))
     with db.connect() as connection:
-        for invalid in (None,'invalid',str(uuid4()).upper()):
-            with pytest.raises(sqlite3.IntegrityError):connection.execute('INSERT INTO users VALUES(?,?,?,?,?)',(invalid,'bad','name','teacher','hash'))
         obj=db.put(connection,'groups',{'name':'组'})
-        with pytest.raises(sqlite3.IntegrityError):
-            connection.execute('INSERT INTO users VALUES(?,?,?,?,?)',(obj['id'],'user','name','teacher','hash'))
+    with pytest.raises(psycopg.IntegrityError), db.connect() as connection:
+        connection.execute('INSERT INTO users VALUES(?,?,?,?,?)',(obj['id'],'user','name','teacher','hash'))
+    with db.connect() as connection:
         connection.execute('UPDATE objects SET deleted=1 WHERE id=?',(obj['id'],))
     with db.connect() as connection:
         with pytest.raises(IdentifierConflict):db.put(connection,'groups',obj)
+    with pytest.raises(psycopg.IntegrityError), db.connect() as connection:
+        connection.execute('UPDATE objects SET deleted=0 WHERE id=?',(obj['id'],))
     with db.connect() as connection:
-        with pytest.raises(sqlite3.IntegrityError):connection.execute('UPDATE objects SET deleted=0 WHERE id=?',(obj['id'],))
         identifier=str(uuid4())
         connection.execute('INSERT INTO users VALUES(?,?,?,?,?)',(identifier,'user','name','teacher','hash'))
         connection.execute('DELETE FROM users WHERE id=?',(identifier,))
-    with db.connect() as connection:
-        with pytest.raises(sqlite3.IntegrityError):connection.execute('INSERT INTO users VALUES(?,?,?,?,?)',(identifier,'new','name','teacher','hash'))
+    with pytest.raises(psycopg.IntegrityError), db.connect() as connection:
+        connection.execute('INSERT INTO users VALUES(?,?,?,?,?)',(identifier,'new','name','teacher','hash'))
     with db.connect() as connection:
         connection.execute('DELETE FROM objects WHERE id=?',(obj['id'],))
     with db.connect() as connection:
@@ -129,7 +127,8 @@ def test_migration_reserves_removed_questions_from_template_history(tmp_path,mon
         template['questions']=[{'id':active}];db.put(connection,'templates',template)
         # Reconstruct an earlier schema with template history but no identifier registry.
         connection.execute('DELETE FROM identifiers')
-        connection.execute("DELETE FROM schema_migrations WHERE name='identifiers-v1'")
+        from server.identifiers import backfill_identifiers
+        backfill_identifiers(connection)
     db.initialize();db.initialize()
     with db.connect() as connection:
         rows={r['id']:r['retired'] for r in connection.execute("SELECT * FROM identifiers WHERE kind='questions'")}

@@ -1,67 +1,64 @@
 """Restore an OMP snapshot into a new data directory, before starting services."""
 import argparse
-import hashlib
+import os
 import json
 import shutil
 import sqlite3
 import tempfile
 import time
 import zipfile
-from contextlib import closing
+import psycopg
 from pathlib import Path
-from . import db as database
-from .db import connect,objects,put
-from .backups import checksum,inspect
+from .database_transfer import import_database
+from .db import objects,put
+from .backups import checksum
 from .identifiers import canonical
 
 
-def _reset_runtime(root,reason):
+def _reset_runtime(db,reason):
     counts={}
-    with connect(root) as db:
-        db.execute('BEGIN IMMEDIATE')
-        counts['user_sessions']=db.execute('SELECT COUNT(*) FROM sessions').fetchone()[0]
-        db.execute('DELETE FROM sessions')
-        locked={row['project_id'] for row in db.execute('SELECT project_id FROM deletion_locks')}
-        # Preserve the confirmed business snapshot until its deletion can resume.
-        # Restored scan bytes need cleanup again, including previously finished files.
-        counts['deletion_files_reset']=db.execute('UPDATE deletion_files SET done=0 WHERE plan_id IN (SELECT plan_id FROM deletion_locks) AND done=1').rowcount
-        for kind in ('scanner-sessions','scanner-devices','download-tickets','auth-challenge','scanner-challenges','recovery-code','jobs','tasks','release-plans','projects'):
-            changed=0
-            for body in objects(db,kind):
-                if kind in ('scanner-sessions','scanner-devices'):
-                    body.update(revoked=True,restore_reason=reason)
-                    if kind=='scanner-sessions':body['expires_at']=0
-                elif kind=='download-tickets':body['expires_at']=0
-                elif kind in ('auth-challenge','scanner-challenges','recovery-code'):
-                    body['used']=True;body['expires_at' if kind=='scanner-challenges' else 'expires']=0
-                elif kind=='jobs':
-                    if body['status'] not in ('pending','running'):continue
-                    body.update(status='failed',lease_until=0,available_at=0,error='restored_requires_review',error_detail='从备份恢复，请核对后手动重试')
-                    body.pop('run_token',None)
-                elif kind=='tasks':
-                    if body['status']!='claimed':continue
-                    from .lifecycle import project_for
-                    if project_for(db,kind,body) in locked:continue
-                    body.update(status='expired',expires_at=0)
-                elif kind=='release-plans':
-                    if body['status']=='completed':continue
-                    body.update(status='preview',expires_at=0,lease_until=0)
-                    body.pop('operation_token',None)
-                elif kind=='projects':
-                    if body['id'] in locked:continue
-                    if not body.get('storage_operation'):continue
-                    body.pop('storage_operation',None)
-                put(db,kind,body);changed+=1
-            counts[kind]=changed
+    counts['user_sessions']=db.execute('SELECT COUNT(*) FROM sessions').fetchone()[0]
+    db.execute('DELETE FROM sessions')
+    locked={row['project_id'] for row in db.execute('SELECT project_id FROM deletion_locks')}
+    # Preserve the confirmed business snapshot until its deletion can resume.
+    # Restored scan bytes need cleanup again, including previously finished files.
+    counts['deletion_files_reset']=db.execute('UPDATE deletion_files SET done=0 WHERE plan_id IN (SELECT plan_id FROM deletion_locks) AND done=1').rowcount
+    for kind in ('scanner-sessions','scanner-devices','download-tickets','auth-challenge','scanner-challenges','recovery-code','jobs','tasks','release-plans','projects'):
+        changed=0
+        for body in objects(db,kind):
+            if kind in ('scanner-sessions','scanner-devices'):
+                body.update(revoked=True,restore_reason=reason)
+                if kind=='scanner-sessions':body['expires_at']=0
+            elif kind=='download-tickets':body['expires_at']=0
+            elif kind in ('auth-challenge','scanner-challenges','recovery-code'):
+                body['used']=True;body['expires_at' if kind=='scanner-challenges' else 'expires']=0
+            elif kind=='jobs':
+                if body['status'] not in ('pending','running'):continue
+                body.update(status='failed',lease_until=0,available_at=0,error='restored_requires_review',error_detail='从备份恢复，请核对后手动重试')
+                body.pop('run_token',None)
+            elif kind=='tasks':
+                if body['status']!='claimed':continue
+                from .lifecycle import project_for
+                if project_for(db,kind,body) in locked:continue
+                body.update(status='expired',expires_at=0)
+            elif kind=='release-plans':
+                if body['status']=='completed':continue
+                body.update(status='preview',expires_at=0,lease_until=0)
+                body.pop('operation_token',None)
+            elif kind=='projects':
+                if body['id'] in locked:continue
+                if not body.get('storage_operation'):continue
+                body.pop('storage_operation',None)
+            put(db,kind,body);changed+=1
+        counts[kind]=changed
     return counts
 
 
-def _restore_files(root,source):
-    with connect(root) as db:
-        records={kind:objects(db,kind) for kind in ('pages','assets','archives','archive-files')}
-        purged = {entry['relative'] for plan in objects(db, 'release-plans')
-                  if plan.get('action') == 'purge' and plan['status'] == 'completed'
-                  for entry in plan['files']}
+def _restore_files(root,source,db):
+    records={kind:objects(db,kind) for kind in ('pages','assets','archives','archive-files')}
+    purged = {entry['relative'] for plan in objects(db, 'release-plans')
+              if plan.get('action') == 'purge' and plan['status'] == 'completed'
+              for entry in plan['files']}
     needed={};archived={}
     for entry in sorted(records['archive-files'],key=lambda r:r.get('created_at',0),reverse=True):archived.setdefault(entry['relative'],[]).append(entry)
     for kind in ('pages','assets','archives'):
@@ -105,7 +102,7 @@ def _restore_files(root,source):
     return result
 
 
-def restore(source,target,files_from=None,expected_sha256=None,database_only=False,reason='从备份恢复'):
+def restore(source,target,files_from=None,expected_sha256=None,database_only=False,reason='从备份恢复',database_url=None):
     source=Path(source).resolve(strict=True);target=Path(target).absolute()
     if target.exists() or target.is_symlink():raise ValueError('恢复目标目录必须不存在')
     parent=target.parent.resolve(strict=True);target=parent/target.name
@@ -115,32 +112,39 @@ def restore(source,target,files_from=None,expected_sha256=None,database_only=Fal
     if not isinstance(reason,str) or not 1<=len(reason.strip())<=1000:raise ValueError('请填写1000字以内恢复原因')
     digest=checksum(source)
     if expected_sha256 and digest!=expected_sha256.lower():raise ValueError('数据库备份SHA-256不一致')
-    counts=inspect(source)
+    dsn = database_url or os.environ.get('OMP_RESTORE_DATABASE_URL')
     with tempfile.TemporaryDirectory(prefix='.omp-recovery-',dir=parent) as temporary:
         root=Path(temporary)/'data';root.mkdir(mode=0o700)
-        with closing(sqlite3.connect(source.as_uri()+'?mode=ro',uri=True)) as snapshot:
-            with closing(sqlite3.connect(root/'omp.sqlite3')) as destination:snapshot.backup(destination)
-        database.initialize(root)
-        files_result={'scope':'database-only','needed':None} if database_only else {'scope':'database-and-files',**_restore_files(root,files)}
-        reset=_reset_runtime(root,reason.strip())
-        report={'format':'omp-recovery-1','source_sha256':digest,'recovered_at':time.time(),'reason':reason.strip(),'source_counts':counts,'files':files_result,'runtime_reset':reset}
-        with connect(root) as db:
+        with import_database(source, dsn) as (db, counts):
+            files_result={'scope':'database-only','needed':None} if database_only else {'scope':'database-and-files',**_restore_files(root,files,db)}
+            if files and (files/'private'/'storage.key').exists():
+                key = files/'private'/'storage.key'
+                if key.is_symlink() or not key.resolve().is_relative_to(files):
+                    raise ValueError('存储密钥文件路径超出源目录')
+                (root/'private').mkdir(mode=0o700)
+                dest = root/'private'/'storage.key'
+                with os.fdopen(os.open(dest, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600), 'wb') as output, key.open('rb') as original:
+                    shutil.copyfileobj(original, output)
+            reset=_reset_runtime(db,reason.strip())
+            report={'format':'omp-recovery-pg-1','source_sha256':digest,'recovered_at':time.time(),'reason':reason.strip(),'source_counts':counts,'files':files_result,'runtime_reset':reset}
             put(db,'recovery-events',report)
-            # Publish a self-contained SQLite file with no outstanding WAL content.
-        with closing(sqlite3.connect(root/'omp.sqlite3')) as db:db.execute('PRAGMA wal_checkpoint(TRUNCATE)')
-        report['restored_counts']=inspect(root/'omp.sqlite3')
-        (root/'recovery-report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
-        if target.exists() or target.is_symlink():raise ValueError('恢复目标已存在，未覆盖')
-        root.rename(target)
+            report['restored_counts']={name: db.execute('SELECT COUNT(*) FROM '+name).fetchone()[0] for name in counts}
+            (root/'recovery-pending.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
+            if target.exists() or target.is_symlink():raise ValueError('恢复目标已存在，未覆盖')
+            root.rename(target)
+        # A completion report is visible only after the destination database commits.
+        (target/'recovery-pending.json').replace(target/'recovery-report.json')
     return report
 
 
 def main():
-    parser=argparse.ArgumentParser(description='从SQLite备份恢复到新的OMP数据目录')
-    parser.add_argument('backup');parser.add_argument('--target',required=True);parser.add_argument('--files-from');parser.add_argument('--sha256');parser.add_argument('--database-only',action='store_true');parser.add_argument('--reason',default='从备份恢复')
+    from .postgres import close_pool
+    parser=argparse.ArgumentParser(description='从数据库备份恢复到空 PostgreSQL 库和新的 OMP 数据目录')
+    parser.add_argument('--database-url',help='独立空库，默认读取 OMP_RESTORE_DATABASE_URL');parser.add_argument('backup');parser.add_argument('--target',required=True);parser.add_argument('--files-from');parser.add_argument('--sha256');parser.add_argument('--database-only',action='store_true');parser.add_argument('--reason',default='从备份恢复')
     args=parser.parse_args()
-    try:result=restore(args.backup,args.target,args.files_from,args.sha256,args.database_only,args.reason)
-    except (ValueError,OSError,sqlite3.Error,zipfile.BadZipFile) as error:parser.exit(1,str(error)+'\n')
+    try:result=restore(args.backup,args.target,args.files_from,args.sha256,args.database_only,args.reason,args.database_url)
+    except (ValueError,OSError,sqlite3.Error,psycopg.Error,zipfile.BadZipFile) as error:parser.exit(1,str(error)+'\n')
+    finally:close_pool()
     print(json.dumps(result,ensure_ascii=False,indent=2))
 
 

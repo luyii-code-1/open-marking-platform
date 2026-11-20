@@ -56,7 +56,7 @@ def requests(request:Request,before:int|None=Query(None,ge=1),limit:int=Query(50
     with connect() as db:
         total=db.execute('SELECT count(*) FROM '+source+where,params).fetchone()[0]
         if before:
-            where+=(' AND ' if where else ' WHERE ')+'a.rowid<?'
+            where+=(' AND ' if where else ' WHERE ')+'a.seq<?'
             params.append(before)
         rows=db.execute('SELECT a.seq AS cursor,a.*,u.name AS actor_name FROM request_log a LEFT JOIN users u ON u.id=a.actor'+where+' ORDER BY a.seq DESC LIMIT ?',[*params,limit+1]).fetchall()
     items=[dict(row) for row in rows[:limit]]

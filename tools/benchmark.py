@@ -1,24 +1,24 @@
-"""ASGI API workload using a disposable SQLite database; no production data."""
+"""ASGI API workload in a disposable PostgreSQL schema and local file directory."""
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
-from pathlib import Path
 import statistics
-import sqlite3
 import os
 from collections import defaultdict
-import tempfile
+from contextlib import ExitStack
 import time
+from unittest.mock import patch
 from uuid import uuid4
 from fastapi.testclient import TestClient
 from server import db
 from server.main import app
+from tools.rehearsal import rehearsal
 
 
 def run(users=100,submissions=10800,rate=0):
-    with tempfile.TemporaryDirectory(prefix='omp-load-') as temporary:
-        db.ROOT=Path(temporary);db.initialize()
+    with rehearsal('omp-load-'), ExitStack() as profiler:
+        db.initialize()
         people=[{'id':str(uuid4()),'role':'teacher','name':f'教师{i}','username':f't{i}'} for i in range(users)]
         tokens=[str(uuid4()) for _ in people]
         with db.connect() as connection:
@@ -40,22 +40,19 @@ def run(users=100,submissions=10800,rate=0):
                 db.put(connection,'tasks',{'submission_id':submission['id'],'template_id':template['id'],'question_id':'historical','user_id':people[index%users]['id'],'status':'completed','score_cents':100,'created_at':0})
         group,template,question=templates[0]
         timings=defaultdict(list)
-        original_connect=sqlite3.connect
-        class TimedConnection(db.Connection):
-            def execute(self,sql,*args,**kwargs):
-                start=time.perf_counter()
-                try:return super().execute(sql,*args,**kwargs)
-                finally:timings[' '.join(sql.split())[:120]].append(time.perf_counter()-start)
-            def __exit__(self,*args):
-                start=time.perf_counter()
-                try:return super().__exit__(*args)
-                finally:timings['COMMIT/ROLLBACK'].append(time.perf_counter()-start)
-            def close(self):
-                start=time.perf_counter()
-                try:return super().close()
-                finally:timings['CLOSE'].append(time.perf_counter()-start)
         if os.getenv('OMP_SQL_PROFILE'):
-            sqlite3.connect=lambda *args,**kwargs:original_connect(*args,**{**kwargs,'factory':TimedConnection})
+            def timed(method):
+                original = getattr(db.Connection, method)
+                def measured(connection, *args, **kwargs):
+                    start = time.perf_counter()
+                    try:
+                        return original(connection, *args, **kwargs)
+                    finally:
+                        label = ' '.join(args[0].split())[:120] if method == 'execute' else method.upper()
+                        timings[label].append(time.perf_counter() - start)
+                return measured
+            for method in ('execute', 'commit', 'rollback', 'close'):
+                profiler.enter_context(patch.object(db.Connection, method, timed(method)))
         latencies=[];score_latencies=[];claim_ids=[];failures=[]
         with TestClient(app,raise_server_exceptions=False) as client:
             def teacher(index):
@@ -75,7 +72,6 @@ def run(users=100,submissions=10800,rate=0):
         report['arrival_rate_per_second']=rate or 'burst'
         report['score_confirmation_p95_seconds']=round(sorted(score_latencies)[int((len(score_latencies)-1)*.95)],3) if score_latencies else None
         print(json.dumps(report,ensure_ascii=False,indent=2))
-        sqlite3.connect=original_connect
         if timings:
             print(json.dumps([{'query':query,'calls':len(values),'total':round(sum(values),4)} for query,values in sorted(timings.items(),key=lambda item:sum(item[1]),reverse=True)][:8],indent=2))
         return not failures and len(claim_ids)==users and len(set(claim_ids))==users

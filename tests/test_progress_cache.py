@@ -1,31 +1,40 @@
-import sqlite3
-from contextlib import closing
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
 from redis.exceptions import ConnectionError
 
-from server import db, progress_cache
+from server import database_transfer, db, progress_cache
 from server.main import app
 from test_allocation import setup, seed
 
 
 class RedisStub:
-    def __init__(self):
+    def __init__(self, monkeypatch):
         self.values = {}
         self.reads = 0
         self.writes = 0
         self.unavailable = False
+        self.backend_pid = None
+        original = progress_cache.SharedProgress.__init__
+        def observe(progress, connection, *args):
+            self.backend_pid = connection.raw.info.backend_pid
+            original(progress, connection, *args)
+        monkeypatch.setattr(progress_cache.SharedProgress, '__init__', observe)
+
+    def assert_outside_writer(self):
+        with db.connect() as observer:
+            assert not observer.execute("""SELECT EXISTS (SELECT 1 FROM pg_locks
+                WHERE pid=? AND locktype='advisory' AND granted)""", (self.backend_pid,)).fetchone()[0]
 
     def get(self, key):
-        assert not db.WRITE_LOCK._is_owned()
+        self.assert_outside_writer()
         self.reads += 1
         if self.unavailable:
             raise ConnectionError('offline')
         return self.values.get(key)
 
     def set(self, key, value, ex):
-        assert not db.WRITE_LOCK._is_owned()
+        self.assert_outside_writer()
         assert 0 < ex <= 60
         self.values[key] = value.encode()
         self.writes += 1
@@ -33,7 +42,7 @@ class RedisStub:
 
 def test_progress_shares_only_counts_after_auth_and_refreshes_after_scoring(tmp_path, monkeypatch):
     monkeypatch.setattr(db, 'ROOT', tmp_path)
-    redis = RedisStub()
+    redis = RedisStub(monkeypatch)
     with TestClient(app) as client:
         admin, teachers = setup(client)
         scope = seed(4)
@@ -58,23 +67,26 @@ def test_progress_shares_only_counts_after_auth_and_refreshes_after_scoring(tmp_
         assert result['question_completed'] == 1 and result['my_completed'] == 1
 
 
-def test_replaced_database_never_reuses_old_snapshot_key(tmp_path, monkeypatch):
+def test_replaced_database_never_reuses_old_snapshot_key(tmp_path, monkeypatch, pg_database_url):
     root = tmp_path / 'old'
-    restored = tmp_path / 'restored'
     monkeypatch.setattr(db, 'ROOT', root)
     db.initialize()
-    redis = RedisStub()
+    redis = RedisStub(monkeypatch)
     monkeypatch.setenv('OMP_REDIS_URL', 'redis://progress-test')
     monkeypatch.setattr(progress_cache, 'redis_client', lambda _: redis)
     monkeypatch.setattr(progress_cache, '_retry_after', 0)
     with db.connect() as conn:
+        db.put(conn, 'classes', {'name': '恢复测试班'})
+    with db.connect() as conn:
         before = progress_cache.SharedProgress(conn, 'template', 'question')
         before.counts(conn)
     before.publish()
-    restored.mkdir()
-    with db.connect() as conn, closing(sqlite3.connect(restored / 'omp.sqlite3')) as destination:
-        conn.backup(destination)
-    monkeypatch.setattr(db, 'ROOT', restored)
+    backup = tmp_path / 'snapshot.zip'
+    database_transfer.export_file(backup, db.database_url())
+    restored = pg_database_url()
+    with database_transfer.import_database(backup, restored) as (_, counts):
+        assert counts['audit'] == 1
+    monkeypatch.setenv('OMP_DATABASE_URL', restored)
     with db.connect() as conn:
         after = progress_cache.SharedProgress(conn, 'template', 'question')
         assert before.read_revision == after.read_revision and before.prefix != after.prefix

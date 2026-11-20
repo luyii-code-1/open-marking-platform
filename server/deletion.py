@@ -288,10 +288,9 @@ def preflight_files(files,manifest):
 def retire(db,plan,subject):
     identifier=plan['id'];actor=plan['actor'];reason=plan['reason']
     deleted_at = time.time()
-    db.create_function('deletion_uuid', 0, lambda: str(uuid4()))
     patch = "json_set(body,'$.deletion_plan_id',?,'$.deleted_at',?,'$.deletion_reason',?)"
     parameters = (identifier, deleted_at, reason)
-    db.execute('INSERT INTO audit(id,actor,action,object_id,body) SELECT deletion_uuid(),?,\'delete\',id,' + patch + ' FROM objects WHERE id IN (SELECT id FROM deletion_scope)', (actor, *parameters))
+    db.execute('INSERT INTO audit(id,actor,action,object_id,body) SELECT gen_random_uuid()::text,?,\'delete\',id,' + patch + ' FROM objects WHERE id IN (SELECT id FROM deletion_scope)', (actor, *parameters))
     db.execute('UPDATE objects SET deleted=1,body=' + patch + ' WHERE id IN (SELECT id FROM deletion_scope)', parameters)
     db.execute('DELETE FROM regrade_queue WHERE template_id IN (SELECT id FROM deletion_scope)')
     db.execute('DELETE FROM review_allocations WHERE template_id IN (SELECT id FROM deletion_scope)')

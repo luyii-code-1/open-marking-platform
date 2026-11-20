@@ -47,6 +47,5 @@ def test_archive_scopes_project_and_backup_is_readable(tmp_path,monkeypatch):
             assert {entry['path'] for entry in json.loads(package.read('manifest.json'))}=={'data.json','pages/'+page['id']+'.image'}
         backup=client.post('/api/v1/system/backup',headers=headers)
         assert backup.status_code==200
-        import sqlite3
-        with sqlite3.connect(tmp_path/'backups'/(backup.json()['id']+'.sqlite3')) as snapshot:
-            assert snapshot.execute('PRAGMA integrity_check').fetchone()[0]=='ok'
+        from server.backups import inspect
+        assert inspect(tmp_path/'backups'/backup.json()['filename'])['scores'] == backup.json()['counts']['scores']

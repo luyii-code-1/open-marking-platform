@@ -30,17 +30,23 @@ def question_for(db,template_id,question_id):
 
 def own_task(db,identifier,current):
     task=require(db,identifier,'tasks')
-    from .lifecycle import writable
-    writable(db,'tasks',task)
-    if current['role'] not in ('admin','manager') and task['user_id']!=current['id']: raise HTTPException(403,'无权访问该任务')
+    authorize_task(db,task,current)
     return task
 
 
-def public_task(task,db=None,submission=None,group=None):
+def authorize_task(db,task,current):
+    from .lifecycle import writable
+    writable(db,'tasks',task)
+    if current['role'] not in ('admin','manager') and task['user_id']!=current['id']: raise HTTPException(403,'无权访问该任务')
+
+
+def public_task(task,db=None,submission=None,group=None,review_role=None):
     value={k:v for k,v in task.items() if k not in ('student_id','candidate_number')}
     if db is not None:
-        allocated=db.execute('SELECT round FROM review_allocations WHERE submission_id=? AND question_id=? AND user_id=?',(task['submission_id'],task['question_id'],task['user_id'])).fetchone()
-        value['review_role']='arbitration' if allocated and allocated['round']==3 else 'ordinary'
+        if review_role is None:
+            allocated=db.execute('SELECT round FROM review_allocations WHERE submission_id=? AND question_id=? AND user_id=?',(task['submission_id'],task['question_id'],task['user_id'])).fetchone()
+            review_role='arbitration' if allocated and allocated['round']==3 else 'ordinary'
+        value['review_role']=review_role
         if submission is None:submission=get(db,task.get('submission_id'),'submissions') or {}
         if group is None:group=get(db,submission.get('group_id'),'groups') or {}
         if group.get('grade_id'):
@@ -49,8 +55,17 @@ def public_task(task,db=None,submission=None,group=None):
     return value
 
 
+def tasks_for_answer(db, submission_id, question_id, completed_only=False):
+    rows = db.execute("""SELECT body FROM (
+        SELECT body,kind,deleted,rowid FROM objects WHERE body::jsonb #>> '{submission_id}'=?
+          AND body::jsonb #>> '{question_id}'=? OFFSET 0
+        ) answer WHERE kind='tasks' AND deleted=0 AND (NOT ? OR body::jsonb #>> '{status}'='completed')
+        ORDER BY rowid""", (submission_id, question_id, completed_only))
+    return [json.loads(row[0]) for row in rows]
+
+
 def completed(db,submission_id,question_id):
-    return sorted(find(db,'tasks',submission_id=submission_id,question_id=question_id,status='completed'),key=lambda t:t['created_at'])
+    return sorted(tasks_for_answer(db,submission_id,question_id,completed_only=True),key=lambda t:t['created_at'])
 
 
 def result_for(db,submission,question,scored_task=None):
@@ -217,31 +232,41 @@ def claim_in_transaction(db, prepared, current, body):
                 task['expires_at']=time.time()+900
                 return public_task(put(db,'tasks',task,current['id']),db)
             task['status']='expired';put(db,'tasks',task,current['id'])
-    # Remove TEXT column affinity on the correlated UUID so SQLite can
-    # seek the JSON expression index rather than scan every task.
-    rows=db.execute('''SELECT s.body FROM review_allocations mine INDEXED BY allocation_user
-        CROSS JOIN objects s ON s.id=mine.submission_id
-        WHERE mine.user_id=? AND mine.question_id=? AND mine.template_id=? AND json_extract(s.body,'$.template_id')=mine.template_id
-        AND s.kind='submissions' AND s.deleted=0 AND json_extract(s.body,'$.status')='ready'
-        AND (mine.round<3 OR (SELECT COUNT(*) FROM objects t INDEXED BY object_task_answer
-            WHERE t.kind='tasks' AND t.deleted=0 AND json_extract(t.body,'$.submission_id')=+s.id
-            AND json_extract(t.body,'$.question_id')=mine.question_id AND json_extract(t.body,'$.status')='completed')=2)
-        AND NOT EXISTS(SELECT 1 FROM review_results r WHERE r.submission_id=s.id AND r.question_id=? AND r.final_cents IS NOT NULL)
-        AND NOT EXISTS(SELECT 1 FROM objects t INDEXED BY object_task_answer WHERE t.kind='tasks' AND t.deleted=0
-            AND json_extract(t.body,'$.submission_id')=+s.id AND json_extract(t.body,'$.question_id')=?
-            AND json_extract(t.body,'$.user_id')=? AND (json_extract(t.body,'$.status')='completed'
-              OR t.id IN (SELECT value FROM json_each(?))))
-        AND (SELECT COUNT(*) FROM objects t INDEXED BY object_task_answer WHERE t.kind='tasks' AND t.deleted=0
-            AND json_extract(t.body,'$.submission_id')=+s.id AND json_extract(t.body,'$.question_id')=?
-            AND (json_extract(t.body,'$.status')='completed' OR (json_extract(t.body,'$.status')='claimed' AND json_extract(t.body,'$.expires_at')>?)))
-            < CASE WHEN ?='single' THEN 1 ELSE
-                CASE WHEN (SELECT COUNT(*) FROM objects t INDEXED BY object_task_answer WHERE t.kind='tasks' AND t.deleted=0
-                    AND json_extract(t.body,'$.submission_id')=+s.id AND json_extract(t.body,'$.question_id')=? AND json_extract(t.body,'$.status')='completed')<2 THEN 2 ELSE 3 END END
-        ORDER BY mine.round DESC,COALESCE((SELECT MAX(json_extract(t.body,'$.skipped_at')) FROM objects t INDEXED BY object_task_answer WHERE t.kind='tasks' AND t.deleted=0 AND json_extract(t.body,'$.submission_id')=+s.id AND json_extract(t.body,'$.question_id')=? AND json_extract(t.body,'$.status')='skipped' AND json_extract(t.body,'$.user_id')=?),0)
-        LIMIT 1''',(current['id'],qid,tid,qid,qid,current['id'],json.dumps(list(held)),qid,time.time(),question.get('review_mode','single'),qid,qid,current['id'])).fetchall()
+    # OFFSET 0 keeps the correlated lookup from flattening into a join scanning the
+    # whole exam before PostgreSQL has statistics on newly assigned papers.
+    rows=db.execute('''WITH assigned AS MATERIALIZED (
+            SELECT submission_id, question_id, template_id, user_id, round
+            FROM review_allocations WHERE user_id=? AND question_id=? AND template_id=?
+        )
+        SELECT s.body FROM assigned a
+        CROSS JOIN LATERAL (
+            SELECT body,kind,deleted FROM objects WHERE id=a.submission_id OFFSET 0
+        ) s
+        CROSS JOIN LATERAL (
+            SELECT count(*) FILTER (WHERE t.body::jsonb #>> '{status}'='completed') AS completed,
+                   bool_or(t.body::jsonb #>> '{user_id}'=a.user_id AND
+                       (t.body::jsonb #>> '{status}'='completed' OR t.id=ANY(?::text[]))) AS held,
+                   count(*) FILTER (WHERE t.body::jsonb #>> '{status}'='claimed'
+                       AND (t.body::jsonb #>> '{expires_at}')::double precision>?) AS live,
+                   max((t.body::jsonb #>> '{skipped_at}')::double precision) FILTER (
+                       WHERE t.body::jsonb #>> '{user_id}'=a.user_id AND t.body::jsonb #>> '{status}'='skipped') AS skipped
+            FROM (SELECT id,body,kind,deleted FROM objects
+                  WHERE body::jsonb #>> '{submission_id}'=a.submission_id
+                    AND body::jsonb #>> '{question_id}'=a.question_id OFFSET 0) t
+            WHERE t.kind='tasks' AND t.deleted=0
+        ) task_counts
+        WHERE s.kind='submissions' AND s.deleted=0 AND s.body::jsonb #>> '{template_id}'=a.template_id
+          AND s.body::jsonb #>> '{status}'='ready'
+          AND (a.round<3 OR task_counts.completed=2) AND task_counts.held IS NOT TRUE
+          AND task_counts.live+task_counts.completed <
+              CASE WHEN ?='single' THEN 1 WHEN task_counts.completed<2 THEN 2 ELSE 3 END
+          AND NOT EXISTS (SELECT 1 FROM review_results r WHERE r.submission_id=a.submission_id
+              AND r.question_id=a.question_id AND r.final_cents IS NOT NULL)
+        ORDER BY a.round DESC, COALESCE(task_counts.skipped,0)
+        LIMIT 1''',(current['id'],qid,tid,list(held),time.time(),question.get('review_mode','single'))).fetchall()
     for row in rows:
         submission=json.loads(row['body'])
-        relevant=find(db,'tasks',submission_id=submission['id'],question_id=question['id'])
+        relevant=tasks_for_answer(db,submission['id'],question['id'])
         if any(t['user_id']==current['id'] and t['status']=='completed' for t in relevant): continue
         if result_for(db,submission,question) is not None: continue
         done=[t for t in relevant if t['status']=='completed']
@@ -272,12 +297,25 @@ def score_in_transaction(db, prepared, current, identifier, body):
     except (KeyError,ValueError,ArithmeticError): raise HTTPException(422,'分值无效')
     key=str(body.get('idempotency_key',''))
     if not 1<=len(key)<=200: raise HTTPException(422,'需要提交幂等编号')
-    task=own_task(db,identifier,current)
+    row=db.execute("""
+        SELECT t.body, s.body AS submission, k.task_id AS prior_task, k.score AS prior_score,
+               (SELECT round FROM review_allocations a
+                WHERE a.submission_id=t.body::jsonb #>> '{submission_id}' AND a.question_id=t.body::jsonb #>> '{question_id}'
+                  AND a.user_id=t.body::jsonb #>> '{user_id}' LIMIT 1) AS review_round
+        FROM objects t LEFT JOIN objects s ON s.id=t.body::jsonb #>> '{submission_id}'
+            AND s.kind='submissions' AND s.deleted=0
+        LEFT JOIN scores k ON k.user_id=? AND k.idempotency_key=?
+        WHERE t.id=? AND t.kind='tasks' AND t.deleted=0
+        """,(current['id'],key,identifier)).fetchone()
+    if row is None:raise HTTPException(404,'记录不存在')
+    task=json.loads(row['body'])
+    authorize_task(db,task,current)
+    submission=json.loads(row['submission']) if row['submission'] is not None else None
+    review_role='arbitration' if row['review_round']==3 else 'ordinary'
     if task['status']=='invalidated': raise HTTPException(409,'作答已更正，需要重新评阅')
-    prior=db.execute('SELECT * FROM scores WHERE user_id=? AND idempotency_key=?',(current['id'],key)).fetchone()
-    if prior:
-        if prior['task_id']!=identifier or prior['score']!=amount: raise HTTPException(409,'提交编号已用于其他评分')
-        return {**public_task(task,db),'accepted_operation':{'id':key,'score':amount/100}}
+    if row['prior_task'] is not None:
+        if row['prior_task']!=identifier or row['prior_score']!=amount: raise HTTPException(409,'提交编号已用于其他评分')
+        return {**public_task(task,db,submission=submission,review_role=review_role),'accepted_operation':{'id':key,'score':amount/100}}
     config_key = ('score', task['template_id'], task['question_id'])
     config = prepared.get(config_key)
     if config is None:
@@ -296,14 +334,14 @@ def score_in_transaction(db, prepared, current, identifier, body):
     step=cents(question.get('step',.5))
     if step<=0 or amount%step: raise HTTPException(422,'分值不符合评分步长')
     task.update(status='completed',score_cents=amount,score=amount/100,score_revision=task.get('score_revision',0)+1)
-    submission=require(db,task['submission_id'],'submissions')
+    if submission is None:raise HTTPException(404,'记录不存在')
     final=result_for(db,submission,question,scored_task=task)
     db.execute('INSERT INTO review_results VALUES(?,?,?) ON CONFLICT(submission_id,question_id) DO UPDATE SET final_cents=excluded.final_cents',(submission['id'],question['id'],final))
     task['final_score']=final/100 if final is not None else None
     put(db,'tasks',task,current['id'])
     db.execute('INSERT INTO scores VALUES(?,?,?,?,?)',(str(uuid4()),identifier,current['id'],amount,key))
     db.execute('DELETE FROM regrade_queue WHERE task_id=?',(identifier,))
-    return {**public_task(task,db,submission=submission,group=group),'accepted_operation':{'id':key,'score':amount/100}}
+    return {**public_task(task,db,submission=submission,group=group,review_role=review_role),'accepted_operation':{'id':key,'score':amount/100}}
 
 
 @router.get('/review/offline-capabilities')

@@ -11,12 +11,12 @@ import signal
 import socket
 import subprocess
 import sys
-import tempfile
 import time
 from uuid import uuid4
 
 import cv2
 import httpx
+from tools.rehearsal import rehearsal
 
 
 def free_port():
@@ -44,8 +44,7 @@ def main():
     processes = []
     logs = []
     containers = []
-    with tempfile.TemporaryDirectory(prefix='omp-linux-queue-') as directory:
-        root = Path(directory)
+    with rehearsal('omp-linux-queue-') as root:
         api_port, redis_port = free_port(), free_port()
         while redis_port == api_port:
             redis_port = free_port()
@@ -65,8 +64,8 @@ def main():
                     inner[inner.index('--dir')+1] = '/data'
                 else:
                     command += ['--mount', f'type=bind,source={root},target={root}']
-                for key in ('OMP_DATA', 'OMP_STORAGE', 'OMP_TASK_MODE', 'OMP_REDIS_URL', 'OMP_NUM_THREADS', 'PYTHONUNBUFFERED'):
-                    command.extend(['--env', key + '=' + environment[key]])
+                    for key in ('OMP_DATABASE_URL', 'OMP_DATA', 'OMP_STORAGE', 'OMP_TASK_MODE', 'OMP_REDIS_URL', 'OMP_NUM_THREADS', 'PYTHONUNBUFFERED'):
+                        command.extend(['--env', key])
                 command += [args.redis_image if name == 'redis' else args.image, *inner]
             log = (root / (name + '.log')).open('w', encoding='utf-8')
             logs.append(log)
@@ -133,7 +132,7 @@ def main():
                 fill(x, y)
                 encoded = cv2.imencode('.jpg', image)[1].tobytes()
                 batch = post('scan-batches', {'group_id': group['id'], 'room': '原生联调'})
-                # Deliberately upload before Redis exists: the SQLite job must survive failed delivery.
+                # Deliberately upload before Redis exists: the PostgreSQL job must survive failed delivery.
                 response = client.post(f"scan-batches/{batch['id']}/pages", files={'file': ('scan.jpg', encoded, 'image/jpeg')},
                     data={'capture_id': str(uuid4()), 'side': 'front', 'sequence': '1'})
                 response.raise_for_status()

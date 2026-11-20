@@ -166,7 +166,7 @@ def test_reviewed_absence_and_replayed_upload(pipeline):
     assert f['upload'](page,{**result,'absent_mark':False}).status_code==409
 
 
-def test_single_jpeg_upload_review_archive_and_cleanup(pipeline,monkeypatch):
+def test_single_jpeg_upload_review_archive_and_cleanup(pipeline,monkeypatch,pg_database_url):
     import io
     from pathlib import Path
     from PIL import Image
@@ -228,7 +228,7 @@ def test_single_jpeg_upload_review_archive_and_cleanup(pipeline,monkeypatch):
     assert {e['path'] for e in manifest if e['path'].startswith('pages/')}=={'pages/'+p['id']+'.jpg' for p in f['pages']}
     from server.recovery import restore
     backup=post('system/backup');target=f['tmp_path']/'restored'
-    restore(db.ROOT/'backups'/(backup['id']+'.sqlite3'),target,db.ROOT,backup['sha256'])
+    restore(db.ROOT/'backups'/backup['filename'],target,db.ROOT,backup['sha256'],database_url=pg_database_url())
     assert {path.name for path in (target/'pages').iterdir()}=={p['id']+'.jpg' for p in f['pages']}
     for page in f['pages']:assert (target/'pages'/(page['id']+'.jpg')).read_bytes()==contents[page['id']]
     release=post('projects/'+f['project']['id']+'/release-preview',{'archive_id':archived['id'],'mode':'local'});assert release['file_count']==2

@@ -1,15 +1,33 @@
+x-postgres-url: &postgres-url postgresql://omp:${OMP_POSTGRES_PASSWORD:?Set a URL-safe OMP_POSTGRES_PASSWORD}@postgres:5432/omp
 services:
+  postgres:
+    image: ${OMP_POSTGRES_IMAGE:-postgres:16-alpine}
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: omp
+      POSTGRES_PASSWORD: ${OMP_POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./deploy/init-postgres.sql:/docker-entrypoint-initdb.d/01-omp.sql:ro
+    healthcheck:
+      test: [CMD, pg_isready, -h, 127.0.0.1, -U, omp, -d, omp]
+      interval: 5s
+      timeout: 5s
+      retries: 12
   api:
     build: .
     restart: unless-stopped
     env_file: .env
     environment:
       OMP_DATA: /data
+      OMP_DATABASE_URL: *postgres-url
       OMP_TASK_MODE: celery
       OMP_REDIS_URL: redis://redis:6379/0
     volumes:
       - ${OMP_HOST_DATA:-./data}:/data
     depends_on:
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
     healthcheck:
@@ -24,11 +42,14 @@ services:
     env_file: .env
     environment:
       OMP_DATA: /data
+      OMP_DATABASE_URL: *postgres-url
       OMP_TASK_MODE: celery
       OMP_REDIS_URL: redis://redis:6379/0
     volumes:
       - ${OMP_HOST_DATA:-./data}:/data
     depends_on:
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
   scheduler:
@@ -38,11 +59,14 @@ services:
     env_file: .env
     environment:
       OMP_DATA: /data
+      OMP_DATABASE_URL: *postgres-url
       OMP_TASK_MODE: celery
       OMP_REDIS_URL: redis://redis:6379/0
     volumes:
       - ${OMP_HOST_DATA:-./data}:/data
     depends_on:
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
   redis:
@@ -72,6 +96,7 @@ services:
       api:
         condition: service_healthy
 volumes:
+  postgres-data:
   redis-data:
   caddy-data:
   caddy-config:

@@ -35,7 +35,9 @@ def main():
         origin = f'https://localhost:{port}'
         project = 'omp-check-' + secrets.token_hex(5)
         environment = root / '.env'
-        environment.write_text(f'OMP_HOST_DATA={root}/data\nOMP_DOMAIN=localhost\nOMP_STORAGE=local\nOMP_WS_ORIGINS={origin}\nOMP_WEBAUTHN_ORIGINS={origin}\n')
+        environment.write_text(f'OMP_HOST_DATA={root}/data\nOMP_DOMAIN=localhost\nOMP_STORAGE=local\n'
+                               f'OMP_POSTGRES_PASSWORD={secrets.token_urlsafe(32)}\n'
+                               f'OMP_WS_ORIGINS={origin}\nOMP_WEBAUTHN_ORIGINS={origin}\n')
         override = root / 'override.yaml'
         override.write_text('services:\n' + ''.join(
             f'  {service}:\n    image: {json.dumps(args.image)}\n    pull_policy: never\n    env_file: !override [{json.dumps(str(environment))}]\n'
@@ -43,9 +45,11 @@ def main():
             f'  proxy:\n    ports: !override ["127.0.0.1:{port}:443"]\n')
         command = ['docker', 'compose', '--project-name', project, '--project-directory', str(repo),
                    '--env-file', str(environment), '-f', str(repo / 'compose.yaml'), '-f', str(override)]
+        # Compose gives the calling shell precedence over its private --env-file.
+        compose_env = {key: value for key, value in os.environ.items() if not key.startswith('OMP_')}
 
         def compose(*parts, check=True):
-            return subprocess.run([*command, *parts], cwd=repo, text=True, capture_output=True, check=check)
+            return subprocess.run([*command, *parts], cwd=repo, env=compose_env, text=True, capture_output=True, check=check)
 
         def wait_for(check, timeout=60):
             deadline = time.monotonic() + timeout

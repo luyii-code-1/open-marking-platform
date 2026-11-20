@@ -1,4 +1,5 @@
-"""Cache the three shared review counters. SQLite owns their snapshot and revision."""
+"""Cache the three shared review counters. PostgreSQL owns their snapshot and revision."""
+import hashlib
 import os
 import time
 from functools import lru_cache
@@ -41,8 +42,8 @@ class SharedProgress:
         if not url or time.monotonic() < _retry_after:
             return
         try:
-            stat = (database.ROOT / 'omp.sqlite3').stat()
-            self.prefix = f'omp:progress:v1:{stat.st_dev}:{stat.st_ino}:{template_id}:{question_id}:'
+            namespace = hashlib.sha256(database.database_url().encode()).hexdigest()
+            self.prefix = f'omp:progress:v2:{namespace}:{template_id}:{question_id}:'
             self.read_revision = revision(db)
             self.client = redis_client(url)
             raw = self.client.get(self.prefix + self.read_revision)
@@ -59,7 +60,7 @@ class SharedProgress:
                 pass
 
     def counts(self, db):
-        # Cache lookup precedes the request's SQLite transaction. Recheck against
+        # Cache lookup precedes the request's database transaction. Recheck against
         # the same snapshot used for authorization-dependent personal progress.
         current = revision(db) if self.client is not None else None
         if self.cached is not None and self.read_revision == current:

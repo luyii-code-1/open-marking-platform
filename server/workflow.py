@@ -265,7 +265,7 @@ def scanned_sheets(identifier:str,q:str='',group_id:str|None=None,page:int=1,
                      'class_name':class_name,'subject':"json_extract(subj.body,'$.name')",'card':"json_extract(g.body,'$.name')",'image_status':image_status}
         direction='DESC' if sort_order=='desc' else 'ASC'
         matches=db.execute(f"SELECT s.id,s.body,{name} AS name,{image_status} AS image_status,"+projection.removeprefix('SELECT ')+filtered+
-                           f" ORDER BY {sort_fields[sort_by]} COLLATE NOCASE {direction},s.id ASC LIMIT 20 OFFSET ?",(*params,(page-1)*20))
+                           f" ORDER BY lower({sort_fields[sort_by]}) {direction},s.id ASC LIMIT 20 OFFSET ?",(*params,(page-1)*20))
         items=[]
         for row in matches:
             sub=json.loads(row['body']);pages=[]

@@ -26,7 +26,6 @@ def assign_class(db,value,body,actor=None):
 
 def migrate():
     with connect() as db:
-        db.execute('PRAGMA busy_timeout=60000')
         db.execute('BEGIN IMMEDIATE')
         from .electives import subject_tag
         existing={tag['name'] for tag in objects(db,'subject-tags')}

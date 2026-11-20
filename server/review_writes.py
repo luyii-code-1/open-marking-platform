@@ -1,8 +1,9 @@
-"""Group simultaneous review operations into durable SQLite commits."""
+"""Group simultaneous review operations into durable PostgreSQL commits."""
 import asyncio
 from collections import deque
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
 from dataclasses import dataclass
 import logging
 
@@ -23,28 +24,38 @@ class Operation:
 
 
 def apply_batch(db, batch):
+    from .review import score_in_transaction
     outcomes = []
     # Other writers cannot change assignments, sessions or the frozen state
     # during this transaction. Never reuse the preparation cache after COMMIT.
     prepared = {}
     with db:
         db.execute('BEGIN IMMEDIATE')
-        # Only claim and score run here; neither changes the exam hierarchy or its locks.
+        # Claim and score never change the exam hierarchy or its room labels.
         db.review_writable_templates = set()
+        db.review_reference_rows = {}
         for op in batch:
-            db.execute('SAVEPOINT review_operation')
             try:
-                current = authenticate_session(db, op.request.headers.get('authorization'), op.request)
-                value = op.handler(db, prepared, current, *op.args)
+                # A read flushes its preceding commands. At the end, RELEASE
+                # travels with the final writes. PostgreSQL skips RELEASE if
+                # an earlier statement fails, so the savepoint remains usable.
+                # Cold allocation can issue COPY, which needs a non-pipelined connection.
+                with db.raw.pipeline() if op.handler is score_in_transaction else nullcontext():
+                    db.execute('SAVEPOINT review_operation')
+                    current = authenticate_session(db, op.request.headers.get('authorization'), op.request)
+                    value = op.handler(db, prepared, current, *op.args)
+                    db.execute('RELEASE review_operation')
             except Exception as error:
                 db.execute('ROLLBACK TO review_operation')
+                db.execute('RELEASE review_operation')
                 prepared.clear()
                 db.review_writable_templates.clear()
+                db.review_reference_rows.clear()
                 outcomes.append((None, error))
             else:
                 outcomes.append((value, None))
-            db.execute('RELEASE review_operation')
-    db.release_writer()
+        del db.review_reference_rows
+        del db.review_writable_templates
     return outcomes
 
 
@@ -64,7 +75,6 @@ class ReviewConnection:
         try:
             if self.db is None:
                 self.db = database.open_connection(self.root)
-                self.db.execute('PRAGMA cache_size=-32768')
             return apply_batch(self.db, batch)
         except BaseException:
             # Closing also releases the application write lock if BEGIN or
@@ -154,7 +164,7 @@ async def submit(request, handler, *args):
     if writer is not None:
         return await writer.submit(request, handler, *args)
     # ASGI clients which omit application lifespan still get grouped commits
-    # without retaining a thread or a SQLite handle after their burst.
+    # without retaining a thread or a database connection after their burst.
     loop = asyncio.get_running_loop()
     state = request.app.state
     entry = getattr(state, 'review_writer', None)

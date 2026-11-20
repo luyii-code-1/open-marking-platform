@@ -1,4 +1,4 @@
-"""Persistent weighted allocations; caller holds the SQLite write transaction."""
+"""Persistent weighted allocations; caller holds the write transaction."""
 import hashlib
 import heapq
 import json
@@ -6,33 +6,6 @@ import time
 
 from fastapi import HTTPException
 from .db import connect, find
-
-
-def initialize_invalidation(db):
-    # The ready roster can change without changing its size or largest rowid.
-    # Invalidate in the transaction which actually changes its membership.
-    def invalidate(template):
-        return f"""DELETE FROM allocation_state WHERE question_id IN (
-            SELECT json_extract(q.value,'$.id') FROM objects t, json_each(t.body,'$.questions') q
-            WHERE t.id=json_extract({template}.body,'$.template_id'));"""
-
-    db.executescript(f"""
-        CREATE TRIGGER IF NOT EXISTS allocation_ready_insert AFTER INSERT ON objects
-        WHEN NEW.kind='submissions' AND NEW.deleted=0 AND json_extract(NEW.body,'$.status')='ready'
-        BEGIN {invalidate('NEW')} END;
-        CREATE TRIGGER IF NOT EXISTS allocation_ready_delete AFTER DELETE ON objects
-        WHEN OLD.kind='submissions' AND OLD.deleted=0 AND json_extract(OLD.body,'$.status')='ready'
-        BEGIN {invalidate('OLD')} END;
-        CREATE TRIGGER IF NOT EXISTS allocation_ready_update AFTER UPDATE OF body,deleted ON objects
-        WHEN NEW.kind='submissions'
-          AND (OLD.deleted<>NEW.deleted OR json_extract(OLD.body,'$.status') IS NOT json_extract(NEW.body,'$.status')
-               OR json_extract(OLD.body,'$.template_id') IS NOT json_extract(NEW.body,'$.template_id'))
-          AND ((OLD.deleted=0 AND json_extract(OLD.body,'$.status')='ready')
-               OR (NEW.deleted=0 AND json_extract(NEW.body,'$.status')='ready'))
-        BEGIN {invalidate('OLD')} {invalidate('NEW')} END;
-        CREATE INDEX IF NOT EXISTS review_unresolved_question ON review_results(question_id,submission_id)
-        WHERE final_cents IS NULL;
-    """)
 
 
 def config_signature(question, assignment):
@@ -88,6 +61,13 @@ def validate(assignment, question):
             raise HTTPException(422, '固定仲裁之外还需两名有效阅卷教师')
 
 
+def save_allocations(db, template_id, question_id, rows):
+    submissions, rounds, teachers = zip(*rows)
+    db.execute("""INSERT INTO review_allocations (template_id, question_id, submission_id, round, user_id)
+        SELECT ?, ?, supply.* FROM unnest(?::text[], ?::integer[], ?::text[]) AS supply""",
+        (template_id, question_id, list(submissions), list(rounds), list(teachers)))
+
+
 def ensure(db, template, question, assignment):
     """Build once per configuration or ready-submission change, preserving live work."""
     tid, qid = template['id'], question['id']
@@ -123,6 +103,7 @@ def ensure(db, template, question, assignment):
     arbiter_ids = set(arbiters)
     ordinary_ids = set(ordinary)
     retained = False
+    allocations = []
     for sid, pinned in records:
         chosen = [t['user_id'] for t in pinned]
         if any(uid not in ordinary_ids for uid in chosen):
@@ -141,12 +122,18 @@ def ensure(db, template, question, assignment):
             heapq.heappush(ranked, (count + 1, position, teacher))
             for entry in skipped:
                 heapq.heappush(ranked, entry)
-        db.executemany('INSERT INTO review_allocations VALUES(?,?,?,?,?)', [(tid, qid, sid, i+1, u) for i, u in enumerate(chosen)])
+        for round_number, teacher in enumerate(chosen, 1):
+            allocations.append((sid, round_number, teacher))
         if len(active.get(sid, [])) > slots:
             uid = active[sid][2]['user_id']
             if uid not in arbiter_ids:
                 retained = True
-            db.execute('INSERT INTO review_allocations VALUES(?,?,?,?,?)', (tid, qid, sid, 3, uid))
+            allocations.append((sid, 3, uid))
+        if len(allocations) >= 2048:
+            save_allocations(db, tid, qid, allocations)
+            allocations.clear()
+    if allocations:
+        save_allocations(db, tid, qid, allocations)
     if retained:
         signature = 'retained:' + signature
     db.execute('INSERT INTO allocation_state VALUES(?,?) ON CONFLICT(question_id) DO UPDATE SET signature=excluded.signature', (qid, signature))
@@ -236,6 +223,6 @@ def read_progress(reader):
         except PreparationRequired:
             db.rollback()
         # Re-read both permissions and configuration under the write lock;
-        # a deferred SQLite snapshot cannot safely be promoted here.
+        # the read snapshot may have become stale.
         db.execute('BEGIN IMMEDIATE')
         return reader(db, prepare)

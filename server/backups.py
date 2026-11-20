@@ -1,7 +1,8 @@
-"""Consistent SQLite snapshots with registered download metadata."""
+"""Consistent PostgreSQL snapshots and the legacy backup file inventory."""
 import hashlib
 import os
 import sqlite3
+import zipfile
 import time
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
@@ -59,35 +60,34 @@ def checksum(path):
 
 def inspect(path):
     path=Path(path).resolve(strict=True)
-    if not path.is_file():raise ValueError('备份应为SQLite文件')
-    with closing(sqlite3.connect(path.as_uri()+'?mode=ro',uri=True)) as db:
-        if db.execute('PRAGMA integrity_check').fetchall()!=[('ok',)]:raise ValueError('SQLite完整性检查未通过')
-        if db.execute('PRAGMA foreign_key_check').fetchone():raise ValueError('SQLite外键检查未通过')
-        tables={r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        if not {'users','objects','audit','scores'}<=tables:raise ValueError('文件不是受支持的OMP数据库备份')
-        if db.execute("SELECT 1 FROM objects WHERE NOT json_valid(body) OR json_type(body,'$.id') IS NOT 'text' OR json_extract(body,'$.id')!=id LIMIT 1").fetchone():raise ValueError('备份对象内容无效')
-        return {'users':db.execute('SELECT COUNT(*) FROM users').fetchone()[0],
-                'objects':db.execute('SELECT COUNT(*) FROM objects').fetchone()[0],
-                'scores':db.execute('SELECT COUNT(*) FROM scores').fetchone()[0],
-                'audit':db.execute('SELECT COUNT(*) FROM audit').fetchone()[0]}
+    from .database_transfer import check_sqlite, manifest, CORE
+    if zipfile.is_zipfile(path):
+        with zipfile.ZipFile(path) as archive:
+            data = manifest(archive)
+            for table, meta in data['tables'].items():
+                with archive.open(table + '.copy') as file:
+                    if hashlib.file_digest(file, 'sha256').hexdigest() != meta['sha256']:
+                        raise ValueError('备份表数据校验失败 ' + table)
+            return {table: data['tables'][table]['rows'] for table in CORE}
+    with closing(sqlite3.connect(path.as_uri()+'?mode=ro',uri=True)) as source:
+        check_sqlite(source)
+        return {table: source.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0] for table in CORE}
 
 
 def create(actor, scheduled=None, ownership=None):
     directory=database.ROOT/'backups';directory.mkdir(parents=True,exist_ok=True)
     identifier = scheduled['backup_id'] if scheduled else str(uuid4())
-    target = directory / (identifier + '.sqlite3')
+    target = directory / (identifier + '.ompdb')
     if scheduled:
         with connect() as db:
             current = policy(db)
             if not current['enabled'] or current['generation'] != scheduled['generation'] or get(db, identifier, 'database-backups'):
                 return
     with TemporaryDirectory(dir=directory, prefix='.snapshot-') as staging:
-        temporary = Path(staging) / 'snapshot.sqlite3'
-        with connect() as source:
-            with closing(sqlite3.connect(temporary)) as destination:
-                source.backup(destination)
-                destination.execute('PRAGMA journal_mode=DELETE')
-        counts=inspect(temporary);digest=checksum(temporary)
+        from .database_transfer import export_file
+        temporary = Path(staging) / 'snapshot.ompdb'
+        counts = export_file(temporary, os.environ['OMP_DATABASE_URL'])
+        digest = checksum(temporary)
         with connect() as db:
             db.execute('BEGIN IMMEDIATE')
             if scheduled:
@@ -97,22 +97,26 @@ def create(actor, scheduled=None, ownership=None):
                 if not current['enabled'] or current['generation'] != scheduled['generation'] or get(db, identifier, 'database-backups'):
                     return
             temporary.replace(target)
-            return put(db,'database-backups',{'id':identifier,'status':'created','origin':'automatic' if scheduled else 'manual','created_at':time.time(),'size':target.stat().st_size,'sha256':digest,'counts':counts,'download_url':f'/api/v1/system/backups/{identifier}/download'},actor)
+            return put(db,'database-backups',{'id':identifier,'status':'created','format':'omp-postgresql-copy-v1','filename':target.name,'origin':'automatic' if scheduled else 'manual','created_at':time.time(),'size':target.stat().st_size,'sha256':digest,'counts':counts,'download_url':f'/api/v1/system/backups/{identifier}/download'},actor)
+
+
+def backup_filename(record):
+    return record['id'] + ('.ompdb' if record.get('format') == 'omp-postgresql-copy-v1' else '.sqlite3')
 
 
 def inventory(db):
     directory = database.ROOT / 'backups'
     records = objects(db, 'database-backups')
-    registered = {record['id'] + '.sqlite3' for record in records}
+    registered = {backup_filename(record) for record in records}
     result = []
     for record in records:
         if record.get('status') == 'deleted':
             continue
-        path = directory / (record['id'] + '.sqlite3')
+        path = directory / backup_filename(record)
         result.append({**record, 'origin': record.get('origin', 'registered'), 'filename': path.name,
                        'available': not path.is_symlink() and path.is_file()})
-    for path in directory.glob('*.sqlite3'):
-        if path.name in registered or path.is_symlink() or not path.is_file():
+    for path in directory.glob('*'):
+        if path.suffix not in ('.sqlite3', '.ompdb') or path.name in registered or path.is_symlink() or not path.is_file():
             continue
         try:
             stat = path.stat()

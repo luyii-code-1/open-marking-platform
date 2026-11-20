@@ -13,6 +13,7 @@ import xml.etree.ElementTree as ET
 import cv2
 import httpx
 from server import db,paper
+from tools.rehearsal import rehearsal
 
 
 def run(scanner_dll=None):
@@ -22,8 +23,7 @@ def run(scanner_dll=None):
     if not dll.exists():raise RuntimeError('请先构建扫描客户端')
     renderer=shutil.which('pdftoppm')
     if not renderer:raise RuntimeError('需要pdftoppm生成扫描样本')
-    with tempfile.TemporaryDirectory(prefix='omp-scanner-smoke-') as temporary:
-        root=Path(temporary).resolve()
+    with rehearsal('omp-scanner-smoke-', data_subdir='server-data') as root:
         if not root.is_relative_to(Path(tempfile.gettempdir()).resolve()) or not root.name.startswith('omp-scanner-smoke-'):raise RuntimeError('临时目录边界无效')
         with socket.socket() as reservation:
             reservation.bind(('127.0.0.1',0));port=reservation.getsockname()[1]

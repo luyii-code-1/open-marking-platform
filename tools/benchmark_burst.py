@@ -13,7 +13,6 @@ import socket
 import signal
 import subprocess
 import sys
-import tempfile
 import time
 import urllib.request
 from uuid import uuid4
@@ -21,6 +20,7 @@ import h11
 
 from server import db
 from server.answer_slices import sync
+from tools.rehearsal import rehearsal
 
 
 def seed(root, users, papers):
@@ -220,7 +220,7 @@ async def exercise(port, tokens, tid, qid, pid, realtime=False, client_ssl=None)
         after_score = process_io(pid)
         for result, start, end in ((claim,before,after_claim),(score,after_claim,after_score)):
             if start and end:
-                result['server_io_bytes'] = {k:end[k]-start[k] for k in start}
+                result['api_process_io_bytes'] = {k:end[k]-start[k] for k in start}
         report = {'claim': claim, 'score': score, 'replay': await burst(ready, Teacher.score)}
         if realtime:
             # Give the last committed audit rows one hub poll outside the measured bursts.
@@ -236,8 +236,7 @@ async def exercise(port, tokens, tid, qid, pid, realtime=False, client_ssl=None)
 
 
 def run(users, papers, target, realtime=False, caddy=None, workers=1):
-    with tempfile.TemporaryDirectory(prefix='omp-http-burst-') as directory, ExitStack() as layers:
-        root = Path(directory)
+    with rehearsal('omp-http-burst-', data_subdir='.') as root, ExitStack() as layers:
         tokens, tid, qid = seed(root, users, papers)
         with socket.socket() as reservation:
             reservation.bind(('127.0.0.1', 0))
@@ -247,7 +246,7 @@ def run(users, papers, target, realtime=False, caddy=None, workers=1):
             from tools.benchmark_proxy import caddy_proxy
             public_port, client_ssl = layers.enter_context(caddy_proxy(caddy, root, port))
         origin = ('https://' if client_ssl else 'http://') + f'127.0.0.1:{public_port}'
-        env = {**os.environ, 'OMP_DATA': directory, 'OMP_TASK_MODE': 'benchmark'}
+        env = {**os.environ, 'OMP_TASK_MODE': 'benchmark'}
         # This private database and listening socket belong only to this run.
         command = [sys.executable,'-m','uvicorn','server.main:app','--host','127.0.0.1','--port',str(port),
                    '--no-access-log','--no-proxy-headers','--ws','websockets-sansio','--ws-max-size','2048',

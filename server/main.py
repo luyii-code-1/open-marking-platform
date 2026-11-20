@@ -41,19 +41,15 @@ async def lifespan(app):
                 try:recover()
                 except Exception:pass
         recovery=threading.Thread(target=resume_local,daemon=True,name='omp-local-recovery');recovery.start()
-    # SQLite checkpoints and removes its WAL when the last database handle
-    # closes. Keep an idle handle between batches, without holding a transaction.
-    with connect() as wal_handle:
-        wal_handle.execute('SELECT count(*) FROM sqlite_master').fetchone()
-        from .review_writes import ReviewWriter
-        review_writer = ReviewWriter(database.ROOT, persistent=True)
-        try:yield {'review_writer': review_writer}
-        finally:
-            stop.set()
-            if recovery:recovery.join(timeout=1)
-            await review_writer.close()
-            await app.state.event_hub.stop()
-            await asyncio.to_thread(app.state.request_journal.close)
+    from .review_writes import ReviewWriter
+    review_writer = ReviewWriter(database.ROOT, persistent=True)
+    try:yield {'review_writer': review_writer}
+    finally:
+        stop.set()
+        if recovery:recovery.join(timeout=1)
+        await review_writer.close()
+        await app.state.event_hub.stop()
+        await asyncio.to_thread(app.state.request_journal.close)
 
 
 app = FastAPI(title='Open Marking Platform',version='0.1.0',lifespan=lifespan)

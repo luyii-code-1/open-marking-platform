@@ -15,14 +15,14 @@ import time
 import cv2
 import httpx
 from server import paper
+from tools.rehearsal import rehearsal
 
 
 def run(scanner_dll=None,bundled=False,back_first=False):
     repo=Path(__file__).resolve().parents[1]
     dll=Path(scanner_dll).resolve() if scanner_dll else repo/'scanner/bin/Debug/net10.0-windows/OMP.Scanner.dll'
     if not dll.is_file():raise RuntimeError('请先编译.NET扫描端')
-    with tempfile.TemporaryDirectory(prefix='omp-desktop-smoke-') as temporary:
-        root=Path(temporary).resolve()
+    with rehearsal('omp-desktop-smoke-') as root:
         if not root.is_relative_to(Path(tempfile.gettempdir()).resolve()):raise RuntimeError('验证目录无效')
         with socket.socket() as reserve:reserve.bind(('127.0.0.1',0));port=reserve.getsockname()[1]
         base=f'http://127.0.0.1:{port}';env={**os.environ,'OMP_DATA':str(root/'data'),'OMP_TASK_MODE':'inline'}

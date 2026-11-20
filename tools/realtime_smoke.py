@@ -8,13 +8,13 @@ import secrets
 import socket
 import subprocess
 import sys
-import tempfile
 import time
 from uuid import uuid4
 import httpx
 from websockets.sync.client import connect
 from websockets.exceptions import ConnectionClosed,InvalidStatus
 from server import db
+from tools.rehearsal import rehearsal
 
 
 def message(ws,timeout=5):
@@ -26,9 +26,8 @@ def message(ws,timeout=5):
 
 
 def run(count=2):
-    repo=Path(__file__).resolve().parents[1];previous_root=db.ROOT
-    with tempfile.TemporaryDirectory(prefix='omp-realtime-smoke-') as temporary:
-        root=Path(temporary);db.ROOT=root/'data'
+    repo=Path(__file__).resolve().parents[1]
+    with rehearsal('omp-realtime-smoke-') as root:
         with socket.socket() as reservation:reservation.bind(('127.0.0.1',0));port=reservation.getsockname()[1]
         origin=f'http://127.0.0.1:{port}';url=f'ws://127.0.0.1:{port}/api/v1/events'
         env={**os.environ,'OMP_DATA':str(db.ROOT),'OMP_TASK_MODE':'inline','OMP_WS_ORIGINS':origin}
@@ -99,7 +98,7 @@ def run(count=2):
                             reconnected.send(json.dumps({'type':'auth','token':fresh}));assert message(reconnected)=={'type':'ready'}
                         print(json.dumps({'status':'passed','teacher_connections':count,'unrelated_teacher_excluded':True,'score_to_all_notifications_seconds':round(elapsed,3),'checks':['origin','first-frame authentication','scope','score progress fanout','cross-process committed change','session revocation','reconnect']},ensure_ascii=False))
             finally:
-                db.ROOT=previous_root;process.terminate()
+                process.terminate()
                 try:process.wait(timeout=5)
                 except subprocess.TimeoutExpired:process.kill();process.wait(timeout=5)
 

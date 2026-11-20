@@ -1,46 +1,25 @@
 import json
 import os
-import sqlite3
 import re
-import threading
-import time
 from contextlib import contextmanager
 from pathlib import Path
 from uuid import uuid4
 
+from . import postgres, postgres_schema
+from .postgres import Connection
+
 ROOT = Path(os.getenv('OMP_DATA', Path(__file__).resolve().parents[1] / 'data'))
-WRITE_LOCK=threading.RLock()
 
 
-class Connection(sqlite3.Connection):
-    writer_owned=False
-    def execute(self,sql,*args,**kwargs):
-        if sql.strip().upper().startswith('BEGIN IMMEDIATE') and not self.writer_owned:
-            WRITE_LOCK.acquire();self.writer_owned=True
-        return super().execute(sql,*args,**kwargs)
-    def close(self):
-        try:super().close()
-        finally:
-            self.release_writer()
-
-    def release_writer(self):
-        if self.writer_owned:
-            self.writer_owned=False
-            WRITE_LOCK.release()
+def database_url():
+    url = os.getenv('OMP_DATABASE_URL')
+    if not url:
+        raise RuntimeError('请设置 OMP_DATABASE_URL 连接 PostgreSQL')
+    return url
 
 
 def open_connection(root=None):
-    directory=Path(root) if root is not None else ROOT
-    directory.mkdir(parents=True, exist_ok=True)
-    db = sqlite3.connect(directory / 'omp.sqlite3', timeout=5,factory=Connection)
-    try:
-        db.row_factory = sqlite3.Row
-        db.execute('PRAGMA foreign_keys=ON')
-        db.execute('PRAGMA busy_timeout=5000')
-        return db
-    except BaseException:
-        db.close()
-        raise
+    return postgres.open_connection(database_url())
 
 
 @contextmanager
@@ -53,102 +32,19 @@ def connect(root=None):
         db.close()
 
 
-def enable_wal(db):
-    # SQLite can report BUSY immediately when two processes switch journal modes.
-    deadline=time.monotonic()+60
-    while True:
-        try:
-            if db.execute('PRAGMA journal_mode').fetchone()[0]=='wal':
-                return
-            if db.execute('PRAGMA journal_mode=WAL').fetchone()[0]!='wal':
-                raise RuntimeError('数据目录无法启用 SQLite WAL')
-            return
-        except sqlite3.OperationalError as error:
-            if (error.sqlite_errorcode & 255) not in (sqlite3.SQLITE_BUSY,sqlite3.SQLITE_LOCKED) or time.monotonic()>=deadline:
-                raise
-            time.sleep(.05)
-
-
 def initialize(root=None):
+    directory = Path(root) if root is not None else ROOT
+    directory.mkdir(parents=True, exist_ok=True)
     with connect(root) as db:
-        db.execute('PRAGMA busy_timeout=60000')
-        enable_wal(db)
-        db.executescript('''
-        CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY,username TEXT UNIQUE NOT NULL,name TEXT NOT NULL,role TEXT NOT NULL,password TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY,user_id TEXT REFERENCES users(id),expires REAL NOT NULL);
-        CREATE TABLE IF NOT EXISTS objects(id TEXT PRIMARY KEY,kind TEXT NOT NULL,body TEXT NOT NULL,deleted INTEGER NOT NULL DEFAULT 0);
-        CREATE INDEX IF NOT EXISTS object_kind ON objects(kind,deleted);
-        CREATE TABLE IF NOT EXISTS audit(id TEXT PRIMARY KEY,actor TEXT,action TEXT NOT NULL,object_id TEXT,body TEXT NOT NULL,created TEXT DEFAULT CURRENT_TIMESTAMP);
-        CREATE INDEX IF NOT EXISTS audit_actor ON audit(actor);
-        CREATE INDEX IF NOT EXISTS audit_object ON audit(object_id);
-        CREATE TABLE IF NOT EXISTS request_log(seq INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT UNIQUE NOT NULL,actor TEXT,method TEXT NOT NULL,route TEXT NOT NULL,object_id TEXT,status INTEGER NOT NULL,duration_ms REAL NOT NULL,peer TEXT,created TEXT NOT NULL);
-        CREATE INDEX IF NOT EXISTS request_actor ON request_log(actor,seq);
-        CREATE INDEX IF NOT EXISTS request_object ON request_log(object_id,seq);
-        CREATE TABLE IF NOT EXISTS scores(id TEXT PRIMARY KEY,task_id TEXT NOT NULL,user_id TEXT NOT NULL,score INTEGER NOT NULL,idempotency_key TEXT NOT NULL,UNIQUE(user_id,idempotency_key));
-        CREATE TABLE IF NOT EXISTS review_results(submission_id TEXT NOT NULL,question_id TEXT NOT NULL,final_cents INTEGER,PRIMARY KEY(submission_id,question_id));
-        CREATE TABLE IF NOT EXISTS review_allocations(template_id TEXT NOT NULL,question_id TEXT NOT NULL,submission_id TEXT NOT NULL,round INTEGER NOT NULL,user_id TEXT NOT NULL,PRIMARY KEY(submission_id,question_id,round));
-        CREATE INDEX IF NOT EXISTS allocation_user ON review_allocations(user_id,question_id,template_id);
-        CREATE TABLE IF NOT EXISTS allocation_state(question_id TEXT PRIMARY KEY,signature TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS regrade_queue(task_id TEXT PRIMARY KEY,user_id TEXT NOT NULL,template_id TEXT NOT NULL,question_id TEXT NOT NULL,position INTEGER NOT NULL);
-        CREATE INDEX IF NOT EXISTS regrade_user ON regrade_queue(user_id,template_id,question_id,position);
-        CREATE INDEX IF NOT EXISTS object_submission ON objects(kind,deleted,json_extract(body,'$.template_id'),json_extract(body,'$.status'));
-        CREATE INDEX IF NOT EXISTS object_task_answer ON objects(kind,deleted,json_extract(body,'$.submission_id'),json_extract(body,'$.question_id'),json_extract(body,'$.status'));
-        CREATE INDEX IF NOT EXISTS object_task_user ON objects(kind,deleted,json_extract(body,'$.user_id'),json_extract(body,'$.question_id'),json_extract(body,'$.status'));
-        CREATE INDEX IF NOT EXISTS object_group ON objects(kind,deleted,json_extract(body,'$.group_id'));
-        CREATE INDEX IF NOT EXISTS object_relative ON objects(kind,deleted,json_extract(body,'$.relative'));
-        CREATE INDEX IF NOT EXISTS object_token_hash ON objects(kind,deleted,json_extract(body,'$.token_hash'));
-        CREATE INDEX IF NOT EXISTS object_deleted_plan ON objects(json_extract(body,'$.deletion_plan_id')) WHERE deleted=1;
-        CREATE INDEX IF NOT EXISTS student_candidate_lookup ON objects(CAST(json_extract(body,'$.candidate_number') AS TEXT))
-            WHERE kind='students' AND deleted=0;
-        CREATE TRIGGER IF NOT EXISTS student_candidate_insert AFTER INSERT ON objects
-        WHEN NEW.kind='students' AND NEW.deleted=0 BEGIN
-            SELECT RAISE(ABORT,'duplicate student candidate number') WHERE EXISTS (
-                SELECT 1 FROM objects WHERE kind='students' AND deleted=0 AND id<>NEW.id
-                AND CAST(json_extract(body,'$.candidate_number') AS TEXT)=CAST(json_extract(NEW.body,'$.candidate_number') AS TEXT));
-        END;
-        CREATE TRIGGER IF NOT EXISTS student_candidate_update AFTER UPDATE OF body,deleted ON objects
-        WHEN NEW.kind='students' AND NEW.deleted=0 AND
-            (OLD.deleted<>0 OR json_extract(OLD.body,'$.candidate_number') IS NOT json_extract(NEW.body,'$.candidate_number')) BEGIN
-            SELECT RAISE(ABORT,'duplicate student candidate number') WHERE EXISTS (
-                SELECT 1 FROM objects WHERE kind='students' AND deleted=0 AND id<>NEW.id
-                AND CAST(json_extract(body,'$.candidate_number') AS TEXT)=CAST(json_extract(NEW.body,'$.candidate_number') AS TEXT));
-        END;
-        CREATE INDEX IF NOT EXISTS received_scan_pages ON objects(id) WHERE kind='pages' AND deleted=0 AND json_extract(body,'$.status')='received';
-        CREATE INDEX IF NOT EXISTS page_processing_jobs ON objects(json_extract(body,'$.payload.page_id'))
-            WHERE kind='jobs' AND deleted=0 AND json_extract(body,'$.kind')='process-page';
-        CREATE TABLE IF NOT EXISTS deletion_locks(project_id TEXT PRIMARY KEY,plan_id TEXT UNIQUE NOT NULL,created_at REAL NOT NULL);
-        CREATE TABLE IF NOT EXISTS deletion_files(plan_id TEXT NOT NULL,relative TEXT NOT NULL,sha256 TEXT NOT NULL,size INTEGER NOT NULL,remote_refs TEXT NOT NULL,done INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(plan_id,relative));
-        ''')
-        from .identifiers import initialize as initialize_identifiers
-        initialize_identifiers(db)
-        from .allocation import initialize_invalidation
-        initialize_invalidation(db)
-        initialize_scan_history(db)
-
-
-def initialize_scan_history(db):
-    exists="SELECT 1 FROM sqlite_master WHERE type='table' AND name='scanned_groups'"
-    if db.execute(exists).fetchone():
-        return
-    if not db.in_transaction:
-        db.execute('BEGIN IMMEDIATE')
-    if db.execute(exists).fetchone():
-        return
-    db.execute('CREATE TABLE IF NOT EXISTS scanned_groups(group_id TEXT PRIMARY KEY NOT NULL)')
-    # Earlier releases kept scan records as tombstones when their files were cleared.
-    db.execute("""INSERT OR IGNORE INTO scanned_groups
-        SELECT json_extract(body,'$.group_id') FROM objects WHERE kind='submissions'
-        UNION SELECT json_extract(b.body,'$.group_id') FROM objects p JOIN objects b
-        ON b.id=json_extract(p.body,'$.batch_id') AND b.kind='scan-batches' WHERE p.kind='pages'""")
-    db.execute("""CREATE TRIGGER IF NOT EXISTS mark_scanned_submission AFTER INSERT ON objects WHEN NEW.kind='submissions'
-        BEGIN INSERT OR IGNORE INTO scanned_groups VALUES(json_extract(NEW.body,'$.group_id')); END""")
-    db.execute("""CREATE TRIGGER IF NOT EXISTS mark_scanned_page AFTER INSERT ON objects WHEN NEW.kind='pages'
-        BEGIN INSERT OR IGNORE INTO scanned_groups SELECT json_extract(body,'$.group_id') FROM objects
-        WHERE kind='scan-batches' AND id=json_extract(NEW.body,'$.batch_id'); END""")
+        postgres_schema.initialize(db)
+        if (directory / 'omp.sqlite3').is_file():
+            migrated = db.execute("SELECT 1 FROM schema_migrations WHERE name='sqlite-import-v1'").fetchone()
+            if not migrated:
+                raise RuntimeError('数据目录包含旧库。请先用 server.database_transfer 将该库迁入目标 PostgreSQL 数据库。')
 
 
 def objects(db, kind):
-    return [json.loads(row['body']) for row in db.execute('SELECT body FROM objects WHERE kind=? AND deleted=0',(kind,))]
+    return [json.loads(row['body']) for row in db.execute('SELECT body FROM objects WHERE kind=? AND deleted=0 ORDER BY rowid',(kind,))]
 
 
 def find(db,kind,**filters):
@@ -156,11 +52,20 @@ def find(db,kind,**filters):
     for key,value in filters.items():
         if not re.fullmatch('[a-z_]+',key):raise ValueError('查询字段无效')
         clauses.append("json_extract(body,'$."+key+"')=?");parameters.append(value)
-    index='object_task_answer' if 'submission_id' in filters else 'object_task_user' if 'user_id' in filters else 'object_submission' if 'template_id' in filters else 'object_group' if 'group_id' in filters else 'object_kind'
-    return [json.loads(row['body']) for row in db.execute('SELECT body FROM objects INDEXED BY '+index+' WHERE '+' AND '.join(clauses),parameters)]
+    return [json.loads(row['body']) for row in db.execute('SELECT body FROM objects WHERE '+' AND '.join(clauses)+' ORDER BY rowid',parameters)]
 
 
 def get(db, identifier, kind=None):
+    # Grouped review operations share a write transaction. Cache only the
+    # reference rows those operations cannot change, keeping mutable return
+    # values independent for each caller.
+    cache = getattr(db, 'review_reference_rows', None)
+    if cache is not None and kind in ('grades', 'room-tags', 'groups'):
+        key = (identifier, kind)
+        if key not in cache:
+            row = db.execute('SELECT body FROM objects WHERE id=? AND kind=? AND deleted=0',key).fetchone()
+            cache[key] = row[0] if row else None
+        return json.loads(cache[key]) if cache[key] is not None else None
     row = db.execute('SELECT kind,body FROM objects WHERE id=? AND deleted=0',(identifier,)).fetchone()
     return json.loads(row['body']) if row and (kind is None or row['kind']==kind) else None
 

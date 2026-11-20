@@ -13,6 +13,7 @@ from PIL import Image
 import pytest
 from fastapi.testclient import TestClient
 from server import db,backups,recovery,jobs
+from server.postgres import open_connection
 from server.main import app
 
 
@@ -40,7 +41,9 @@ def seed(client,root):
     return account,headers,project,group,page,task
 
 
-def test_restore_released_scans_grades_and_audit_with_runtime_reset(tmp_path,monkeypatch):
+def test_restore_released_scans_grades_and_audit_with_runtime_reset(tmp_path,monkeypatch, pg_database_url):
+    restored_url = pg_database_url()
+    monkeypatch.setenv("OMP_RESTORE_DATABASE_URL", restored_url)
     source=tmp_path/'source';monkeypatch.setattr(db,'ROOT',source)
     with TestClient(app) as client:
         account,headers,project,group,page,task=seed(client,source)
@@ -56,15 +59,17 @@ def test_restore_released_scans_grades_and_audit_with_runtime_reset(tmp_path,mon
             device=db.put(connection,'scanner-devices',{'owner_id':client.get('/api/v1/auth/me',headers=headers).json()['id'],'revoked':False,'label':'设备','public_key':'public'})
             db.put(connection,'scanner-sessions',{'device_id':device['id'],'token_hash':'hash','expires_at':time.time()+900})
             plan=db.put(connection,'release-plans',{'project_id':project['id'],'status':'running','expires_at':time.time()+300,'lease_until':time.time()+300})
+        with db.connect() as snapshot:
+            original_audit = {r[0] for r in snapshot.execute('SELECT id FROM audit')}
         created=client.post('/api/v1/system/backup',headers=headers);assert created.status_code==200,created.text
-        backup=created.json();path=source/'backups'/(backup['id']+'.sqlite3');before=path.read_bytes()
-        with closing(sqlite3.connect(path)) as snapshot:original_audit={r[0] for r in snapshot.execute('SELECT id FROM audit')}
+        backup=created.json();path=source/'backups'/backup['filename'];before=path.read_bytes()
+
         target=tmp_path/'recovered'
         report=recovery.restore(path,target,source,backup['sha256'],reason='验证恢复')
         assert path.read_bytes()==before and db.ROOT==source
         assert report['files']['from_archive']==2 and report['files']['verified']==3
         assert (target/'pages'/(page['id']+'.image')).read_bytes()==(target/'pages'/(page['id']+'.png')).read_bytes()
-        with db.connect(target) as connection:
+        with closing(open_connection(restored_url)) as connection:
             assert connection.execute('SELECT score FROM scores').fetchone()[0]==800
             assert connection.execute('SELECT final_cents FROM review_results').fetchone()[0]==800
             assert connection.execute('SELECT COUNT(*) FROM sessions').fetchone()[0]==0
@@ -75,6 +80,7 @@ def test_restore_released_scans_grades_and_audit_with_runtime_reset(tmp_path,mon
             assert original_audit <= {r[0] for r in connection.execute('SELECT id FROM audit')}
         assert client.get('/api/v1/auth/me',headers=headers).status_code==200
     monkeypatch.setattr(db,'ROOT',target)
+    monkeypatch.setenv('OMP_DATABASE_URL',restored_url)
     with TestClient(app) as client:
         assert client.get('/api/v1/auth/me',headers=headers).status_code==401
         assert client.get(ticket).status_code==403
@@ -87,11 +93,13 @@ def test_restore_released_scans_grades_and_audit_with_runtime_reset(tmp_path,mon
         with db.connect() as connection:assert db.get(connection,pending['id'])['status']=='failed'
 
 
-def test_restore_rejects_overwrite_mismatch_missing_files_and_wrong_database(tmp_path,monkeypatch):
+def test_restore_rejects_overwrite_mismatch_missing_files_and_wrong_database(tmp_path,monkeypatch, pg_database_url):
+    restored_url = pg_database_url()
+    monkeypatch.setenv("OMP_RESTORE_DATABASE_URL", restored_url)
     root=tmp_path/'source';monkeypatch.setattr(db,'ROOT',root)
     with TestClient(app) as client:
         account,headers,project,group,page,task=seed(client,root)
-        record=client.post('/api/v1/system/backup',headers=headers).json();source=root/'backups'/(record['id']+'.sqlite3')
+        record=client.post('/api/v1/system/backup',headers=headers).json();source=root/'backups'/record['filename']
         existing=tmp_path/'existing';existing.mkdir();(existing/'keep').write_text('保留',encoding='utf-8')
         with pytest.raises(ValueError,match='不存在'):recovery.restore(source,existing,root)
         assert (existing/'keep').read_text(encoding='utf-8')=='保留'
@@ -106,7 +114,7 @@ def test_restore_rejects_overwrite_mismatch_missing_files_and_wrong_database(tmp
         assert report['files']['scope']=='database-only' and not (target/'pages').exists()
         wrong=tmp_path/'wrong.sqlite3'
         with sqlite3.connect(wrong) as connection:connection.execute('CREATE TABLE unrelated(id)')
-        with pytest.raises(ValueError,match='OMP'):recovery.restore(wrong,tmp_path/'invalid')
+        with pytest.raises(ValueError,match='OMP'):recovery.restore(wrong,tmp_path/'invalid',database_url=pg_database_url())
 
 
 def test_backup_download_is_admin_only_and_checks_registered_digest(tmp_path,monkeypatch):
@@ -123,24 +131,28 @@ def test_backup_download_is_admin_only_and_checks_registered_digest(tmp_path,mon
         token=client.post('/api/v1/auth/login',json=teacher).json()['token'];other={'Authorization':'Bearer '+token}
         assert client.get(record['download_url'],headers=other).status_code==403
         assert client.get('/api/v1/system/backups',headers=other).status_code==403
-        with (tmp_path/'backups'/(record['id']+'.sqlite3')).open('ab') as output:output.write(b'changed')
+        with (tmp_path/'backups'/record['filename']).open('ab') as output:output.write(b'changed')
         assert client.get(record['download_url'],headers=headers).status_code==409
 
 
-def test_recovery_module_cli_restores_to_new_directory(tmp_path,monkeypatch):
+def test_recovery_module_cli_restores_to_new_directory(tmp_path,monkeypatch, pg_database_url):
+    restored_url = pg_database_url()
+    monkeypatch.setenv("OMP_RESTORE_DATABASE_URL", restored_url)
     root=tmp_path/'source';monkeypatch.setattr(db,'ROOT',root)
     with TestClient(app) as client:
         account,headers,*_=seed(client,root)
         record=client.post('/api/v1/system/backup',headers=headers).json()
-    source=root/'backups'/(record['id']+'.sqlite3');target=tmp_path/'cli-recovery'
+    source=root/'backups'/record['filename'];target=tmp_path/'cli-recovery'
     process=subprocess.run([sys.executable,'-X','utf8','-m','server.recovery',str(source),'--target',str(target),'--database-only','--sha256',record['sha256']],cwd=Path(__file__).resolve().parents[1],capture_output=True,text=True,encoding='utf-8',timeout=20,creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess,'CREATE_NO_WINDOW') else 0)
     assert process.returncode==0,process.stderr
     report=json.loads(process.stdout)
     assert report['source_sha256']==record['sha256'] and report['files']['scope']=='database-only'
-    assert (target/'recovery-report.json').is_file() and backups.inspect(target/'omp.sqlite3')['scores']==1
+    assert (target/'recovery-report.json').is_file() and report['restored_counts']['scores']==1
 
 
-def test_restore_honors_completed_purge_and_checks_other_pages(tmp_path, monkeypatch):
+def test_restore_honors_completed_purge_and_checks_other_pages(tmp_path, monkeypatch, pg_database_url):
+    restored_url = pg_database_url()
+    monkeypatch.setenv("OMP_RESTORE_DATABASE_URL", restored_url)
     root = tmp_path / 'source'
     monkeypatch.setattr(db, 'ROOT', root)
     with TestClient(app) as client:
@@ -157,7 +169,7 @@ def test_restore_honors_completed_purge_and_checks_other_pages(tmp_path, monkeyp
             other = db.put(conn, 'pages', {'batch_id': batch['id'], 'status': 'received'})
         path = root / 'pages' / (other['id'] + '.image')
         backup = client.post('/api/v1/system/backup', headers=headers).json()
-    source = root / 'backups' / (backup['id'] + '.sqlite3')
+    source = root / 'backups' / backup['filename']
     with pytest.raises(ValueError, match=other['id']):
         recovery.restore(source, tmp_path / 'restored', root)
     path.write_bytes(b'other paper')
@@ -173,8 +185,8 @@ def test_manage_registered_and_external_backup_files(tmp_path, monkeypatch):
         _, headers, *_ = seed(client, tmp_path)
         backup = client.post('/api/v1/system/backup', headers=headers).json()
         directory = tmp_path / 'backups'
-        registered = directory / (backup['id'] + '.sqlite3')
-        external = directory / 'pre-release.sqlite3'
+        registered = directory / backup['filename']
+        external = directory / 'pre-release.ompdb'
         shutil.copyfile(registered, external)
         (directory / 'unfinished.tmp').touch()
         base = '/api/v1/system/backups'
