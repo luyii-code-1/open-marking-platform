@@ -86,7 +86,7 @@ def result_for(db,submission,question,scored_task=None):
         else:
             tasks.append(scored_task)
             tasks.sort(key=lambda task: task['created_at'])
-    return final_score([t['score_cents'] for t in tasks],question.get('review_mode','single'),question.get('threshold',0))
+    return final_score([t['score_cents'] for t in tasks],question.get('review_mode','single'),question.get('threshold',0),question.get('threshold_inclusive',True))
 
 
 @router.get('/tasks')

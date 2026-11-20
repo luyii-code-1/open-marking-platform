@@ -17,6 +17,7 @@ import {RecordSelect} from './RecordSelect'
 import {emptyResultFilters,withResultFilters,type ResultFilterValue} from './resultFilterParams'
 import {ClassResultSummary} from './ClassResultSummary'
 import './result-settings.css'
+import {ClassResults} from './ClassResults'
 
 const number=(value:unknown)=>value===null||value===undefined?'—':String(value)
 const statusName:Record<string,string>={absent:'缺考',pending:'待结分',completed:'已完成',unscanned:'未扫描'}
@@ -37,7 +38,11 @@ function rangeSummary(filters:ResultFilterValue,options:ResultFilterOptions){
   return [filters.groupIds.length?`${filters.groupIds.length} 张题卡`:'',classes.length?classes.length>2?`${classes.slice(0,2).join('、')}等 ${classes.length} 个班级`:classes.join('、'):'全部班级',filters.studentIds.length?`${filters.studentIds.length} 名指定学生`:'',filters.statuses.map(id=>options.statuses.find(row=>row.id===id)?.name||statusName[id]||id).join('、'),filters.q.trim()?`关键词：${filters.q.trim()}`:''].filter(Boolean).join(' · ')
 }
 
-export function Results({admin,groupId,projectId,projectOnly=false}:{admin:boolean;groupId?:string;projectId?:string;projectOnly?:boolean}) {
+export function Results(props:{admin:boolean;groupId?:string;projectId?:string;projectOnly?:boolean}){
+  return <Tabs destroyOnHidden items={[{key:'classes',label:'班级成绩',children:<ClassResults {...props}/>},{key:'analysis',label:'统计分析',children:<AdvancedResults {...props}/>} ]}/>
+}
+
+function AdvancedResults({admin,groupId,projectId,projectOnly=false}:{admin:boolean;groupId?:string;projectId?:string;projectOnly?:boolean}) {
   const groups=useResource<Row[]>('/groups',[]),projects=useResource<Row[]>('/projects',[]),subjects=useResource<Row[]>('/subjects',[])
   const [selectedGroupId,setGroup]=useState(groupId || ''),group=groupId || selectedGroupId,[selectedProject,setProject]=useState(projectId || ''),project=projectId || selectedProject,[metric,setMetric]=useState('raw'),[includeAbsent,setIncludeAbsent]=useState(false),[pass,setPass]=useState(60),[excellent,setExcellent]=useState(85),[cutoffs,setCutoffs]=useState({pass:60,excellent:85}),[view,setView]=useState('classes'),{message}=App.useApp()
   const [filters,setFilters]=useState(emptyResultFilters),[projectFilters,setProjectFilters]=useState(emptyResultFilters),[rankingClass,setRankingClass]=useState(''),[summaryClass,setSummaryClass]=useState(''),[projectTab,setProjectTab]=useState('cross')

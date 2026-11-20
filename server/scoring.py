@@ -24,13 +24,14 @@ def objective_score(selected, answer, maximum, rule=None):
     raise ValueError('不支持的评分规则')
 
 
-def final_score(values, mode='single', threshold=0):
+def final_score(values, mode='single', threshold=0, threshold_inclusive=True):
     if not values:
         return None
     if mode == 'single':
         return values[0]
     if len(values) < 2:
         return None
-    if abs(values[0]-values[1]) <= cents(threshold):
+    difference=abs(values[0]-values[1]);limit=cents(threshold)
+    if difference < limit or (threshold_inclusive and difference == limit):
         return int((Decimal(values[0]+values[1])/2).quantize(Decimal('1'),rounding=ROUND_HALF_UP))
     return values[2] if len(values)>2 else None

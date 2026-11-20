@@ -536,6 +536,8 @@ from .anomalies import router as anomalies_router
 app.include_router(anomalies_router)
 from .analysis import router as analysis_router
 app.include_router(analysis_router)
+from .result_reports import router as result_reports_router
+app.include_router(result_reports_router)
 from .roster import router as roster_router
 app.include_router(roster_router)
 from .release import router as release_router

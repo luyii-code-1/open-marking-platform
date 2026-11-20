@@ -43,8 +43,9 @@ def issues(template,complete=False,*,require_answers=True):
             if q.get('review_mode')=='double':
                 try:
                     threshold=cents(q.get('threshold',0))
-                    if threshold<0 or (points is not None and threshold>points):raise ValueError()
-                except (ValueError,TypeError,InvalidOperation,OverflowError):errors.append(label+'允许差值应在0至满分之间')
+                    inclusive=q.get('threshold_inclusive',True)
+                    if type(inclusive) is not bool or threshold<0 or (not inclusive and threshold==0) or (points is not None and threshold>points):raise ValueError()
+                except (ValueError,TypeError,InvalidOperation,OverflowError):errors.append(label+'最大分差应大于0且不超过满分；原有含边界规则可设0')
             if q.get('style','line') not in ('line','grid','rich','none'):errors.append(label+'答题区样式无效')
             if q.get('style','line')=='line' and 'lines' in q and (type(q['lines']) is not int or not 1<=q['lines']<=100):errors.append(label+'横线行数应为1至100')
             if q.get('style')=='grid':

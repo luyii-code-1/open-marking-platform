@@ -1,4 +1,5 @@
 import uuid
+import pytest
 from fastapi.testclient import TestClient
 from server import db
 from server.main import app
@@ -51,7 +52,8 @@ def test_review_batch_writability_and_legacy_submission_fallback(tmp_path,monkey
     assert isinstance(blocked,HTTPException) and blocked.status_code==409
 
 
-def test_double_review_arbitration_idempotency_and_freeze(tmp_path,monkeypatch):
+@pytest.mark.parametrize('exclusive,marks',[(False,(10,15,12)),(True,(10,12,12))])
+def test_double_review_arbitration_idempotency_and_freeze(tmp_path,monkeypatch,exclusive,marks):
     monkeypatch.setattr(db,'ROOT',tmp_path)
     with TestClient(app) as client:
         account={'username':'admin','password':'administrator-password','name':'管理员'}
@@ -65,14 +67,14 @@ def test_double_review_arbitration_idempotency_and_freeze(tmp_path,monkeypatch):
         qid=str(uuid.uuid4())
         with db.connect() as connection:
             group=db.put(connection,'groups',{'name':'组'})
-            template=db.put(connection,'templates',{'group_id':group['id'],'questions':[{'id':qid,'number':1,'type':'subjective','points':20,'review_mode':'double','threshold':2,'regions':[{'page':1,'x':10,'y':110,'width':100,'height':60}]}]})
+            template=db.put(connection,'templates',{'group_id':group['id'],'questions':[{'id':qid,'number':1,'type':'subjective','points':20,'review_mode':'double','threshold':2,**({'threshold_inclusive':False} if exclusive else {}),'regions':[{'page':1,'x':10,'y':110,'width':100,'height':60}]}]})
             group['template_id']=template['id'];db.put(connection,'groups',group)
             student=db.put(connection,'students',{'name':'学生','class_id':'class','candidate_number':'001'})
             db.put(connection,'submissions',{'group_id':group['id'],'template_id':template['id'],'student_id':student['id'],'candidate_number':'001','pages':[],'status':'ready'})
             db.put(connection,'assignments',{'template_id':template['id'],'question_id':qid,'user_ids':[t[0]['id'] for t in teachers]})
         claim={'template_id':template['id'],'question_id':qid}
         task_ids=[]
-        for index,amount in enumerate((10,15,12)):
+        for index,amount in enumerate(marks):
             headers=teachers[index][1]
             response=client.post('/api/v1/tasks/claim',json=claim,headers=headers)
             assert response.status_code==200,response.text
