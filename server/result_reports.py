@@ -218,7 +218,8 @@ def tables(data):
 
 def xlsx(data, selected='workbook'):
     from openpyxl import Workbook
-    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+    from openpyxl.styles import Alignment, Font
+    from .export_tables import TABLE_FONT, TABLE_BORDER
     from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
     from openpyxl.utils import get_column_letter
     reports=tables(data)
@@ -228,33 +229,50 @@ def xlsx(data, selected='workbook'):
         sheet=book.create_sheet(worksheet_name(report.name,taken));cols=leaves(report.columns);size=len(cols)
         sheet.sheet_view.showGridLines=False
         sheet.merge_cells(start_row=1,start_column=1,end_row=1,end_column=size)
-        sheet.cell(1,1,report.name+' · '+data['title']).font=Font(name='微软雅黑',size=14,bold=True)
-        sheet.cell(1,1).data_type='s';sheet.row_dimensions[1].height=28
+        sheet.cell(1,1,report.name+'（'+data['title'].replace(' · ',' ')+'）').font=TABLE_FONT
+        sheet.cell(1,1).alignment=Alignment(horizontal='center',vertical='center')
+        sheet.cell(1,1).data_type='s';sheet.row_dimensions[1].height=25
         at=1
         for column in report.columns:
             children=column.get('children')
             if children:
-                if len(children)>1:sheet.merge_cells(start_row=2,start_column=at,end_row=2,end_column=at+len(children)-1)
-                sheet.cell(2,at,column['title']).data_type='s'
-                for child in children:sheet.cell(3,at,child['title']).data_type='s';at+=1
+                printed=column['title'].replace('第','',1).replace('题（','（').replace('，合计','合计')
+                if len(children)==1:
+                    sheet.merge_cells(start_row=2,start_column=at,end_row=3,end_column=at)
+                    sheet.cell(2,at,printed).data_type='s';at+=1
+                else:
+                    sheet.merge_cells(start_row=2,start_column=at,end_row=2,end_column=at+len(children)-1)
+                    sheet.cell(2,at,printed).data_type='s'
+                    for child in children:sheet.cell(3,at,child['title'].replace('作答（答案','作答（').replace('（%）','%')).data_type='s';at+=1
             else:
                 sheet.merge_cells(start_row=2,start_column=at,end_row=3,end_column=at)
-                sheet.cell(2,at,column['title']).data_type='s';at+=1
+                sheet.cell(2,at,column['title'].replace('（%）','%')).data_type='s';at+=1
         for row in sheet.iter_rows(min_row=2,max_row=3,max_col=size):
             for cell in row:
-                cell.fill=PatternFill('solid',fgColor='E9EEF4');cell.font=Font(name='微软雅黑',size=10,bold=True,color='172B3A')
+                cell.font=TABLE_FONT
                 cell.alignment=Alignment(horizontal='center',vertical='center',wrap_text=True)
-                cell.border=Border(bottom=Side(style='thin',color='B8C5D1'))
-        for i,column in enumerate(cols,1):sheet.column_dimensions[get_column_letter(i)].width=column['width']
+                cell.border=TABLE_BORDER
+        for i,column in enumerate(cols,1):
+            key=column['key'];width=12 if key=='candidate_number' else 9
+            if key in ('class','band'):width=14
+            elif key=='question':width=20
+            elif column['title']=='累计比例（%）':width=10
+            elif report.name==REPORT_NAMES['items']:
+                if key.endswith('-answer'):width=12
+                elif column['width']==24:width=20
+            sheet.column_dimensions[get_column_letter(i)].width=width
         for r,record in enumerate(report.rows,4):
             for c,column in enumerate(cols,1):
                 value=record.get(column['key']);cell=sheet.cell(r,c,ILLEGAL_CHARACTERS_RE.sub('',value) if isinstance(value,str) else value)
+                if column['key']=='question' and isinstance(value,str):
+                    printed=re.sub(r'（[^）]*）$','',value).replace('第','',1).replace('题','')
+                    cell.value=printed+('（合计）' if '合计' in value else '')
                 if isinstance(value,str):cell.data_type='s';cell.number_format='@'
-                cell.font=Font(name='微软雅黑',size=10)
-                cell.alignment=Alignment(horizontal='right' if isinstance(value,(int,float)) else 'left',vertical='center')
+                cell.font=TABLE_FONT;cell.border=TABLE_BORDER
+                cell.alignment=Alignment(horizontal='center',vertical='center')
                 if isinstance(value,(int,float)):cell.number_format='0' if float(value).is_integer() else '0.00'
-            sheet.row_dimensions[r].height=21
-        sheet.row_dimensions[2].height=40;sheet.row_dimensions[3].height=28
+            sheet.row_dimensions[r].height=15
+        sheet.row_dimensions[2].height=18;sheet.row_dimensions[3].height=18
         sheet.freeze_panes=f'{get_column_letter(report.frozen_columns+1)}4'
         sheet.auto_filter.ref=f'A3:{get_column_letter(size)}{max(3,sheet.max_row)}' if report.name=='小题分' else None
         sheet.print_title_rows='1:3';sheet.sheet_properties.pageSetUpPr.fitToPage=True
@@ -263,11 +281,11 @@ def xlsx(data, selected='workbook'):
         sheet.print_title_cols=f'A:{get_column_letter(report.frozen_columns)}'
         sheet.sheet_properties.outlinePr.summaryRight=False
         if report.name in (REPORT_NAMES['averages'],REPORT_NAMES['questions']):
-            note_row=sheet.max_row+2
+            note_row=sheet.max_row+1
             sheet.merge_cells(start_row=note_row,start_column=1,end_row=note_row,end_column=size)
             note=sheet.cell(note_row,1,'小题统计按该题已评分的实考答卷计算；作答选率按实考作答人数计算。名次段和分数段仅统计已结分实考答卷。')
-            note.font=Font(name='微软雅黑',size=10,italic=True,color='526579');note.alignment=Alignment(vertical='center',wrap_text=True)
-            sheet.row_dimensions[note_row].height=28
+            note.font=Font(name='Arial',size=9,color='000000');note.alignment=Alignment(vertical='center',wrap_text=True)
+            sheet.row_dimensions[note_row].height=15
     output=io.BytesIO();book.save(output);return output.getvalue()
 
 

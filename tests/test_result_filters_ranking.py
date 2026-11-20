@@ -74,8 +74,8 @@ def test_filtered_analysis_permissions_and_ranked_workbook_exports(tmp_path,monk
         assert ranking.status_code==200
         sheet=load_workbook(io.BytesIO(ranking.content)).active
         assert sheet.freeze_panes=='A5' and sheet['A5'].value=='丙'
-        assert sheet['F5'].value==3 and sheet['A3'].fill.fgColor.rgb.endswith('23465F')
-        assert sheet['A5'].fill.fgColor.rgb.endswith('FFF2CC') and sheet['A5'].font.name=='微软雅黑'
+        assert sheet['F5'].value==3 and sheet['A3'].fill.patternType is None
+        assert sheet['A5'].fill.patternType is None and sheet['A5'].font.name=='Arial'
         project_params={'project_id':project['id'],'class_ids':classes[0]['id']}
         total=client.get('/api/v1/analysis/project/class-summary',params=project_params,headers=admin).json()
         by_name={row['name']:row for row in total['students']}
