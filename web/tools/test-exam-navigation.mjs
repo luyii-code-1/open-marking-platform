@@ -64,6 +64,7 @@ assert.deepEqual(readLocation('#/people'), {page:'people'})
 assert.deepEqual(readLocation('#/people/unknown'), {page:'people'})
 assert.deepEqual(readLocation('#/settings/devices'), {page:'settings',section:'devices'})
 assert.deepEqual(readLocation('#/settings/backups'), {page:'settings',section:'backups'})
+assert.deepEqual(readLocation('#/settings/http-guard'), {page:'settings',section:'http-guard'})
 assert.deepEqual(readLocation('#/settings'), {page:'settings'})
 assert.deepEqual(readLocation('#/settings/unknown'), {page:'settings'})
 

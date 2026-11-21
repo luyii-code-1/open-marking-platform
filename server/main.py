@@ -44,6 +44,10 @@ async def lifespan(app):
         recovery=threading.Thread(target=resume_local,daemon=True,name='omp-local-recovery');recovery.start()
     from .review_writes import ReviewWriter
     review_writer = ReviewWriter(database.ROOT, persistent=True)
+    from .http_guard import Guard
+    guard = Guard(database.ROOT)
+    await asyncio.to_thread(guard.start)
+    app.state.http_guard = guard
     try:yield {'review_writer': review_writer}
     finally:
         stop.set()
@@ -51,6 +55,7 @@ async def lifespan(app):
         await review_writer.close()
         await app.state.event_hub.stop()
         await asyncio.to_thread(app.state.request_journal.close)
+        await asyncio.to_thread(guard.close)
 
 
 app = FastAPI(title='Open Marking Platform',version='0.1.0',lifespan=lifespan)
@@ -58,6 +63,8 @@ from .paper_fonts import router as paper_fonts_router
 app.include_router(paper_fonts_router)
 from .request_log import RequestLogMiddleware
 app.add_middleware(RequestLogMiddleware)
+from .http_guard import HttpGuardMiddleware
+app.add_middleware(HttpGuardMiddleware)
 
 from .identifiers import InvalidIdentifier,IdentifierConflict,prepare_questions
 
@@ -597,6 +604,8 @@ from .exam_status import router as exam_status_router
 app.include_router(exam_status_router)
 from .selection_import import router as selection_import_router
 app.include_router(selection_import_router)
+from .http_guard_api import router as http_guard_router
+app.include_router(http_guard_router)
 
 web_distribution=Path(__file__).resolve().parents[1]/'web'/'dist'
 if web_distribution.exists():

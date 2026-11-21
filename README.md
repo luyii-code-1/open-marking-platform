@@ -11,7 +11,7 @@
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe -m uvicorn server.main:app --host 127.0.0.1 --port 8000 --no-access-log
+.\.venv\Scripts\python.exe -m uvicorn server.main:app --host 127.0.0.1 --port 8000 --no-proxy-headers --no-access-log
 ```
 
 首次启动通过 `/api/v1/auth/bootstrap` 创建管理员。账号、会话、成绩、任务和审计记录保存在 PostgreSQL。扫描文件、归档和备份文件保存在 `OMP_DATA`，默认目录为 `data/`。
@@ -84,6 +84,12 @@ docker exec -i omp-production-api-1 python - complete "$RELEASE_SHA" < deploy/da
 系统管理员在“系统设置 → 数据库备份”中独立控制每日自动备份。发布清理只针对部署工具生成的备份，管理员手动创建的备份、每日自动备份和迁移基线均由后台单独管理。
 
 管理员日志检索和任教成绩范围见 [操作日志](docs/操作日志.md)。
+
+系统管理员可在「系统设置 → HTTP 防护」查看请求趋势、来源 IP、地区和规则命中记录。默认使用观察模式，保留 60 天，可调整为 1 至 365 天。切换到拦截模式后，IP、CIDR 和地区规则返回 403，单 IP 超过每个 API 进程的分钟限额时返回 429。学校共用出口 IP 时可先在观察模式核对命中情况。
+
+防护日志和策略存于 `OMP_DATA/http-guard/traffic.sqlite3`，使用本机磁盘上的 SQLite WAL。API 通过有界队列批量写入，后台显示当前进程的丢弃计数。GeoIP 从管理页面下载并校验，按 IP 在本地查询国家或地区。[GeoIP 数据源](https://github.com/Loyalsoldier/geoip)
+
+独立运行 Uvicorn 时使用 `--no-proxy-headers` 保留 TCP 对端地址。Compose 默认信任 Caddy 服务 `proxy`。其他部署可在 API 环境变量 `OMP_HTTP_TRUSTED_PROXIES` 中列出专用反代的 IP、网段或服务名，以逗号分隔。直连部署将此变量留空。
 
 赋分分段、外部对照表导入及修订发布见 [赋分方案](docs/赋分方案.md)。
 

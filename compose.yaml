@@ -23,6 +23,7 @@ services:
       OMP_DATABASE_URL: *postgres-url
       OMP_TASK_MODE: celery
       OMP_REDIS_URL: redis://redis:6379/0
+      OMP_HTTP_TRUSTED_PROXIES: ${OMP_HTTP_TRUSTED_PROXIES-proxy}
     volumes:
       - ${OMP_HOST_DATA:-./data}:/data
     depends_on:

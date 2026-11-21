@@ -97,7 +97,7 @@ export function readLocation(hash: string): Location {
         ? { ...project, templateId: parts[4], questionId: parts[5] } : project
     }
     if (page==='people' && ['users','grades','classes','teaching','students'].includes(parts[1])) return {page,section:parts[1]}
-    if (page==='settings' && ['login','devices','storage','backups','audit'].includes(parts[1])) return {page,section:parts[1]}
+    if (page==='settings' && ['login','devices','storage','backups','http-guard','audit'].includes(parts[1])) return {page,section:parts[1]}
     if (page !== 'exams') return { page }
     if (!parts[1]) return { page }
     const location: Location = { page, projectId: parts[1] }
