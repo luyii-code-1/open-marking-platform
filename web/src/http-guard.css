@@ -47,3 +47,30 @@
 @media (max-width: 850px) {
   .http-guard-rankings, .http-guard-fields { grid-template-columns: minmax(0, 1fr); }
 }
+.guard-workspace { min-height: 100dvh; display: grid; grid-template-columns: 216px minmax(0, 1fr); background: #f5f7fa; }
+.guard-rail { padding: 22px 14px 18px; display: flex; flex-direction: column; gap: 24px; position: sticky; top: 0; height: 100dvh; color: #e0e7f0; background: #192738; }
+.guard-identity { display: flex; gap: 10px; align-items: center; padding: 3px 8px; font-size: 16px; color: #fff; }
+.guard-identity > .anticon { font-size: 23px; }
+.guard-rail nav { display: grid; gap: 4px; }
+.guard-rail a, .guard-return { min-height: 40px; display: flex; align-items: center; gap: 12px; padding: 8px 11px; color: inherit; border-radius: 4px; }
+.guard-rail a { text-decoration: none; }
+.guard-rail a:hover, .guard-return:hover { color: white; background: #293c52; }
+.guard-rail a[aria-current="page"] { color: #fff; background: #304b69; box-shadow: inset 3px 0 #7cb8ff; font-weight: 600; }
+.guard-return { width: 100%; background: transparent; border: 0; cursor: pointer; text-align: left; margin-top: auto; }
+.guard-main { min-width: 0; padding: 22px clamp(12px, 2.4vw, 36px) 40px; }
+.guard-header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 20px; }
+.guard-header h1 { margin: 0; font-size: 24px; line-height: 1.4; }
+.guard-primary-metrics { margin-bottom: 14px !important; }
+.guard-primary-metrics dd { font-size: 30px !important; }
+.guard-ip-preview { display: flex; flex-wrap: wrap; gap: 4px; max-height: 150px; overflow-y: auto; }
+.guard-control { display: flex; gap: 16px; align-items: center; }
+.guard-control .ant-select { min-width: 110px; }
+@media (max-width: 800px) {
+  .guard-workspace { display: block; }
+  .guard-rail { position: static; height: auto; padding: 12px; gap: 10px; display: grid; grid-template-columns: 1fr auto; }
+  .guard-rail nav { grid-column: 1 / -1; grid-row: 2; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .guard-rail a { justify-content: center; gap: 6px; padding: 5px 2px; }
+  .guard-return { margin: 0; min-height: 32px; }
+  .guard-main { padding-top: 14px; }
+}
+@media (max-width: 420px) { .guard-rail nav .anticon { display: none; } }

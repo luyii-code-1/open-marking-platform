@@ -4,7 +4,7 @@ import secrets
 import time
 from fastapi import APIRouter,Depends,HTTPException,Header,Request
 from .db import connect,find,put
-from .dependencies import user,require,password_hash
+from .dependencies import user,require,password_hash,set_request_actor
 from .browser_sessions import issue,digest,SESSION_SECONDS
 from pydantic import BaseModel,Field
 
@@ -106,5 +106,5 @@ def recovery_reset(body:dict,request:Request=None):
         db.execute('UPDATE users SET password=? WHERE id=?',(password_hash(new),row['id']))
         db.execute('DELETE FROM sessions WHERE user_id=?',(row['id'],))
         put(db,'account-events',{'user_id':row['id'],'action':'password_reset','method':'recovery_code'},row['id'])
-        if request is not None:request.state.actor=row['id']
+        set_request_actor(request, dict(row))
         return {'status':'reset'}

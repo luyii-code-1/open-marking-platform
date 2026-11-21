@@ -77,7 +77,7 @@ async def conflicting_identifier(request,error):
     return JSONResponse(status_code=409,content={'detail':str(error)})
 
 
-from .dependencies import password_hash,user,admin,scan_user,scan_admin,require,scan_batch
+from .dependencies import password_hash,user,admin,scan_user,scan_admin,require,scan_batch,set_request_actor
 
 
 @app.get('/api/v1/system/build')
@@ -116,7 +116,7 @@ def bootstrap(body: Account,request:Request=None):
         identifier=str(uuid4())
         db.execute('INSERT INTO users VALUES(?,?,?,?,?)',(identifier,body.username,body.name,'admin',password_hash(body.password)))
         put(db,'account-events',{'user_id':identifier,'action':'bootstrap','username':body.username,'name':body.name,'role':'admin'},identifier)
-    if request is not None:request.state.actor=identifier
+    set_request_actor(request, {'id':identifier,'username':body.username,'role':'admin'})
     return {'status':'created'}
 
 
@@ -131,7 +131,7 @@ def login(body: Login,request:Request=None):
         if body.portal=='admin' and row['role'] not in ('admin','manager'):raise HTTPException(403,'此账号没有管理后台权限，请使用阅卷台入口')
         from .accounts import session
         value=session(db,dict(row),'password')
-        if request is not None:request.state.actor=row['id']
+        set_request_actor(request, dict(row))
         return value
 
 
@@ -606,6 +606,8 @@ from .selection_import import router as selection_import_router
 app.include_router(selection_import_router)
 from .http_guard_api import router as http_guard_router
 app.include_router(http_guard_router)
+from .http_guard_analytics import router as http_analytics_router
+app.include_router(http_analytics_router)
 
 web_distribution=Path(__file__).resolve().parents[1]/'web'/'dist'
 if web_distribution.exists():

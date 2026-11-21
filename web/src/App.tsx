@@ -3,7 +3,7 @@ import { SessionActivity } from './SessionActivity'
 import { Button } from './Button'
 import { Brand } from './Brand'
 import { ScannerDesk } from './ScannerDesk'
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { Alert, Avatar, Card, Empty, Layout, Menu, Space, Spin, Statistic, Tag, Typography } from 'antd'
 import { ScanOutlined, ApartmentOutlined, AuditOutlined, BookOutlined, FileSearchOutlined, LogoutOutlined, ReadOutlined, SettingOutlined, TeamOutlined, MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons'
 import { ApiError, clearSession, currentSession, currentToken, request, updateSession, watchSession, useResource, type AuthSession, type User } from './api'
@@ -13,7 +13,8 @@ import { Exams } from './Exams'
 import { useNavigation, confirmLeaving } from './useNavigation'
 import { Marking } from './Marking'
 import { ReviewTasks } from './ReviewTasks'
-import {markingPath, readLocation, setExamContextOwner} from './examNavigation'
+import {guardView, markingPath, readLocation, setExamContextOwner} from './examNavigation'
+import { usePageViews } from './usePageViews'
 import type {ProjectFilter} from './reviewProjects'
 import { Account } from './Account'
 import { RealtimeStatus } from './RealtimeStatus'
@@ -23,6 +24,7 @@ import { ReviewWorkspace } from './ReviewWorkspace'
 import { cachedReviewUser, rememberReviewUser, settleReviewWrites } from './reviewStore'
 
 const { Text, Title } = Typography
+const HttpGuard = lazy(() => import('./HttpGuard'))
 export function App() {
   const [user, setUser] = useState<User | null>(null), [checking, setChecking] = useState(true), [collapsed, setCollapsed] = useState(false), [portal,setPortal] = useState<Portal>(()=>sessionStorage.getItem('omp-portal')==='marking'?'marking':'admin')
   const [offlineAccess,setOfflineAccess]=useState(false),[authToken,setAuthToken]=useState(currentToken),[verifiedToken,setVerifiedToken]=useState('')
@@ -64,10 +66,24 @@ export function App() {
       setPortal(next);sessionStorage.setItem('omp-portal',next);navigate(next==='admin'?'#/scanner':'#/marking',true)
     }
   },[user,offlineAccess,location.page,location.section,portal])
-  if (checking||user&&verifiedToken!==authToken) return <div className="screen-center"><Spin size="large" /></div>
-  if (!user) return <Login portal={location.page==='login' && (location.section==='admin'||location.section==='marking')?location.section:undefined} onPortal={value=>navigate(value?'#/login/'+value:'#/')} onLogin={(person,selected)=>{const next:Portal=person.role==='admin'?'admin':selected;setPortal(next);sessionStorage.setItem('omp-portal',next);acceptUser(person,currentToken());navigate(next==='admin'?'#/scanner':'#/marking',true)}} />
-  const admin = ['admin','manager'].includes(user.role), management = admin && (user.role==='admin'||portal==='admin')&&!offlineAccess
-  const page = management&&location.page==='marking'?'scanner':offlineAccess?'marking':location.page==='settings'&&user.role==='manager'?'scanner':management || ['dashboard','marking','results','account'].includes(location.page) ? location.page : 'dashboard'
+  const guardPage = location.page === 'http-guard'
+  const loginPortal = guardPage ? 'admin' : location.page === 'login' && (location.section === 'admin' || location.section === 'marking') ? location.section : undefined
+  const admin = user?.role==='admin'||user?.role==='manager', management = admin && (user.role==='admin'||portal==='admin')&&!offlineAccess
+  const page = management&&location.page==='marking'?'scanner':offlineAccess?'marking':location.page==='settings'&&user?.role==='manager'?'scanner':management || ['dashboard','marking','results','account'].includes(location.page) ? location.page : 'dashboard'
+  const waiting = checking || !!user && verifiedToken !== authToken
+  const displayed = !user ? (loginPortal ? 'login/' + loginPortal : 'login')
+    : guardPage ? (user.role === 'admin' && !offlineAccess ? 'http-guard/' + guardView(location.section) : null)
+    : page === 'login' ? null : page
+  usePageViews(waiting ? null : displayed, window.location.hash)
+  if (waiting) return <div className="screen-center"><Spin size="large" /></div>
+  if (!user) return <Login portal={loginPortal} onPortal={value=>navigate(value?'#/login/'+value:'#/')} onLogin={(person,selected)=>{const next:Portal=person.role==='admin'?'admin':selected;setPortal(next);sessionStorage.setItem('omp-portal',next);acceptUser(person,currentToken());navigate(guardPage?'#/http-guard/'+guardView(location.section):next==='admin'?'#/scanner':'#/marking',true)}} />
+  if (guardPage) {
+    if (user.role !== 'admin' || offlineAccess) return <main className="screen-center"><Alert type="warning" showIcon message="仅系统管理员可访问 HTTP 防护工作台" action={<Button onClick={() => setPage(management ? 'scanner' : 'marking')}>返回工作台</Button>} /></main>
+    return <><SessionActivity token={authToken}/><RealtimeStatus key={authToken} user={user} onProfile={acceptUser} onExpired={endSession}/>
+      <Suspense fallback={<div className="screen-center"><Spin size="large" /></div>}>
+        <HttpGuard view={guardView(location.section)} onView={view => navigate('#/http-guard/' + view)} onExit={() => setPage('scanner')} account={user.name} />
+      </Suspense></>
+  }
   const items = [
     { key: 'dashboard', icon: <ApartmentOutlined />, label: '工作概览' },
     { type: 'group' as const, key: 'work', label: '考试工作', children: [
@@ -80,7 +96,7 @@ export function App() {
     ...(management ? [{ type: 'group' as const, key: 'management', label: '基础管理', children: [
       { key: 'people', icon: <TeamOutlined />, label: '人员与班级' },
       { key: 'archives', icon: <BookOutlined />, label: '归档文件' },
-      ...(user.role==='admin'?[{ key: 'settings', icon: <SettingOutlined />, label: '系统设置' }]:[]),
+      ...(user.role==='admin'?[{ key: 'http-guard', icon: <AuditOutlined />, label: 'HTTP 防护' },{ key: 'settings', icon: <SettingOutlined />, label: '系统设置' }]:[]),
     ] }] : []),
     { key: 'account', icon: <SettingOutlined />, label: '个人账号' },
   ]

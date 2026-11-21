@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.16)
+project(omp_injection LANGUAGES C)
+add_library(omp_injection SHARED libinjection_sqli.c libinjection_html5.c libinjection_xss.c)
+set_target_properties(omp_injection PROPERTIES C_STANDARD 99 WINDOWS_EXPORT_ALL_SYMBOLS ON)
+install(TARGETS omp_injection RUNTIME DESTINATION . LIBRARY DESTINATION .)
+install(FILES COPYING DESTINATION . RENAME libinjection-LICENSE.txt)

@@ -60,7 +60,12 @@ export function markingPath(projectId?: string, templateId?: string, questionId?
   if (templateId && questionId) path += '/review/' + encodeURIComponent(templateId) + '/' + encodeURIComponent(questionId)
   return path
 }
-const pages = new Set(['dashboard', 'scanner', 'subject-catalog', 'electives', 'exams', 'marking', 'exceptions', 'results', 'people', 'conversions', 'settings', 'account', 'login', 'archives'])
+const pages = new Set(['dashboard', 'scanner', 'subject-catalog', 'electives', 'exams', 'marking', 'exceptions', 'results', 'people', 'conversions', 'settings', 'account', 'login', 'archives', 'http-guard'])
+export const guardViews = ['overview', 'events', 'policies', 'performance'] as const
+export type GuardView = typeof guardViews[number]
+export function guardView(section?: string): GuardView {
+  return guardViews.find(view => view === section) ?? 'overview'
+}
 
 export function examPath(location: ExamLocation = {}) {
   const { projectId, subjectId, gradeId,groupId, section } = location
@@ -97,7 +102,9 @@ export function readLocation(hash: string): Location {
         ? { ...project, templateId: parts[4], questionId: parts[5] } : project
     }
     if (page==='people' && ['users','grades','classes','teaching','students'].includes(parts[1])) return {page,section:parts[1]}
-    if (page==='settings' && ['login','devices','storage','backups','http-guard','audit'].includes(parts[1])) return {page,section:parts[1]}
+    if (page==='http-guard') return {page,section:guardView(parts[1])}
+    if (page==='settings' && parts[1]==='http-guard') return {page:'http-guard',section:'overview'}
+    if (page==='settings' && ['login','devices','storage','backups','audit'].includes(parts[1])) return {page,section:parts[1]}
     if (page !== 'exams') return { page }
     if (!parts[1]) return { page }
     const location: Location = { page, projectId: parts[1] }

@@ -14,6 +14,7 @@ import time
 from starlette.responses import JSONResponse
 
 from .http_geoip import GeoIP
+from .http_guard_inspection import inspect_request
 from .http_guard_store import DEFAULT_SETTINGS, GuardStore
 
 
@@ -51,6 +52,22 @@ def validate_settings(settings):
     result = {key: settings.get(key, default) for key, default in DEFAULT_SETTINGS.items()}
     if result['mode'] not in ('off', 'observe', 'enforce'):
         raise ValueError('请选择有效的防护模式')
+    for key in ('sqli_mode', 'xss_mode'):
+        if result[key] not in ('off', 'observe', 'enforce'):
+            raise ValueError('请选择有效的内容检测模式')
+    managed = result['managed_ips']
+    if not isinstance(managed, list) or len(managed) > 512:
+        raise ValueError('精确 IP 策略最多可保留 512 项')
+    exact = {}
+    for item in managed:
+        if (not isinstance(item, dict) or item.get('action') not in ('allow', 'deny')
+                or type(item.get('expires')) is not int or item['expires'] < 0):
+            raise ValueError('精确 IP 策略无效')
+        address = _address(item.get('ip'))
+        if address is None:
+            raise ValueError('精确 IP 策略包含无效地址')
+        exact[str(address)] = {'ip': str(address), 'action': item['action'], 'expires': item['expires']}
+    result['managed_ips'] = list(exact.values())
     for key, low, high in [('retention_days', 1, 365), ('rate_per_minute', 0, 1000000)]:
         if type(result[key]) is not int or not low <= result[key] <= high:
             raise ValueError(f'{key} 需要介于 {low} 和 {high} 之间的整数')
@@ -109,6 +126,9 @@ class Policy:
     deny_countries: frozenset
     rate_per_minute: int
     block_sensitive_paths: bool
+    sqli_mode: str
+    xss_mode: str
+    managed_ips: dict
 
     @classmethod
     def compile(cls, settings):
@@ -117,12 +137,16 @@ class Policy:
             values[key] = Networks(_network(item) for item in values[key])
         for key in ('allow_countries', 'deny_countries'):
             values[key] = frozenset(values[key])
+        values['managed_ips'] = {ip_address(row['ip']): row for row in values['managed_ips']}
         return cls(**values)
 
     def source(self, address, country):
-        if self.allow_ips.contains(address):
+        exact = self.managed_ips.get(address)
+        if exact and exact['expires'] and exact['expires'] <= time.time():
+            exact = None
+        if self.allow_ips.contains(address) or (exact and exact['action'] == 'allow'):
             return '', True
-        if self.deny_ips.contains(address):
+        if self.deny_ips.contains(address) or (exact and exact['action'] == 'deny'):
             return 'deny_ip', False
         if country in self.deny_countries:
             return 'deny_country', False
@@ -351,6 +375,11 @@ class HttpGuardMiddleware:
             if blocked:
                 return await send({'type': 'websocket.close', 'code': 1008})
             return await self.app(scope, receive, send)
+        if not reason and (policy.sqli_mode != 'off' or policy.xss_mode != 'off'):
+            reason, receive = await inspect_request(scope, receive, policy)
+            if reason:
+                mode = policy.sqli_mode if reason == 'sqli' else policy.xss_mode
+                blocked = policy.mode == 'enforce' and mode == 'enforce'
         status = 500
         bytes_out = 0
         content_length = 0
@@ -372,7 +401,7 @@ class HttpGuardMiddleware:
         try:
             if blocked:
                 code = 429 if reason == 'rate_limit' else 403
-                response = JSONResponse({'detail': '请求过于频繁' if code == 429 else '来源或访问路径受限'},
+                response = JSONResponse({'detail': '请求过于频繁' if code == 429 else '请求被防护策略拦截'},
                                         status_code=code, headers={'Cache-Control': 'no-store'})
                 return await response(scope, receive, send_counted)
             return await self.app(scope, receive, send_counted)
@@ -380,8 +409,10 @@ class HttpGuardMiddleware:
             # A route template never includes arbitrary submitted paths, query
             # strings or the archive download ticket occupying a path segment.
             route = getattr(scope.get('route'), 'path', None) or ('<blocked>' if blocked else '<unmatched>')
+            state = scope.get('state', {})
             guard.offer({'ts': time.time(), 'ip': ip, 'country': country,
                          'method': scope['method'][:16], 'route': route[:256],
                          'status': status, 'duration_ms': round((time.monotonic() - started) * 1000, 2),
                          'bytes_out': bytes_out, 'decision': 'blocked' if blocked else 'observed' if reason else 'pass',
-                         'reason': reason})
+                         'reason': reason, 'actor': state.get('actor') or '',
+                         'actor_label': state.get('actor_label') or '', 'actor_kind': state.get('actor_kind') or ''})

@@ -9,7 +9,7 @@ from cryptography.hazmat.primitives import serialization,hashes
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.exceptions import InvalidSignature,UnsupportedAlgorithm
 from .db import connect,find,get,objects,put
-from .dependencies import admin,system_admin,user,require,password_hash
+from .dependencies import admin,system_admin,user,require,password_hash,set_request_actor
 
 router=APIRouter(prefix='/api/v1/scanner')
 
@@ -119,7 +119,7 @@ def authenticate(body:dict,request:Request=None):
         db.execute('BEGIN IMMEDIATE');device=active(db,device['id'])
         put(db,'scanner-sessions',{'device_id':device['id'],'token_hash':hashlib.sha256(token.encode()).hexdigest(),'expires_at':time.time()+900},device['id'])
         device['last_authenticated_at']=time.time();put(db,'scanner-devices',device,device['id'])
-    if request is not None:request.state.actor=device['id']
+    set_request_actor(request, {'id':device['id'],'role':'scanner','name':device.get('label','')})
     return {'token':token,'expires_in':900,'device':public(device)}
 
 
@@ -134,4 +134,5 @@ def scan_user(authorization):
         if not sessions or sessions[0]['expires_at']<time.time():raise HTTPException(401,'设备连接已过期，请重新连接')
         device=active(db,sessions[0]['device_id'])
         if sessions[0].get('revoked'):raise HTTPException(401,'旧设备连接已失效，请重新连接')
-        return {'id':device['id'],'role':'scanner','device_id':device['id'],'owner_id':device['owner_id']}
+        return {'id':device['id'],'role':'scanner','name':device.get('label',''),
+                'device_id':device['id'],'owner_id':device['owner_id']}

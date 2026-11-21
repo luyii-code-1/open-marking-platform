@@ -7,7 +7,7 @@ from webauthn import generate_registration_options,generate_authentication_optio
 from webauthn.helpers import bytes_to_base64url,base64url_to_bytes,options_to_json
 from webauthn.helpers.structs import PublicKeyCredentialDescriptor,AuthenticatorSelectionCriteria,UserVerificationRequirement,ResidentKeyRequirement
 from .db import connect,find,put
-from .dependencies import user,require
+from .dependencies import user,require,set_request_actor
 from .accounts import session,verify_password
 
 router=APIRouter(prefix='/api/v1/auth/passkeys')
@@ -90,7 +90,7 @@ def login_verify(body:dict,request:Request=None):
         item['used']=True;put(db,'auth-challenge',item,item['user_id'])
         person=db.execute('SELECT id,username,name,role FROM users WHERE id=?',(item['user_id'],)).fetchone()
         if item.get('portal')=='admin' and person['role'] not in ('admin','manager'):raise HTTPException(403,'此账号没有管理后台权限，请使用阅卷台入口')
-        if request is not None:request.state.actor=person['id']
+        set_request_actor(request, dict(person))
         return session(db,dict(person),'passkey')
 
 

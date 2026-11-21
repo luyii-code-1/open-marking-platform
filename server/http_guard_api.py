@@ -7,7 +7,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .dependencies import system_admin
 from .http_geoip import UpdateInProgress
-from .http_guard import validate_settings
+from . import http_guard_policy
+from .http_guard_inspection import engine_status
 from .http_guard_store import BUCKET_SECONDS, RevisionConflict
 
 
@@ -19,11 +20,12 @@ def guard_service(request: Request, response: Response):
 router = APIRouter(prefix='/api/v1/system/http-guard', dependencies=[Depends(system_admin)])
 Service = Annotated[object, Depends(guard_service)]
 Rules = Annotated[list[Annotated[str, Field(max_length=100)]], Field(max_length=512)]
+Mode = Literal['off', 'observe', 'enforce']
 
 
 class Settings(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
-    mode: Literal['off', 'observe', 'enforce']
+    mode: Mode
     revision: int = Field(ge=1, le=2**63 - 2)
     retention_days: int = Field(ge=1, le=365)
     rate_per_minute: int = Field(ge=0, le=1_000_000)
@@ -32,6 +34,23 @@ class Settings(BaseModel):
     deny_ips: Rules
     allow_countries: Rules
     deny_countries: Rules
+    sqli_mode: Mode | None = None
+    xss_mode: Mode | None = None
+    managed_ips: list[dict] | None = Field(None, max_length=512, exclude=True)
+
+
+class EventPolicy(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+    revision: int = Field(ge=1, le=2**63 - 2)
+    event_ids: list[Annotated[int, Field(ge=1, le=2**63 - 1)]] = Field(min_length=1, max_length=200)
+    action: Literal['allow', 'deny']
+    ttl_hours: Literal[0, 1, 24, 168] = 24
+
+
+class RemovePolicy(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+    revision: int = Field(ge=1, le=2**63 - 2)
+    ip: str = Field(min_length=2, max_length=45)
 
 
 def window(hours: int = 24):
@@ -45,37 +64,46 @@ def storage_call(fn, *args):
         return fn(*args)
     except (OSError, sqlite3.Error) as error:
         raise HTTPException(503, 'HTTP 防护数据库暂时不可用') from error
+    except RevisionConflict as error:
+        raise HTTPException(409, '策略已由其他管理员更新，请刷新后再提交') from error
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error
 
 
 @router.get('/settings')
 def settings(guard: Service):
-    return storage_call(guard.store.settings)
+    return http_guard_policy.current_policy(storage_call(guard.store.settings))
 
 
 @router.put('/settings')
-def save_settings(body: Settings, request: Request, guard: Service):
-    try:
-        policy = validate_settings(body.model_dump(exclude={'revision'}))
-    except ValueError as error:
-        raise HTTPException(422, str(error)) from error
-    if policy['mode'] == 'enforce':
-        if (policy['allow_countries'] or policy['deny_countries']) and not guard.geo.status()['ready']:
-            raise HTTPException(422, '启用地区拦截前，请先下载 GeoIP 数据库')
-        if guard.source_reason(policy, guard.client_ip(request.scope)):
-            raise HTTPException(422, '这组规则会拦截你当前的来源 IP，请先调整来源规则')
-    try:
-        result = storage_call(guard.store.save_settings, policy, body.revision)
-    except RevisionConflict as error:
-        raise HTTPException(409, '设置已由其他管理员更新，请重新加载后再保存') from error
-    storage_call(guard.reload)
-    return result
+def save_settings(body: Settings, request: Request, guard: Service, admin=Depends(system_admin)):
+    return storage_call(http_guard_policy.save, guard, body.revision, admin['username'],
+                        body.model_dump(exclude={'revision'}, exclude_none=True),
+                        guard.client_ip(request.scope), engine_status()['ready'])
+
+
+@router.post('/event-policy')
+def event_policy(body: EventPolicy, request: Request, guard: Service, admin=Depends(system_admin)):
+    return storage_call(http_guard_policy.add_from_events, guard, body.revision, admin['username'],
+                        body.event_ids, body.action, body.ttl_hours, guard.client_ip(request.scope))
+
+
+@router.post('/remove-policy')
+def remove_policy(body: RemovePolicy, request: Request, guard: Service, admin=Depends(system_admin)):
+    return storage_call(http_guard_policy.remove, guard, body.revision, admin['username'], body.ip,
+                        guard.client_ip(request.scope))
+
+
+@router.get('/policy-history')
+def policy_history(guard: Service):
+    return storage_call(http_guard_policy.history, guard.store)
 
 
 @router.get('/status')
 def status(request: Request, guard: Service):
     ip = guard.client_ip(request.scope)
     state = guard.status()
-    return {'client_ip': ip, 'geo': guard.geo.status(),
+    return {'client_ip': ip, 'geo': guard.geo.status(), 'engine': engine_status(),
             'runtime': {'queued': state['queued'], 'dropped': state['dropped'],
                         'write_errors': state['writer_errors'], 'settings_errors': state['settings_errors']}}
 
@@ -98,6 +126,8 @@ def overview(guard: Service, hours: int = Depends(window)):
 @router.get('/events')
 def events(guard: Service, hours: int = Depends(window), ip: str = Query('', max_length=64),
            decision: Literal['', 'pass', 'observed', 'blocked'] = '',
+           actor: str = Query('', max_length=160), reason: str = Query('', max_length=40),
+           status_group: int | None = Query(None, ge=2, le=5),
            before: int | None = Query(None, ge=1, le=2**63 - 1), limit: int = Query(50, ge=1, le=200)):
     if ip:
         try:
@@ -105,4 +135,4 @@ def events(guard: Service, hours: int = Depends(window), ip: str = Query('', max
             ip = str(address.ipv4_mapped or address) if isinstance(address, IPv6Address) else str(address)
         except ValueError as error:
             raise HTTPException(422, '请输入完整的 IPv4 或 IPv6 地址') from error
-    return storage_call(guard.store.events, hours, ip, decision, before, limit)
+    return storage_call(guard.store.events, hours, ip, decision, before, limit, actor.strip(), reason, status_group)

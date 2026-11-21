@@ -12,14 +12,22 @@ def password_hash(password, salt=None):
     return salt + ':' + hashlib.scrypt(password.encode(),salt=salt.encode(),n=16384,r=8,p=1).hex()
 
 
+def set_request_actor(request, person):
+    if request is not None:
+        request.state.actor = person['id']
+        request.state.actor_label = (person.get('username') or person.get('name') or '')[:160]
+        request.state.actor_kind = 'device' if person.get('role') == 'scanner' else 'user'
+
+
 def authenticate_session(db, authorization, request=None):
     if not authorization or not authorization.startswith('Bearer '):
         raise HTTPException(401,'请先登录')
     row=db.execute('SELECT u.id,u.username,u.name,u.role FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=? AND s.expires>?',(hashlib.sha256(authorization[7:].encode()).hexdigest(),time.time())).fetchone()
     if row is None:
         raise HTTPException(401,'登录已过期')
-    if request is not None:request.state.actor=row['id']
-    return dict(row)
+    person = dict(row)
+    set_request_actor(request, person)
+    return person
 
 
 def user(authorization: Annotated[str | None, Header()] = None,request:Request=None):
@@ -46,7 +54,7 @@ def system_admin(current=Depends(user)):
 def scan_user(authorization:Annotated[str|None,Header()]=None,request:Request=None):
     from .scanner_auth import scan_user as authenticate
     current=authenticate(authorization)
-    if request is not None:request.state.actor=current['id']
+    set_request_actor(request, current)
     return current
 
 

@@ -106,6 +106,32 @@ def test_local_readiness_and_bounded_writer(tmp_path, monkeypatch):
     assert guard.status()['dropped'] == 2 and guard.status()['writer_errors'] == 1
 
 
+def test_content_action_follows_global_and_category_modes(tmp_path, monkeypatch):
+    # Exercise the decision path independently of the platform's native library build.
+    async def matched(scope, receive, policy):
+        return 'sqli', receive
+    monkeypatch.setattr('server.http_guard.inspect_request', matched)
+    guard = Guard(tmp_path)
+    app = FastAPI()
+    app.state.http_guard = guard
+    app.add_middleware(HttpGuardMiddleware)
+
+    @app.get('/sample')
+    def sample():
+        return {'ok': True}
+
+    with TestClient(app) as client:
+        for global_mode, category_mode, code, decision in (
+            ('observe', 'enforce', 200, 'observed'),
+            ('enforce', 'observe', 200, 'observed'),
+            ('enforce', 'enforce', 403, 'blocked'),
+        ):
+            guard.policy = Policy.compile({'mode': global_mode, 'sqli_mode': category_mode})
+            assert client.get('/sample').status_code == code
+            event = guard._events.get_nowait()
+            assert (event['decision'], event['reason']) == (decision, 'sqli')
+
+
 def test_shared_policy_refresh_and_persistent_log_drain(tmp_path):
     guard = Guard(tmp_path)
     guard.start()
