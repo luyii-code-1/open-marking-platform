@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from fastapi.responses import FileResponse
+from .lifecycle import RESULTS_REVIEW_GUIDE
 from .db import connect, find, get, objects, put
 from .dependencies import admin, require
 
@@ -29,7 +30,7 @@ def remove_roster_students(identifier:str,body:dict,current=Depends(admin)):
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
         group=require(db,identifier,'groups')
-        if group.get('frozen'):raise HTTPException(409,'成绩已发布，请先发起复核')
+        if group.get('frozen'):raise HTTPException(409,RESULTS_REVIEW_GUIDE)
         ids=body.get('student_ids')
         if not isinstance(ids,list) or not ids or any(not isinstance(sid,str) or not sid for sid in ids):raise HTTPException(422,'请选择需要移出的应考学生')
         selected=set(ids)
@@ -70,7 +71,7 @@ def set_roster(identifier:str,body:dict,current=Depends(admin)):
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
         group=require(db,identifier,'groups')
-        if group.get('frozen'):raise HTTPException(409,'成绩已冻结，请先发起复核')
+        if group.get('frozen'):raise HTTPException(409,RESULTS_REVIEW_GUIDE)
         if body.get('mode')=='grade':
             if not group.get('grade_id'):raise HTTPException(422,'请先设置题卡所属年级')
             group['roster_mode']='grade';put(db,'groups',group,current['id'])
@@ -107,7 +108,7 @@ def import_roster(identifier:str,file:UploadFile=File(),action:str=Form('preview
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
         group=require(db,identifier,'groups')
-        if group.get('frozen'):raise HTTPException(409,'成绩已冻结，请先发起复核')
+        if group.get('frozen'):raise HTTPException(409,RESULTS_REVIEW_GUIDE)
         if not group.get('grade_id'):raise HTTPException(422,'请先设置题卡所属年级')
         report=match_rows(db,group,rows)
         payload={'file':hashlib.sha256(content).hexdigest(),'group':group,'report':report}

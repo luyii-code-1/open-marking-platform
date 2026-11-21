@@ -103,7 +103,7 @@ export function App() {
         {page === 'results' && <Results admin={management} />}
         {page === 'conversions' && management && user.role==='admin' && <Conversions/>}
         {page === 'archives' && <ArchiveManager/>}
-        {page === 'people' && <DataManagement systemAdmin={user.role==='admin'}/>}
+        {page === 'people' && <DataManagement systemAdmin={user.role==='admin'} tab={location.section||'users'} onTab={key=>navigate('#/people/'+key)}/>}
         {page === 'settings' && user.role==='admin' && <Settings />}
         {page === 'scanner' && management && <ScannerDesk/>}
         {page === 'account' && <Account user={user} onProfile={acceptUser} onLogout={endSession}/>}

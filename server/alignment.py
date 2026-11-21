@@ -6,6 +6,7 @@ import cv2
 import numpy as np
 from fastapi import APIRouter,Depends,HTTPException
 from fastapi.responses import Response
+from .lifecycle import RESULTS_REVIEW_GUIDE
 from . import paper
 from .db import connect,put,find
 from .dependencies import admin,require
@@ -71,7 +72,8 @@ def align_page(identifier:str,body:dict,current=Depends(admin)):
             page=require(db,identifier,'pages');batch=require(db,page['batch_id'],'scan-batches');group=require(db,batch['group_id'],'groups')
             from .lifecycle import writable
             writable(db,'pages',page)
-            if group.get('frozen') or batch['status']=='paired':raise HTTPException(409,'已配对或发布的页面请使用补扫替换，发布后需先复核')
+            if group.get('frozen'):raise HTTPException(409, RESULTS_REVIEW_GUIDE)
+            if batch['status']=='paired':raise HTTPException(409,'页面已配对，请在题卡的「扫描与补扫 → 纠正与补扫」中选择答卷并替换扫描页。')
             if page['status']=='received':raise HTTPException(425,'页面正在识别，请稍后再调整')
             if path.exists():
                 old_content=path.read_bytes();asset_id=str(uuid4());asset_path=local_path('assets/'+asset_id+'.png');asset_path.parent.mkdir(parents=True,exist_ok=True)

@@ -5,6 +5,7 @@ import { Alert, App, Card, Descriptions, Form, Input, InputNumber, Modal, Select
 import { Table } from './DataTable'
 import { download, send, useResource, type Row } from './api'
 import { AssetImage } from './components'
+import {examPath,unassignedGrade} from './examNavigation'
 import { HierarchyPicker } from './HierarchyPicker'
 
 const kinds:Record<string,string>={automatic:'自动检查',recognition:'定位识别失败',wrong_paper:'混卷或正反面不符',scan_quality:'扫描页面质量',exception:'教师报告',excellent:'优秀卷'}
@@ -24,7 +25,8 @@ export function Exceptions({groupId}:{groupId?:string}) {
     setBusy(true)
     try{await send('/exceptions/resolve',{ids,resolution});setDetailId('');setBulk(false);setSelected([]);await list.reload();message.success('核查结论已保存')}catch(e){message.error((e as Error).message)}finally{setBusy(false)}
   }
-  const item=details.data?.exception
+  const item=details.data?.exception,scope=details.data?.context
+  const correctionPath=scope?.project_id&&scope.subject_id&&scope.group_id?examPath({projectId:scope.project_id,subjectId:scope.subject_id,gradeId:scope.grade_id||unassignedGrade,groupId:scope.group_id,section:'scans',scanTab:'correct'}):undefined
   return <Space direction="vertical" size={16} style={{width:'100%'}}>
     <Card title="异常与优秀卷" extra={<Button onClick={list.reload}>刷新</Button>}>
       <Space wrap style={{marginBottom:16}}>{!groupId && <HierarchyPicker allowClear placeholder="全部题卡" value={group} onChange={value=>{setGroup(value);setSelected([])}}/>}<Select allowClear placeholder="全部状态" value={status} style={{width:150}} options={[{label:'待核查',value:'open'},{label:'已处理',value:'resolved'}]} onChange={value=>{setStatus(value);setSelected([])}}/><RoomTagPicker groupId={group} value={roomTag} onChange={value=>{setRoomTag(value);setSelected([])}}/><Button onClick={()=>download(`/exports/exceptions?${new URLSearchParams({...group?{group_id:group}:{},...status?{status}:{},...roomTag?{room_tag_id:roomTag}:{}})}`,'异常核查.csv').catch(e=>message.error(e.message))}>导出</Button><Button disabled={!selected.length} onClick={()=>{setBulk(true);setResolution('')}}>批量处理（{selected.length}）</Button></Space>
@@ -46,7 +48,7 @@ export function Exceptions({groupId}:{groupId?:string}) {
         {item.evidence&&<Alert type="info" message="触发依据" description={<pre style={{whiteSpace:'pre-wrap'}}>{JSON.stringify(item.evidence,null,2)}</pre>}/>}
         {details.data.answer_image_url&&<AssetImage src={details.data.answer_image_url}/>}
         <Tabs items={details.data.pages.map((page:Row)=>({key:page.id,label:`${page.side==='front'?'正面':'背面'} · 序号 ${page.sequence}`,children:<><Typography.Paragraph>识读选项：{Object.entries(page.selections).map(([number,answer])=>`第${number}题 ${(answer as string[]).join('、')||'空白'}`).join('；')||'无客观题记录'}</Typography.Paragraph><AssetImage src={page.image_url}/></>}))}/>
-        <Typography.Paragraph type="secondary">需要修改考号、选项、补扫或答题区域时，请先在“扫描批次 / 纠正与补扫”保存更正，再记录核查结论。</Typography.Paragraph>
+        <Typography.Paragraph type="secondary">需更正考号、选项或答题区域时，在「扫描与补扫 → 纠正与补扫」中保存，随后回到这里记录核查结论。 {correctionPath&&<a href={correctionPath} target="_blank" rel="noopener noreferrer">在新标签页打开纠正与补扫</a>}</Typography.Paragraph>
       </Space>}
       <Input.TextArea rows={3} value={resolution} onChange={e=>setResolution(e.target.value)} placeholder="填写核查结论与处理结果"/>
     </Modal>

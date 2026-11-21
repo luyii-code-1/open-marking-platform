@@ -5,7 +5,7 @@ export const groupSections = [
   ['scans', '扫描与补扫'], ['sheets','答题卡查询'], ['marking', '阅卷分配'], ['exceptions', '异常核查'], ['results', '成绩'],
 ] as const
 export type GroupSection = typeof groupSections[number][0]
-export type ExamLocation = { projectId?: string; subjectId?: string; gradeId?:string; groupId?: string; section?: string }
+export type ExamLocation = { projectId?: string; subjectId?: string; gradeId?:string; groupId?: string; section?: string; scanTab?:'correct' }
 export const unassignedGrade='unassigned'
 export const cardName=(group:Row,subject?:Row)=>group.is_default||group.name==='Default'?`${subject?.name||''}题卡`:group.name
 export function subjectGrades(subject:Row,groups:Row[],grades:Row[]=[]):Row[]{
@@ -31,6 +31,7 @@ export function examPath(location: ExamLocation = {}) {
   if (subjectId && gradeId) path += '/grades/' + encodeURIComponent(gradeId)
   if (subjectId && groupId) path += (gradeId?'/cards/':'/groups/') + encodeURIComponent(groupId)
   if (section && section !== 'overview') path += '/' + encodeURIComponent(section)
+  if (groupId && section==='scans' && location.scanTab==='correct') path += '/correct'
   return path
 }
 
@@ -46,6 +47,7 @@ export function readLocation(hash: string): Location {
       return parts[3] === 'review' && parts[4] && parts[5]
         ? { ...project, templateId: parts[4], questionId: parts[5] } : project
     }
+    if (page==='people' && ['users','grades','classes','teaching','students'].includes(parts[1])) return {page,section:parts[1]}
     if (page !== 'exams') return { page }
     if (!parts[1]) return { page }
     const location: Location = { page, projectId: parts[1] }
@@ -61,6 +63,7 @@ export function readLocation(hash: string): Location {
       location.groupId = parts[5]
       location.section = groupSections.some(([key]) => key === parts[6]) ? parts[6] : 'overview'
     }
+    if (location.groupId && location.section==='scans' && parts[location.gradeId?9:7]==='correct') location.scanTab='correct'
     return location
   } catch { return { page: 'dashboard' } }
 }

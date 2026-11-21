@@ -1,5 +1,6 @@
 from copy import deepcopy
 from fastapi import APIRouter,Depends,HTTPException,File,Form,UploadFile
+from .lifecycle import RESULTS_REVIEW_GUIDE
 from .db import connect,objects,put
 from .dependencies import system_admin,admin,require
 from .review import results_for
@@ -32,7 +33,7 @@ def edit_conversion(identifier:str,body:dict,current=Depends(system_admin)):
         old=require(db,identifier,'score-conversions')
         if body.get('base_revision')!=old.get('revision',1):raise HTTPException(409,'方案已变化，请重新载入再编辑')
         groups=[g for g in objects(db,'groups') if g.get('conversion_id')==identifier]
-        if any(g.get('frozen') for g in groups):raise HTTPException(409,'方案用于已发布成绩，请另存副本并在复核后绑定')
+        if any(g.get('frozen') for g in groups):raise HTTPException(409,'请将赋分方案另存为副本。' + RESULTS_REVIEW_GUIDE + '复核开启后可绑定副本。')
         value={k:deepcopy(v) for k,v in body.items() if k in ('name','mode','table','segments','precision','boundary')}
         if not isinstance(value.get('name'),str) or not 1<=len(value['name'].strip())<=100:raise HTTPException(422,'请填写100字以内方案名称')
         try:validate_conversion(value)

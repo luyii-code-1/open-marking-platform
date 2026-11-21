@@ -66,7 +66,7 @@ export function ClassResults({admin,projectId,groupId,initialProject,onLesson}:{
   const cls=classes.find(c=>c.id===classId)
   const cards:Row[]=(project?.cards||[]).filter((c:Row)=>c.class_ids.includes(classId)&&(!groupId||c.id===groupId))
   const card=cards.find(c=>c.id===(groupId||cardId))
-  const managementCard=fixed||card
+  const managementCard=groupId?undefined:card
   if(catalog.error)return <Alert type="error" message={catalog.error} action={<Button onClick={catalog.reload}>重试</Button>}/>
   if(!catalog.loaded)return <Spin/>
   return <section className="class-results">
@@ -77,6 +77,6 @@ export function ClassResults({admin,projectId,groupId,initialProject,onLesson}:{
       {admin&&managementCard&&<Button className="class-management" onClick={()=>setManaging(true)}>成绩管理</Button>}
     </div>
     {!project?<Empty description="暂无可查看的考试成绩"/>:!cls?<ClassDirectory key={project.id} classes={classes} onSelect={id=>{setClass(id);setCard('')}}/>:card?<ClassCardReports key={card.id+cls.id} project={project} card={card} cls={cls}/>:<ClassTotals key={project.id+cls.id} project={project} cls={cls} cards={cards} onCard={setCard}/>}
-    {admin&&managementCard&&<Drawer title="题卡成绩管理" width={720} open={managing} onClose={()=>setManaging(false)}><CardWorkflow groupId={managementCard.id} onSaved={catalog.reload}/></Drawer>}
+    {admin&&managementCard&&<Drawer title="题卡成绩管理" width={720} open={managing} onClose={()=>setManaging(false)}><CardWorkflow key={managementCard.id} groupId={managementCard.id} onSaved={catalog.reload}/></Drawer>}
   </section>
 }

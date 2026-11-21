@@ -4,6 +4,9 @@ from contextvars import ContextVar
 import json
 from fastapi import HTTPException
 
+RESULTS_REVIEW_GUIDE = ('成绩已发布。如需更正，请由系统管理员或管理教师在管理后台的「考试项目」'
+                        '打开对应题卡，进入「成绩」，点击「发起成绩复核」并填写原因。')
+
 _operation = ContextVar('omp_deletion_operation', default=None)
 PARENTS = {
     'room-tags': ('project_id','group_id'),

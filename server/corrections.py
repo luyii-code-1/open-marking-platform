@@ -6,6 +6,7 @@ from uuid import uuid4
 from fastapi import APIRouter,Depends,HTTPException,File,UploadFile
 from fastapi.responses import FileResponse
 from PIL import Image
+from .lifecycle import RESULTS_REVIEW_GUIDE
 from . import db as database
 from .db import connect,objects,put,find
 from .dependencies import admin,require
@@ -33,7 +34,7 @@ def correct_objective(identifier:str,body:dict,current=Depends(admin)):
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
         submission=require(db,identifier,'submissions');group=require(db,submission['group_id'],'groups')
-        if group.get('frozen'):raise HTTPException(409,'成绩已冻结，请先发起复核')
+        if group.get('frozen'):raise HTTPException(409,RESULTS_REVIEW_GUIDE)
         if submission['status']=='absent':raise HTTPException(409,'缺考答卷不能修改选项')
         template=require(db,submission['template_id'],'templates')
         questions={q['id']:q for q in template['questions'] if q['type']!='subjective'}
@@ -129,6 +130,10 @@ def reopen(identifier:str,body:dict,current=Depends(admin)):
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
         group=require(db,identifier,'groups')
+        if body.get('scan_only') is True and group.get('frozen'):
+            raise HTTPException(409,RESULTS_REVIEW_GUIDE)
+        if 'expected_published_at' in body and (not group.get('frozen') or body['expected_published_at']!=group.get('published_at')):
+            raise HTTPException(409,'成绩发布状态已变化，请关闭复核窗口并刷新后确认。')
         subject=database.get(db,group.get('subject_id'),'subjects')
         project=database.get(db,(subject or {}).get('project_id'),'projects')
         if (project or {}).get('storage_operation',{}).get('until',0)>time.time():raise HTTPException(409,'项目正在处理扫描文件，请完成后再复核')
@@ -143,7 +148,7 @@ def replace_page(identifier:str,body:dict,current=Depends(admin)):
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
         submission=require(db,identifier,'submissions'); group=require(db,submission['group_id'],'groups')
-        if group.get('frozen'): raise HTTPException(409,'成绩已冻结，请先发起复核')
+        if group.get('frozen'): raise HTTPException(409,RESULTS_REVIEW_GUIDE)
         try: index=int(body['page'])-1
         except (KeyError,ValueError,TypeError): raise HTTPException(422,'页码无效')
         if not 0<=index<len(submission['pages']): raise HTTPException(422,'页码超出范围')
@@ -169,7 +174,7 @@ def mark_absent(identifier:str,body:dict,current=Depends(admin)):
     reason(body)
     with connect() as db:
         group=require(db,identifier,'groups')
-        if group.get('frozen'): raise HTTPException(409,'成绩已冻结')
+        if group.get('frozen'): raise HTTPException(409,RESULTS_REVIEW_GUIDE)
         student=require(db,body.get('student_id'),'students')
         from .school import group_students
         members=group_students(db,group)
@@ -188,7 +193,7 @@ def attach_pages(identifier:str,body:dict,current=Depends(admin)):
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
         submission=require(db,identifier,'submissions');group=require(db,submission['group_id'],'groups')
-        if group.get('frozen'):raise HTTPException(409,'成绩已冻结，请先发起复核')
+        if group.get('frozen'):raise HTTPException(409,RESULTS_REVIEW_GUIDE)
         if submission['status']!='absent':raise HTTPException(409,'整卷补齐用于更正缺考记录；已有实考请使用补扫替换')
         template=require(db,submission['template_id'],'templates');ids=body.get('page_ids')
         if not isinstance(ids,list) or any(not isinstance(i,str) for i in ids) or len(ids)!=template['sides'] or len(set(ids))!=len(ids):raise HTTPException(422,'请按正面、背面顺序选齐整卷')
@@ -214,7 +219,7 @@ def correct_attendance(identifier:str,body:dict,current=Depends(admin)):
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
         submission=require(db,identifier,'submissions');group=require(db,submission['group_id'],'groups')
-        if group.get('frozen'):raise HTTPException(409,'成绩已冻结，请先发起复核')
+        if group.get('frozen'):raise HTTPException(409,RESULTS_REVIEW_GUIDE)
         template=require(db,submission['template_id'],'templates')
         status='absent' if body['absent'] else 'ready'
         if body['absent'] and not submission.get('pages'):raise HTTPException(409,'请先扫描题卡后核对缺考标记')
@@ -259,7 +264,7 @@ def override_regions(identifier:str,question_id:str,body:dict,current=Depends(ad
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
         submission=require(db,identifier,'submissions'); group=require(db,submission['group_id'],'groups')
-        if group.get('frozen'): raise HTTPException(409,'成绩已冻结，请先复核')
+        if group.get('frozen'): raise HTTPException(409,RESULTS_REVIEW_GUIDE)
         template=require(db,submission['template_id'],'templates')
         question=next((q for q in template['questions'] if q['id']==question_id),None)
         if not question or question['type']!='subjective': raise HTTPException(422,'请选择主观题')

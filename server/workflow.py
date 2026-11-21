@@ -3,6 +3,7 @@ import time
 import hashlib
 import json
 from fastapi import APIRouter, Depends, HTTPException, Query
+from .lifecycle import RESULTS_REVIEW_GUIDE
 from .db import connect, find, get, objects, put
 from .dependencies import admin, require
 from .school import group_students, student_view
@@ -54,7 +55,9 @@ def overview(db,group,current):
             'batches':details,
             'open_batches':sum(b.get('status')!='paired' and b['received_pages']>0 for b in details),'open_exceptions':len(exceptions),
             'scanned':sum(s.get('status')!='absent' for s in submissions),'results':counts,
-            'published':bool(group.get('frozen')),'template_id':group.get('template_id')}
+            'published':bool(group.get('frozen')), 'published_at':group.get('published_at'),
+            'in_review':bool(not group.get('frozen') and group.get('reopened_at') and group.get('published_at')),
+            'template_id':group.get('template_id')}
     roster_ids={student['id'] for student in roster['students']}
     scanned_ids={submission['student_id'] for submission in submissions if submission.get('pages')}
     state['roster_scanned']=len(roster_ids & scanned_ids)
@@ -103,9 +106,11 @@ def overview(db,group,current):
         if kind=='subjective':state[kind]['arbitration']=arbitration
     from .lifecycle import project_for
     project=get(db,project_for(db,'groups',group),'projects') or {}
+    state.update(project_id=project.get('id'), subject_id=group.get('subject_id'), grade_id=group.get('grade_id'))
     state['scans_purged']=bool(project.get('scans_purged'))
     state['objective_reprocess_allowed']=bool(not group.get('frozen') and not state['scans_purged'] and any(q['type']!='subjective' for q in active.get('questions',[])) and any(b['recognized_pages'] for b in details))
-    state['publication_blockers']=publication_blockers(state)
+    state['publication_actions']=publication_actions(state)
+    state['publication_blockers']=[action['issue'] for action in state['publication_actions']]
     return state
 
 
@@ -129,7 +134,7 @@ def reprocess_objective(identifier:str,current=Depends(admin)):
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
         group=require(db,identifier,'groups');writable(db,'groups',group)
-        if group.get('frozen'):raise HTTPException(409,'成绩已发布，请先发起复核')
+        if group.get('frozen'):raise HTTPException(409,RESULTS_REVIEW_GUIDE)
         template=require(db,group.get('template_id'),'templates')
         if not any(q['type']!='subjective' for q in template['questions']):raise HTTPException(422,'当前题卡没有客观题')
         project_id=project_for(db,'groups',group)
@@ -145,7 +150,7 @@ def review_roster(identifier:str,body:dict,current=Depends(admin)):
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
         group=require(db,identifier,'groups')
-        if group.get('frozen'):raise HTTPException(409,'成绩已发布，请先发起复核')
+        if group.get('frozen'):raise HTTPException(409,RESULTS_REVIEW_GUIDE)
         students=group_students(db,group)
         if students is None:raise HTTPException(409,'请先设置应考名单')
         if not isinstance(body.get('student_ids'),list) or any(not isinstance(s,str) for s in body['student_ids']):raise HTTPException(422,'学生编号列表无效')
@@ -162,7 +167,7 @@ def close_scanning(identifier:str,body:dict,current=Depends(admin)):
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
         group=require(db,identifier,'groups')
-        if group.get('frozen'):raise HTTPException(409,'成绩已发布，请先发起复核')
+        if group.get('frozen'):raise HTTPException(409,RESULTS_REVIEW_GUIDE)
         state=overview(db,group,current)
         if not state['template_id']:raise HTTPException(409,'请先发布版式')
         if not state['roster_configured']:raise HTTPException(409,'请先设置应考名单')
@@ -174,15 +179,21 @@ def close_scanning(identifier:str,body:dict,current=Depends(admin)):
         return {'closed':True,'unscanned':state['results']['unscanned']}
 
 
-def publication_blockers(state):
+def publication_actions(state):
     issues=[]
-    if not state['template_id']:issues.append('尚未发布版式')
-    if state.get('missing_answers'):issues.append('请补录客观题答案：'+ '、'.join(map(str,state['missing_answers'])))
-    if state['open_batches']:issues.append('仍有未完成的扫描批次')
-    if state['open_exceptions']:issues.append('仍有影响成绩的异常')
-    if state['results']['pending'] or state['regrades']:issues.append('评分或重阅尚未完成')
-    if not sum(state['results'].values()):issues.append('没有可发布的学生记录')
+    def add(issue, section, label):
+        issues.append({'issue':issue,'section':section,'label':label})
+    if not state['template_id']:add('尚未发布版式','template','打开题卡设计')
+    if state.get('missing_answers'):add('请补录客观题答案：'+ '、'.join(map(str,state['missing_answers'])),'template','到题卡设计补录答案')
+    if state['open_batches']:add('仍有未完成的扫描批次','scans','核对扫描记录并确认入库')
+    if state['open_exceptions']:add('仍有影响成绩的异常','exceptions','打开异常核查')
+    if state['results']['pending'] or state['regrades']:add('评分或重阅尚未完成','marking','查看阅卷分配与教师进度')
+    if not sum(state['results'].values()):add('没有可发布的学生记录','roster','检查应考名单')
     return issues
+
+
+def publication_blockers(state):
+    return [action['issue'] for action in publication_actions(state)]
 
 
 @router.put('/{kind}/{identifier}/name')
@@ -200,7 +211,7 @@ def rename(kind:str,identifier:str,body:dict,current=Depends(admin)):
 def finish_empty(identifier:str,body:dict,current=Depends(admin)):
     with connect() as db:
         db.execute('BEGIN IMMEDIATE');batch=require(db,identifier,'scan-batches')
-        if require(db,batch['group_id'],'groups').get('frozen'):raise HTTPException(409,'成绩已发布，请先发起复核')
+        if require(db,batch['group_id'],'groups').get('frozen'):raise HTTPException(409,RESULTS_REVIEW_GUIDE)
         if batch['status']=='frozen':raise HTTPException(409,'请先处理批次异常')
         if any(not p.get('excluded') for p in find(db,'pages',batch_id=identifier)):raise HTTPException(409,'有采集页面的批次请确认配对并入库')
         if body.get('confirm') is not True:raise HTTPException(422,'请确认该批次无需接收页面')

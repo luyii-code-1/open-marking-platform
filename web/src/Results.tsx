@@ -9,7 +9,7 @@ import { Button } from './Button'
 import { ContentCard as Card } from './components'
 import { useResource, type Row } from './api'
 import { HierarchyPicker } from './HierarchyPicker'
-import { cardName,examPath } from './examNavigation'
+import { cardName,examPath,unassignedGrade } from './examNavigation'
 import { ResultExport } from './ResultExport'
 import {ResultOverview} from './ResultOverview'
 import {ResultFilters,useResultFilterOptions,classLabel,type ResultFilterOptions} from './ResultFilters'
@@ -47,7 +47,8 @@ export function Results(props:{admin:boolean;groupId?:string;projectId?:string;p
     if(props.admin&&(props.groupId||props.projectId&&props.projectId!==id)){window.location.hash=examPath({projectId:id,section:'summary'});return}
     setExam(id);setTab('classes')
   }
-  return <Tabs activeKey={tab} onChange={setTab} destroyOnHidden items={[{key:'classes',label:'班级成绩',children:<ClassResults key={exam} initialProject={exam} onLesson={props.admin?undefined:openLesson} {...props}/>},...(!props.admin?[{key:'lesson',label:'讲评试卷',children:<PaperLesson initial={lesson}/>}]:[]),{key:'analysis',label:'统计分析',children:<AdvancedResults {...props} onOpenExam={openExam}/>} ]}/>
+  return <>{props.admin&&props.groupId&&<CardWorkflow key={props.groupId} groupId={props.groupId}/>}
+    <Tabs activeKey={tab} onChange={setTab} destroyOnHidden items={[{key:'classes',label:'班级成绩',children:<ClassResults key={exam} initialProject={exam} onLesson={props.admin?undefined:openLesson} {...props}/>},...(!props.admin?[{key:'lesson',label:'讲评试卷',children:<PaperLesson initial={lesson}/>}]:[]),{key:'analysis',label:'统计分析',children:<AdvancedResults {...props} onOpenExam={openExam}/>} ]}/></>
 }
 
 function AdvancedResults({admin,groupId,projectId,projectOnly=false,onOpenExam}:{onOpenExam:(id:string)=>void;admin:boolean;groupId?:string;projectId?:string;projectOnly?:boolean}) {
@@ -88,9 +89,9 @@ function AdvancedResults({admin,groupId,projectId,projectOnly=false,onOpenExam}:
       {group&&<div style={{marginTop:12}}><ResultFilters value={filters} onChange={setFilters} options={filterOptions.data} loading={filterOptions.loading} matched={resource.loading?undefined:data?.summary.records}/></div>}
       <Space wrap style={{marginTop:16}}><Typography.Text>缺考计入统计</Typography.Text><Switch checked={includeAbsent} onChange={setIncludeAbsent}/><Typography.Text>及格线（满分%）</Typography.Text><InputNumber min={0} max={100} value={pass} onChange={v=>setPass(v??60)}/><Typography.Text>优秀线（满分%）</Typography.Text><InputNumber min={0} max={100} value={excellent} onChange={v=>setExcellent(v??85)}/><Button onClick={()=>{if(pass>excellent){message.warning('优秀线应不低于及格线');return}setCutoffs({pass,excellent})}}>应用分数线</Button></Space>
     </ResultSettings>
-    {admin&&group&&<CardWorkflow key={group} groupId={group} onSaved={async()=>{await resource.reload();await groups.reload()}}/>}
+    {admin&&!groupId&&group&&<CardWorkflow key={group} groupId={group} onSaved={resource.reload}/>}
     {(resource.error||filterOptions.error)&&<Alert type="error" message={resource.error||filterOptions.error}/>}
-    {data?<>{admin&&!data.roster_configured&&<Alert type="warning" message="本组尚未配置应考名单，当前仅能显示已有答卷。可在考试项目的应考名单中配置，以显示未扫描学生。"/>}<div className="stat-grid"><Card><Statistic title="考生记录" value={data.summary.records}/></Card><Card><Statistic title="平均分" value={data.summary.average??'—'} precision={2}/></Card><Card><Statistic title="统计人数" value={data.summary.analyzed}/></Card><Card><Statistic title="未扫描 / 缺考 / 待结分" value={`${data.summary.unscanned} / ${data.summary.absent} / ${data.summary.pending}`}/></Card></div>
+    {data?<>{admin&&!data.roster_configured&&<Alert type="warning" message="本题卡尚未配置应考名单。配置后可查看未扫描学生。" action={subject&&selectedGroup&&<Button href={examPath({projectId:subject.project_id,subjectId:subject.id,gradeId:selectedGroup.grade_id||unassignedGrade,groupId:group,section:'roster'})}>配置应考名单</Button>}/>}<div className="stat-grid"><Card><Statistic title="考生记录" value={data.summary.records}/></Card><Card><Statistic title="平均分" value={data.summary.average??'—'} precision={2}/></Card><Card><Statistic title="统计人数" value={data.summary.analyzed}/></Card><Card><Statistic title="未扫描 / 缺考 / 待结分" value={`${data.summary.unscanned} / ${data.summary.absent} / ${data.summary.pending}`}/></Card></div>
       <Alert type="info" message={`${metric==='raw'?'原始分':'赋分'}满分 ${data.full_score} · ${includeAbsent?'缺考按0分计入':'缺考单列'} · 未扫描及未结总分不计入总分均值和排名 · ${data.rank_scope==='group'?'题卡内排名':'仅在任教班级范围内排名'}`} description="单题分析按该题已评作答统计，可能包含尚未完成整卷的考生。相同分数并列，后续名次跳号。"/>
       <Card loading={resource.loading}><Tabs activeKey={view} onChange={setView} items={[
         {key:'classes',label:'班级统计',children:<Table query="" rowKey="id" scroll={{x:'max-content'}} dataSource={data.classes} columns={[{title:'班级',dataIndex:'name'},{title:'记录人数',dataIndex:'records'},{title:'缺考',dataIndex:'absent'},{title:'待结分',dataIndex:'pending'},{title:'未扫描',dataIndex:'unscanned'},...measures]}/>},

@@ -234,7 +234,7 @@ export function Marking({ admin, groupId, initialProjectId, initialTemplateId, i
 
         </div>
       </aside>
-    </main>:<div className="marking-empty"><Empty description={published?'题卡成绩已发布':onExit?(busy||templateResource.loading?"正在加载作答":"当前没有可领取的作答"):"选择题目，进入阅卷"}>{onExit&&<Space>{published?<Button onClick={openHistory}>评分记录</Button>:<Button disabled={!question||locked||workspace.offline} onClick={next}>重新领取</Button>}<Button onClick={leave}>返回任务列表</Button></Space>}</Empty></div>}
+    </main>:<div className="marking-empty"><Empty description={published?'题卡成绩已发布。如需更正评分，请联系系统管理员或管理教师，在该题卡的「成绩」中点击「发起成绩复核」。':onExit?(busy||templateResource.loading?"正在加载作答":"当前没有可领取的作答"):"选择题目，进入阅卷"}>{onExit&&<Space>{published?<Button onClick={openHistory}>评分记录</Button>:<Button disabled={!question||locked||workspace.offline} onClick={next}>重新领取</Button>}<Button onClick={leave}>返回任务列表</Button></Space>}</Empty></div>}
     {osd&&<div className="score-osd" role="status">{osd.text}</div>}
     <footer className="marking-progress-footer">
       <div className="marking-progress-summary"><strong>我的进度 <b>{myCompleted}</b> / {myTotal} 份</strong><span>{Number(progress.data.my_progress||0).toFixed(0)}%</span></div>
@@ -243,7 +243,7 @@ export function Marking({ admin, groupId, initialProjectId, initialTemplateId, i
       <div ref={workspace.setQueueTarget} className="marking-queue-slot"/>
     </footer>
     <Drawer title="我的历史与回评" width={840} open={historyOpen} onClose={()=>setHistoryOpen(false)}>
-      <ErrorNotice error={error}/><Table rowKey="id" dataSource={history} pagination={{defaultPageSize:50}} scroll={{x:700}} locale={{emptyText:'暂无历史评分'}} columns={[{title:'作答',dataIndex:'id',ellipsis:true},{title:'我的给分',dataIndex:'score'},{title:'实际给分',dataIndex:'final_score',render:v=>v??'待汇总'},{title:'评分时间',dataIndex:'created_at',render:v=>new Date(v*1000).toLocaleString()},{title:'操作',render:(_,row)=><Space><Button disabled={published||workspace.offline||locked||record?.status==='queued'||record?.status==='conflict'} loading={action.pending===`history:${row.id}`} onClick={()=>reviewHistory(row)}>回评</Button><Button disabled={published||workspace.offline||locked} onClick={()=>regradeFrom(row)}>从此处重阅</Button></Space>}]}/>
+      <ErrorNotice error={error}/>{published&&<Typography.Paragraph>如需更正已发布的评分，请联系系统管理员或管理教师，在该题卡的「成绩」中发起复核。</Typography.Paragraph>}<Table rowKey="id" dataSource={history} pagination={{defaultPageSize:50}} scroll={{x:700}} locale={{emptyText:'暂无历史评分'}} columns={[{title:'作答',dataIndex:'id',ellipsis:true},{title:'我的给分',dataIndex:'score'},{title:'实际给分',dataIndex:'final_score',render:v=>v??'待汇总'},{title:'评分时间',dataIndex:'created_at',render:v=>new Date(v*1000).toLocaleString()},{title:'操作',render:(_,row)=><Space><Button disabled={published||workspace.offline||locked||record?.status==='queued'||record?.status==='conflict'} loading={action.pending===`history:${row.id}`} onClick={()=>reviewHistory(row)}>回评</Button><Button disabled={published||workspace.offline||locked} onClick={()=>regradeFrom(row)}>从此处重阅</Button></Space>}]}/>
     </Drawer>
     <Drawer title="评阅进度" width={400} open={progressOpen} onClose={()=>setProgressOpen(false)}>
       <ErrorNotice error={progress.error}/><p>我的任务 {myCompleted} / {myTotal} 份</p><p>正在评阅 {progress.data.my_in_progress||0} · 待重阅 {progress.data.my_regrade_pending||0} · 本题作答 {progress.data.total_submissions||0}</p>

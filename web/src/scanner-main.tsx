@@ -130,7 +130,7 @@ function Scanner() {
     const matches=state.batches.filter((b:Row)=>b.group_id===group.id&&roomKey(b)===(roomId||''))
     const local=matches.find((b:Row)=>b.status==='open')||matches.find((b:Row)=>b.status==='frozen')
     if(local){setBatch(local.id);setPage(1);return}
-    if(group.template.sides===2&&!firstSide){message.warning('请先选择已校准的双面出图顺序');return}
+    if(group.template.sides===2&&!firstSide){setDeviceOpen(true);message.warning('请在扫描设置中选择双面出图顺序，然后重新开始扫描');return}
     await action('createBatch',{group_id:group.id,name:room?.name||'未指定考场',room_tag_ids:roomId?[roomId]:[],capture_mode:group.template.sides===2?'duplex':'separate',first_side:firstSide},r=>{setBatch(r.id);setPage(1)})
   }
   async function clearRoom(){
@@ -210,7 +210,7 @@ function Scanner() {
     ...(inProject && batch ? [{ title: batch.room_tags?.[0]?.name||'未指定考场' }] : []),
   ]
   if(state&&(!state.device_preferences||typeof state.session_open!=='boolean'))return <main className="scanner-unavailable"><Typography.Title level={3}>请更新扫描客户端</Typography.Title><p>从管理后台的扫描台下载安装包后重新打开。</p><Button onClick={()=>action('offlinePage')}>打开已安装版本的本地页面</Button></main>
-  if (!hasScannerHost) return <main className="scanner-unavailable"><Typography.Title level={3}>扫描工作台</Typography.Title><Typography.Paragraph>请在扫描客户端打开此页面。</Typography.Paragraph></main>
+  if (!hasScannerHost) return <main className="scanner-unavailable"><Typography.Title level={3}>扫描工作台</Typography.Title><Typography.Paragraph>请在扫描客户端打开此页面。可在管理后台的「扫描台」下载安装包，并连接本机扫描端。</Typography.Paragraph><a href="/#/scanner">打开管理后台扫描台</a></main>
   return <div className="scanner-app">
     <header className="scanner-header"><Space size={16}><Brand /><Typography.Title level={4}>扫描工作台</Typography.Title></Space><Space size={12}>{sessionOpen&&<Button onClick={()=>setDeviceOpen(true)} disabled={locked}>扫描设置</Button>}<Tag color={state?.online ? 'green' : undefined}>{!sessionOpen?'待连接':state?.online?'已连接':'离线'}</Tag>{sessionOpen&&<Dropdown menu={{ items: [
       { key: 'connect', label: '切换服务器', disabled: locked, onClick: () => { setConnection(true) } },

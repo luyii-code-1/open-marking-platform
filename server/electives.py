@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, File, UploadFile, HTTPException
 from typing import Literal
 from pydantic import BaseModel
+from .lifecycle import RESULTS_REVIEW_GUIDE
 from .db import connect, objects, find, put, get
 from .dependencies import admin, require
 from .roster_import import read_rows, match_rows
@@ -58,7 +59,7 @@ def use_elective(identifier:str,current=Depends(admin)):
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
         group=require(db,identifier,'groups')
-        if group.get('frozen'):raise HTTPException(409,'成绩已冻结')
+        if group.get('frozen'):raise HTTPException(409,RESULTS_REVIEW_GUIDE)
         entry=card_catalog(db,group)
         if not entry:raise HTTPException(422,'该科目没有设置年级应考范围')
         from .db import get
@@ -101,7 +102,7 @@ def supplement(identifier:str,body:dict,current=Depends(admin)):
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
         group=require(db,identifier,'groups')
-        if group.get('frozen'):raise HTTPException(409,'成绩已冻结')
+        if group.get('frozen'):raise HTTPException(409,RESULTS_REVIEW_GUIDE)
         ids=body.get('student_ids')
         if not group.get('grade_id') or not isinstance(ids,list) or not ids or any(not isinstance(i,str) for i in ids):raise HTTPException(422,'请选择同年级学生')
         added=members(db,group['grade_id'],set(ids))

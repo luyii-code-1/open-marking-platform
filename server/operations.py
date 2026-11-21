@@ -6,6 +6,7 @@ import secrets
 from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
+from .lifecycle import RESULTS_REVIEW_GUIDE
 from . import db as database
 from .db import connect,get,objects,put,find
 from .dependencies import system_admin,admin,user,require,password_hash
@@ -41,7 +42,7 @@ def bind_conversion(identifier:str,body:dict,current=Depends(admin)):
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
         group=require(db,identifier,'groups')
-        if group.get('frozen'): raise HTTPException(409,'成绩已冻结，请先发起复核')
+        if group.get('frozen'): raise HTTPException(409,RESULTS_REVIEW_GUIDE)
         conversion_id=body.get('conversion_id')
         if conversion_id:
             config=require(db,conversion_id,'score-conversions')

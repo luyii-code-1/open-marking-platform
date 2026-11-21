@@ -7,6 +7,7 @@ from pathlib import Path
 from uuid import uuid4
 from fastapi import APIRouter,Depends,HTTPException
 from fastapi.responses import Response
+from .lifecycle import RESULTS_REVIEW_GUIDE
 from . import paper
 from .db import connect,get,find,objects,put
 from .dependencies import admin,require
@@ -59,7 +60,7 @@ def delete_template(identifier:str,draft_version:int|None=None,expected_status:s
         db.execute('BEGIN IMMEDIATE')
         value=require(db,identifier,'templates')
         group=require(db,value['group_id'],'groups')
-        if group.get('frozen'):raise HTTPException(409,'成绩已冻结')
+        if group.get('frozen'):raise HTTPException(409,RESULTS_REVIEW_GUIDE)
         if draft_version is not None and draft_version!=value.get('draft_version',0) or expected_status and expected_status!=value['status']:
             raise HTTPException(409,'版本已变化，请重新载入后删除')
         from .lifecycle import writable
@@ -125,7 +126,7 @@ def instantiate(identifier:str,body:dict,current=Depends(admin)):
         db.execute('BEGIN IMMEDIATE')
         entry=require(db,identifier,'template-library')
         group=require(db,body['group_id'],'groups') if body.get('group_id') else default_group(db,body.get('subject_id'),current['id'])
-        if group.get('frozen'):raise HTTPException(409,'成绩已冻结，请先发起复核或选择新的题卡组')
+        if group.get('frozen'):raise HTTPException(409,RESULTS_REVIEW_GUIDE + '也可以选择其他题卡。')
         definition=deepcopy(entry['definition'])
         name=body.get('name',entry['name'])
         if not isinstance(name,str) or not 1<=len(name.strip())<=100:raise HTTPException(422,'请填写100字以内题卡标题')

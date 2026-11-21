@@ -1,5 +1,6 @@
 """Global school identities and current grade-based examination membership."""
 from fastapi import APIRouter, Depends, HTTPException
+from .lifecycle import RESULTS_REVIEW_GUIDE
 from .db import connect, find, get, objects, put
 from .dependencies import admin, require
 
@@ -119,5 +120,5 @@ def group_grade(identifier:str,body:dict,current=Depends(admin)):
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
         group=require(db,identifier,'groups')
-        if group.get('frozen'):raise HTTPException(409,'成绩已冻结，请先发起复核')
+        if group.get('frozen'):raise HTTPException(409,RESULTS_REVIEW_GUIDE)
         return bind_group(db,group,body.get('grade_id'),current['id'])

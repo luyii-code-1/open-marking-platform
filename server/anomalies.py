@@ -4,6 +4,7 @@ import json
 import time
 
 from fastapi import APIRouter, Depends, HTTPException
+from .lifecycle import RESULTS_REVIEW_GUIDE
 from .db import connect, find, get, put
 from .dependencies import admin, require
 
@@ -100,7 +101,7 @@ def set_rules(identifier:str,body:dict,current=Depends(admin)):
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
         group=require(db,identifier,'groups')
-        if group.get('frozen'):raise HTTPException(409,'成绩已冻结，请先发起复核')
+        if group.get('frozen'):raise HTTPException(409,RESULTS_REVIEW_GUIDE)
         group['anomaly_rules']=value;put(db,'groups',group,current['id'])
         submissions=find(db,'submissions',group_id=identifier)
         for submission in submissions:check_submission(db,submission,current['id'])

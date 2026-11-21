@@ -17,6 +17,7 @@ from pathlib import Path
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from .lifecycle import RESULTS_REVIEW_GUIDE
 from .db import connect, find, get, initialize, objects, put
 from .scoring import cents, final_score
 from . import db as database
@@ -224,7 +225,7 @@ def create_route(kind):
                 from .school import assign_class
                 assign_class(db,value,body,current['id'])
             if kind=='templates':
-                if require(db,value['group_id'],'groups').get('frozen'):raise HTTPException(409,'成绩已冻结')
+                if require(db,value['group_id'],'groups').get('frozen'):raise HTTPException(409,RESULTS_REVIEW_GUIDE)
                 if value.get('paper') not in ('A3','A4') or value.get('sides') not in (1,2):
                     raise HTTPException(422,'纸型或单双面无效')
                 value.update(revision=0,status='draft',layout_version=3)
@@ -272,7 +273,7 @@ def create_route(kind):
                 if not isinstance(tag_ids,list):raise HTTPException(422,'考场标签应为编号列表')
                 value['room_tags']=snapshot(db,project_for_group(db,group['id']),tag_ids,group=group)
                 if group.get('grade_id'):value['grade_id']=group['grade_id']
-                if group.get('frozen'):raise HTTPException(409,'成绩已冻结，请先发起复核')
+                if group.get('frozen'):raise HTTPException(409,RESULTS_REVIEW_GUIDE)
                 if not group.get('template_id'):
                     raise HTTPException(422,'请先发布题卡')
                 template=require(db,group['template_id'],'templates')
@@ -341,7 +342,7 @@ def publish(identifier:str,body:dict|None=None,current=Depends(admin)):
         template=require(db,identifier,'templates')
         group=require(db,template['group_id'],'groups')
         if template['status']!='published':
-            if group.get('frozen'):raise HTTPException(409,'成绩已冻结，请先发起复核或选择新的题卡组')
+            if group.get('frozen'):raise HTTPException(409,RESULTS_REVIEW_GUIDE + '也可以选择其他题卡。')
             if template['status']!='draft':raise HTTPException(409,'请选择草稿发布')
             if group.get('template_id')!=(body or {}).get('replace_id'):
                 raise HTTPException(409,'当前正式版本已变化，请重新载入后确认替换')
@@ -423,7 +424,7 @@ def upload_page(identifier:str,file:UploadFile=File(),capture_id:str=Form(),side
             if existing['status']=='quarantined': return JSONResponse(status_code=409,content={**existing,'detail':'该页已隔离，批次冻结'})
             return existing
         group=require(db,batch['group_id'],'groups')
-        if group.get('frozen'):raise HTTPException(409,'成绩已冻结，请先发起复核')
+        if group.get('frozen'):raise HTTPException(409,RESULTS_REVIEW_GUIDE)
         if group.get('template_id')!=batch['template_id']:raise HTTPException(409,'本批次题卡已更换，请使用当前正式题卡新建批次')
         if batch['status'] in ('frozen','paired'): raise HTTPException(409,'批次已冻结或已确认')
         template=require(db,batch['template_id'],'templates')
@@ -481,7 +482,7 @@ def pair(identifier:str,body:dict|None=Body(default=None),current=Depends(scan_a
         batch=scan_batch(db,identifier,current)
         if batch['status']=='frozen': raise HTTPException(409,'批次已冻结，请处理异常')
         if batch['status']=='paired': return batch
-        if require(db,batch['group_id'],'groups').get('frozen'):raise HTTPException(409,'成绩已冻结，请先发起复核')
+        if require(db,batch['group_id'],'groups').get('frozen'):raise HTTPException(409,RESULTS_REVIEW_GUIDE)
         template=require(db,batch['template_id'],'templates')
         all_pages=[p for p in objects(db,'pages') if p['batch_id']==identifier and not p.get('excluded')]
         page_list=[p for p in all_pages if not p.get('linked_submission_id')]

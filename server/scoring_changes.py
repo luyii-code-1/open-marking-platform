@@ -6,6 +6,7 @@ import time
 from fastapi import APIRouter, Depends, HTTPException
 from .db import connect, find, put
 from .dependencies import admin, require
+from .lifecycle import RESULTS_REVIEW_GUIDE
 from .review import result_for
 from .template_checks import issues
 
@@ -46,14 +47,15 @@ def fill_answer_key(identifier:str,body:dict,current=Depends(admin)):
         db.execute('BEGIN IMMEDIATE')
         template=require(db,identifier,'templates')
         group=require(db,template['group_id'],'groups')
-        if template['status'] not in ('published','superseded') or group.get('frozen'):raise HTTPException(409,'该版式当前不能补录答案')
+        if group.get('frozen'):raise HTTPException(409,RESULTS_REVIEW_GUIDE)
+        if template['status'] not in ('published','superseded'):raise HTTPException(409,'请在题卡设计中编辑草稿的客观题答案。')
         questions={q['id']:q for q in template['questions'] if q['type']!='subjective'}
         added={}
         for qid,answer in answers.items():
             if qid not in questions or not isinstance(answer,list) or not answer:raise HTTPException(422,'题目或标准答案无效')
             question=questions[qid]
             if question.get('answer'):
-                if question['answer']!=answer:raise HTTPException(409,'该题已有答案，请刷新或使用答案复核')
+                if question['answer']!=answer:raise HTTPException(409,'该题已有答案。请刷新题卡并补齐其余答案，再在正式版式中点击「调整答案与评分」。')
             else:
                 question['answer']=answer
                 added[qid]=answer

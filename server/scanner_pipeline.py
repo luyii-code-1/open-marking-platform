@@ -7,6 +7,7 @@ from uuid import UUID
 import cv2
 import numpy as np
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from .lifecycle import RESULTS_REVIEW_GUIDE
 from .db import connect, find, get, objects, put
 from .dependencies import require, scan_admin, scan_batch
 from .lifecycle import writable
@@ -82,7 +83,7 @@ def project_package(identifier: str, current=Depends(scan_admin)):
 def batch_context(db, identifier, current):
     batch = scan_batch(db, identifier, current); group = require(db, batch['group_id'], 'groups')
     writable(db, 'scan-batches', batch)
-    if group.get('frozen'): raise HTTPException(409, '成绩已经发布，请先在管理端发起复核')
+    if group.get('frozen'): raise HTTPException(409, RESULTS_REVIEW_GUIDE)
     template = require(db, batch['template_id'], 'templates')
     if (group.get('template_id') != template['id'] and template.get('status')!='superseded') or template['revision'] != batch['template_revision']: raise HTTPException(409, '题卡版本已变化，请下载项目配置并重新建立批次')
     return batch, group, template
@@ -100,7 +101,7 @@ def register_batch(identifier: str, body: dict, current=Depends(scan_admin)):
             if sorted(body.get('room_tag_ids',[]))!=sorted(t['id'] for t in batch.get('room_tags',[])):raise HTTPException(409,'本地考场标签与批次记录不一致')
             return batch
         group = require(db, body.get('group_id'), 'groups'); writable(db, 'groups', group)
-        if group.get('frozen'): raise HTTPException(409, '成绩已经发布，请先在管理端发起复核')
+        if group.get('frozen'): raise HTTPException(409, RESULTS_REVIEW_GUIDE)
         template = require(db, group.get('template_id'), 'templates')
         if template['status'] != 'published' or template['id'] != body.get('template_id') or template['revision'] != body.get('template_revision') or config_hash(template) != body.get('config_sha256'): raise HTTPException(409, '题卡配置已变化，请重新下载项目配置')
         from .room_tags import snapshot,project_for_group

@@ -25,6 +25,15 @@ assert.equal(defaultGroup(subjects[1], [...groups, { id: 'g3', name: '备用', s
 assert.equal(readLocation('#/exams/%').page, 'dashboard')
 const encoded = { projectId: '考试 / A', subjectId: '数学', groupId: '组#1', section: 'template' }
 assert.deepEqual(readLocation(examPath(encoded)), { page: 'exams', ...encoded })
+for (const grade of [{gradeId:'高一 / A'},{}]) {
+  const correction = {...encoded,...grade,section:'scans',scanTab:'correct'}
+  assert.deepEqual(readLocation(examPath(correction)), {page:'exams',...correction})
+  const normal = {...encoded,...grade,section:'results'}
+  assert.deepEqual(readLocation(examPath({...normal,scanTab:'correct'})), {page:'exams',...normal})
+}
+assert.deepEqual(readLocation('#/people/grades'), {page:'people',section:'grades'})
+assert.deepEqual(readLocation('#/people'), {page:'people'})
+assert.deepEqual(readLocation('#/people/unknown'), {page:'people'})
 
 // Creating/importing a child always uses the current parent, even if the input carries another ID.
 const input = { name: '数学', project_id: 'p2' }

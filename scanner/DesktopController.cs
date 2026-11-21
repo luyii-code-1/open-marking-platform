@@ -667,7 +667,7 @@ public sealed class DesktopController : IDisposable
         if(_api?.LoggedIn!=true)throw new InvalidOperationException("请先连接服务器。");
         var remote=await _api.Get($"scan-batches/{batch.Id}",_lifetime.Token);
         if(Text(remote,"status")=="paired"){_queue.BatchStatus(batch.Id,"paired");return;}
-        if(remote.TryGetProperty("group_frozen",out var frozen)&&frozen.GetBoolean())throw new InvalidOperationException("成绩已发布，请先在管理端发起复核。");
+        if(remote.TryGetProperty("group_frozen",out var frozen)&&frozen.GetBoolean())throw new InvalidOperationException("成绩已发布。如需补扫，请联系系统管理员或管理教师，在管理后台打开该题卡的「成绩」，点击「发起成绩复核」。");
         if(Text(remote,"status")=="frozen")throw new InvalidOperationException("服务端批次仍被冻结，请先完成核查。");
         var pages=_queue.Pages(batch.Id).ToDictionary(p=>p.CaptureId);
         foreach(var page in (await _api.Get($"scan-batches/{batch.Id}/pages",_lifetime.Token)).EnumerateArray())if(pages.TryGetValue(Text(page,"id"),out var local))ApplyRemote(local,page);

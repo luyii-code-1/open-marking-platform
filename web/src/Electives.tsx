@@ -51,5 +51,5 @@ export function CatalogPicker({value=[],onChange}:{value?:string[];onChange?:(id
   const tags=useResource<Row[]>('/subject-tags',[])
   const options=tags.data.map(t=>({label:t.name,value:t.id}))
   return <Space direction="vertical">{options.length>0?<><Checkbox checked={options.every(t=>value.includes(t.value))} indeterminate={value.length>0&&value.length<options.length} onChange={e=>onChange?.(e.target.checked?options.map(t=>t.value):[])}>全选科目</Checkbox>
-    <Checkbox.Group options={options} value={value} onChange={v=>onChange?.(v.map(String))}/></>:!tags.loading&&'请先在科目管理中添加科目。'}</Space>
+    <Checkbox.Group options={options} value={value} onChange={v=>onChange?.(v.map(String))}/></>:tags.error?<Alert type="error" message={tags.error} action={<Button onClick={tags.reload}>重新加载科目</Button>}/>:tags.loaded&&<Space wrap><a href="#/subject-catalog" target="_blank" rel="noopener noreferrer">在新标签页打开科目管理，添加科目</a><Button onClick={tags.reload} loading={tags.loading}>刷新科目</Button></Space>}</Space>
 }

@@ -1,3 +1,4 @@
+from .lifecycle import RESULTS_REVIEW_GUIDE
 from .merged_questions import label as question_label
 import io
 import json
@@ -262,7 +263,7 @@ def claim_in_transaction(db, prepared, current, body):
         if question['type'] != 'subjective':
             raise HTTPException(422, '客观题由系统给分')
         if require(db, template['group_id'], 'groups').get('frozen'):
-            raise HTTPException(409, '成绩已冻结')
+            raise HTTPException(409, RESULTS_REVIEW_GUIDE)
         assignments = find(db, 'assignments', template_id=tid, question_id=qid)
         if not assignments:
             raise HTTPException(409, '请先配置阅卷教师')
@@ -393,7 +394,7 @@ def score_in_transaction(db, prepared, current, identifier, body):
         group = require(db, template['group_id'], 'groups')
         config = prepared[config_key] = question, group
     question, group = config
-    if group.get('frozen'): raise HTTPException(409,'成绩已冻结，请联系管理员复核')
+    if group.get('frozen'): raise HTTPException(409,RESULTS_REVIEW_GUIDE)
     if task['status'] not in ('claimed','completed') or (task['status']=='claimed' and task['expires_at']<time.time()): raise HTTPException(409,'任务已失效，请重新领取')
     if 'offline_protocol' in body:
         if type(body['offline_protocol']) is not int or body['offline_protocol']!=1:raise HTTPException(422,'离线评分协议不受支持')
@@ -427,7 +428,7 @@ def regrade_from(identifier:str,body:dict,current=Depends(user)):
         first=own_task(db,identifier,current)
         if first['user_id']!=current['id'] or first['status']!='completed':raise HTTPException(409,'请选择本人已完成的一份评分')
         template,_=question_for(db,first['template_id'],first['question_id'])
-        if require(db,template['group_id'],'groups').get('frozen'):raise HTTPException(409,'成绩已冻结，请联系管理员复核')
+        if require(db,template['group_id'],'groups').get('frozen'):raise HTTPException(409,RESULTS_REVIEW_GUIDE)
         tasks=sorted(find(db,'tasks',user_id=current['id'],template_id=template['id'],question_id=first['question_id'],status='completed'),key=lambda t:(t['created_at'],t['id']))
         tasks=[t for t in tasks if (t['created_at'],t['id'])>=(first['created_at'],first['id'])]
         position=time.time_ns()
@@ -554,7 +555,7 @@ def exception_details(identifier:str,current=Depends(admin)):
         from .school import student_view
         from .room_tags import view as room_view
         if student and (group or {}).get('grade_id'):student=student_view(db,student)
-        return {'exception':item,'context':{'project':(project or {}).get('name'),'subject':(subject or {}).get('name'),'group':(group or {}).get('name'),'room':(batch or {}).get('room'),'room_tags':room_view(db,(submission or batch or {}).get('room_tags',[])), 'grade':(get(db,(group or {}).get('grade_id'),'grades') or {}).get('name'),'candidate_number':(submission or page or {}).get('candidate_number'),'student_name':(student or {}).get('name')},'pages':[{'id':p['id'],'side':p['side'],'sequence':p['sequence'],'status':p['status'],'image_url':f"/api/v1/pages/{p['id']}/image",'selections':{str(q['number']):p.get('selections',{}).get(q['id'],[]) for q in (template or {}).get('questions',[]) if q['type']!='subjective' and q['id'] in p.get('selections',{})}} for p in pages if p],'answer_image_url':f"/api/v1/tasks/{task['id']}/image" if task else None}
+        return {'exception':item,'context':{'project_id':(project or {}).get('id'),'subject_id':(subject or {}).get('id'),'group_id':(group or {}).get('id'),'grade_id':(group or {}).get('grade_id'),'project':(project or {}).get('name'),'subject':(subject or {}).get('name'),'group':(group or {}).get('name'),'room':(batch or {}).get('room'),'room_tags':room_view(db,(submission or batch or {}).get('room_tags',[])), 'grade':(get(db,(group or {}).get('grade_id'),'grades') or {}).get('name'),'candidate_number':(submission or page or {}).get('candidate_number'),'student_name':(student or {}).get('name')},'pages':[{'id':p['id'],'side':p['side'],'sequence':p['sequence'],'status':p['status'],'image_url':f"/api/v1/pages/{p['id']}/image",'selections':{str(q['number']):p.get('selections',{}).get(q['id'],[]) for q in (template or {}).get('questions',[]) if q['type']!='subjective' and q['id'] in p.get('selections',{})}} for p in pages if p],'answer_image_url':f"/api/v1/tasks/{task['id']}/image" if task else None}
 
 
 @router.post('/exceptions/resolve')

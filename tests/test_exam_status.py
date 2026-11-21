@@ -88,6 +88,47 @@ def test_manual_override_persists_and_reset_tracks_current_publication(exam):
             (saved['id'],f['actor'])).fetchone()[0]==4
 
 
+def test_result_review_uses_current_publication_and_requires_management(exam):
+    request = exam['request']
+    group, _ = exam['card']()
+    card = 'groups/' + group['id']
+    publish = {'group_id': group['id']}
+    request('POST', 'results/publish', publish)
+    workflow = request('GET', card + '/workflow')
+    assert (workflow['project_id'], workflow['subject_id']) == (exam['project']['id'], exam['subject']['id'])
+    assert workflow['published'] and not workflow['in_review']
+    timestamp = workflow['published_at']
+    form = {'expected_published_at': timestamp, 'reason': '更正补扫答卷'}
+    teacher = {'username':'review-reader','password':'teacher-test-password','name':'教师','role':'teacher'}
+    request('POST', 'users', teacher)
+    token = request('POST', 'auth/login', teacher)['token']
+    request('POST', card + '/reopen', form, 403, auth={'Authorization':'Bearer '+token})
+    request('POST', card + '/reopen', {**form,'reason':' '}, 422)
+    request('POST', card + '/reopen', {'reason':'继续补扫','scan_only':True}, 409)
+    request('POST', card + '/reopen', {**form,'expected_published_at':timestamp-1}, 409)
+    assert request('GET', card + '/workflow')['published']
+    request('POST', card + '/reopen', form)
+    reopened = request('GET', card + '/workflow')
+    assert reopened['in_review'] and not reopened['published']
+    request('POST', card + '/reopen', form, 409)
+    request('POST', 'results/publish', publish)
+    request('POST', card + '/reopen', form, 409)
+    assert request('GET', card + '/workflow')['published']
+
+
+def test_publication_blockers_have_scoped_destinations():
+    from server.workflow import publication_actions, publication_blockers
+    state = dict(template_id=None, missing_answers=[2], open_batches=1, open_exceptions=2,
+                 results={'pending':0,'completed':0}, regrades=1)
+    actions = publication_actions(state)
+    assert publication_blockers(state) == [a['issue'] for a in actions]
+    assert [a['section'] for a in actions] == ['template','template','scans','exceptions','marking','roster']
+    assert all(a['label'] for a in actions)
+    state.update(template_id='published',missing_answers=[],open_batches=0,open_exceptions=0,
+                 results={'pending':0,'completed':1},regrades=0)
+    assert publication_actions(state) == []
+
+
 def test_catalog_filtering_and_scanner_read_only_status(exam):
     f=exam; r=f['request']; project=f['project']; group,_=f['card']()
     other=r('POST','projects',{'name':'进行中的另一考试'})
