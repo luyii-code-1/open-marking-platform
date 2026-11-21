@@ -150,3 +150,39 @@ html,body,#root{height:100%;margin:0}
 .scan-face img{width:30px;height:42px;object-fit:contain}
 .scan-face:hover,.scan-face:focus-visible,.scan-face.is-selected{border-color:#4c87de;background:#edf5ff}
 .scan-face.is-missing{flex-direction:column;gap:0;border-style:dashed;background:transparent;color:#586576;cursor:default}
+
+
+.scan-workflow-steps{flex-shrink:0;margin:4px 0 12px;padding:10px 16px;background:#fff;border:1px solid #e2e7ed;border-radius:8px}
+.scan-workflow-steps .ant-steps-item-title{font-size:14px!important}
+.scanner-settings .ant-select{width:100%}
+.scanner-settings .ant-form-item{margin-bottom:22px}
+.scanner-resolution{display:grid;grid-template-columns:1fr 1fr;gap:12px;width:100%}
+.scanner-resolution .ant-radio-button-wrapper{height:auto;min-height:78px;padding:12px 14px;border:1px solid #cbd5e1;border-radius:6px;line-height:1.6;white-space:normal}
+.scanner-resolution .ant-radio-button-wrapper::before{display:none}
+.scanner-resolution strong,.scanner-resolution span:not(.ant-radio-button){display:block}
+.scanner-resolution strong{font-size:17px}
+.scanner-resolution strong+span{font-size:13px;color:#434343;margin-top:4px}
+.scan-device-summary{display:grid;gap:6px;padding:12px;background:#fff;border:1px solid #dfe5ec;border-radius:8px;font-size:13px}
+.scan-device-summary>span{overflow-wrap:anywhere;color:#434343}
+.scan-operation-buttons>.ant-btn-primary{grid-column:1/-1;min-height:42px;font-size:15px}
+.scan-operation-buttons>.ant-btn{font-size:13px;min-height:36px}
+.scan-operation-card .ant-typography{font-size:13px}
+.scan-upload-card>.ant-btn{min-height:40px;font-size:14px}
+.scan-server-list{margin-bottom:20px}
+.scan-server-list>.ant-radio-group{display:grid;gap:10px;width:100%;margin-bottom:12px}
+.scan-server-row{display:flex;align-items:center;justify-content:space-between;gap:8px;border:1px solid #dfe5ec;border-radius:6px;padding:12px}
+.scan-server-row.is-selected{background:#eef5ff;border-color:#0866ff}
+.scan-server-row>.ant-radio-wrapper{min-width:0;flex:1;align-items:flex-start;margin:0}
+.scan-server-row .ant-radio-wrapper>span:last-child{min-width:0;flex:1}
+.scan-server-row strong,.scan-server-row .ant-radio-wrapper span span{display:block;overflow-wrap:anywhere}
+.scan-server-row strong{font-size:15px;margin-bottom:4px}
+.scan-server-row .ant-radio-wrapper span span{font-size:12px;color:#434343}
+.scan-server-row>.ant-btn,.scan-server-row>.ant-tag{flex-shrink:0;margin:0}
+.scan-pairing{margin-bottom:20px}
+.scan-connection-card{width:500px}
+.scan-connection-card .ant-form>.ant-btn+.ant-btn{margin-top:12px}
+.ant-drawer .scan-connection{padding:0}
+.ant-drawer .scan-connection-card{padding:0;border:0;box-shadow:none}
+.ant-drawer .scan-connection-card>.brand,.ant-drawer .scan-connection-card>h1{display:none}
+.scan-operations .ant-tabs-tab,.scan-panel-heading h3,.scan-operation-card h3{font-size:14px}
+@media(max-height:760px){.scan-workflow-steps{padding:6px 12px;margin-bottom:8px}.scan-workflow-steps .ant-steps-item-title{font-size:13px!important}}
