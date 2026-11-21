@@ -11,7 +11,7 @@ import { Brand } from './Brand'
 import { cardName,subjectGrades,unassignedGrade } from './examNavigation'
 import { rowNavigation } from './rowNavigation'
 import {scannerRoomCounts} from './scannerRoomCounts'
-import {scannerRoomState,type ScanRun} from './scannerRoomPages'
+import {scannerRoomState,type Paper,type ScanRun} from './scannerRoomPages'
 import {ScanDesk} from './ScanDesk'
 import {ScanChoices} from './ScanChoices'
 import {ScanConnection} from './ScanConnection'
@@ -113,7 +113,10 @@ function Scanner() {
     const names=new Map((group?.roster||[]).map((r:Row)=>[r.candidate_number,r.name]))
     if(review!==null)setReview(rows.map((r:Row)=>({...r,name:names.get(r.candidate)||'未匹配'})))
     const updated=rows.find((r:Row)=>r.id===answer.id)
-    if(updated)setAnswer({...updated,name:names.get(updated.candidate)||'未匹配'})
+    if(updated)setAnswer(current=>{
+      if(!current||current.id!==updated.id||current.batch_id!==updated.batch_id)return current
+      return {...updated,sides:current.sides.map((side:Row)=>updated.sides.find((r:Row)=>r.id===side.id)||side),name:names.get(updated.candidate)||'未匹配'}
+    })
   }
   const locked = busy || !!state?.capturing || !!state?.syncing
   async function openProject(id: string) { await action('openProject', { project_id: id }, () => { setInProject(true); setSubject(''); setGrade('');setGroup(''); setBatch('') }) }
@@ -147,6 +150,14 @@ function Scanner() {
       },
     })
   }
+  function clearSelection(){
+    setState((prev:any)=>prev&&({...prev,pages:[],papers:[]}))
+    imageRequest.current++;selectionRequest.current++
+    setDeskPage(null);setAnswer(null);setOriginal('');setOriginalError('')
+  }
+  function changePage(next:number){
+    if(next!==page){clearSelection();setPage(next)}
+  }
   async function startScan(){
     if(!deviceReady){setDeviceOpen(true);return}
     let id=batchId
@@ -168,9 +179,11 @@ function Scanner() {
     try{
       const rows=await scannerCall<Row[]>('pageReview',{batch_id:row.batch_id||batchId})
       if(request!==selectionRequest.current)return
-      const found=rows.find(r=>r.sides.some((side:Row)=>side.id===row.id))
+      const paper=state.papers?.find((p:Paper)=>p.front?.id===row.id||p.back?.id===row.id)
+      const anchor=paper?.front||row
+      const found=rows.find(r=>r.sides.some((side:Row)=>side.id===anchor.id))
       const names=new Map<string,string>((group?.roster||[]).map((r:Row)=>[r.candidate_number,r.name]))
-      const record:Row=found?{...found,name:names.get(found.candidate)||'未匹配'}:{...row,batch_id:row.batch_id||batchId,editable:false,sides:[row]}
+      const record:Row=found?{...found,...(paper?{sides:[paper.front,paper.back].filter(Boolean),editable:!!paper.front&&found.editable}:{}),name:names.get(found.candidate)||'未匹配'}:{...row,batch_id:row.batch_id||batchId,editable:false,sides:[row]}
       await openOriginal(record,record.sides.findIndex((side:Row)=>side.id===row.id))
     }catch(e){if(request===selectionRequest.current)setOriginalError((e as Error).message)}
   }
@@ -222,12 +235,12 @@ function Scanner() {
           <Typography.Paragraph type="secondary">题卡共确认 {group.confirmed_sheets??group.confirmed_students??0} 份 · 服务端统计以上次刷新为准</Typography.Paragraph>
           <Button disabled={!state.online||locked} onClick={()=>action('downloadProject',{project_id:pack.project.id})}>刷新考场进度</Button>
           {state.batches.some((b:Row)=>b.group_id===group.id&&(b.blocked||b.status==='frozen'))&&<Table<Row> rowKey="id" dataSource={state.batches.filter((b:Row)=>b.group_id===group.id&&(b.blocked||b.status==='frozen'))} columns={[{title:'待核对',dataIndex:'name'},{title:'原因',dataIndex:'error'},{title:'操作',render:(_,r)=><Button onClick={()=>{setScanView('room');setScanRun(null);setBatch(r.id)}}>查看原图</Button>}]}/>}</section>
-            : <ScanDesk rows={state.pages} total={state.page_total} page={page} onPage={setPage}
+            : <ScanDesk rows={state.pages} papers={state.papers||[]} total={state.paper_total||0} page={page} onPage={changePage}
                 selected={state.pages.find((r:Row)=>r.id===deskPage?.id)||deskPage}
                 onSelect={selectDeskPage} capturing={state.capturing} syncing={state.syncing} processing={state.processing} processingRemaining={state.processing_remaining||0} needsReview={needsReview}
                 context={<div><h2>{batch.room_tags?.[0]?.name||'未指定考场'}</h2><span>{pack.project.name} · {subject.name} · {group.grade_name} · {cardName(group,subject)} · {batch.paper} {batch.sides===2?'双面':'单面'}</span></div>}
                 stats={[{label:'已采集',value:sumVisible('total')+' 面'},{label:'正面',value:sumVisible('front_count')+' 面'},{label:'背面',value:sumVisible('back_count')+' 面'},{label:'待核对',value:sumVisible('blocked')+' 面'},{label:'本地暂存',value:sumVisible('pending')+' 面'},{label:'已上传',value:sumVisible('uploaded')+' 面'}]}
-                scope={<Radio.Group value={scanView} onChange={e=>{setScanView(e.target.value);setPage(1)}} optionType="button" options={[{label:'本次扫描',value:'run',disabled:!scanRun},{label:'本考场全部',value:'room'}]}/>}
+                scope={<Radio.Group value={scanView} onChange={e=>{clearSelection();setScanView(e.target.value);setPage(1)}} optionType="button" options={[{label:'本次扫描',value:'run',disabled:!scanRun},{label:'本考场全部',value:'room'}]}/>}
                 actions={<>
               <Button type="primary" loading={busyKey===actionKey('start',{batch_id:batchId})} disabled={locked || group.frozen} onClick={startScan}>开始扫描</Button><Button danger loading={busyKey===actionKey('stop')} disabled={!state.capturing} onClick={() => action('stop')}>停止进纸</Button>
               <Button disabled={locked||state.processing} onClick={async()=>{

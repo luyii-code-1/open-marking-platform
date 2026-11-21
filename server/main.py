@@ -538,6 +538,8 @@ from .analysis import router as analysis_router
 app.include_router(analysis_router)
 from .result_reports import router as result_reports_router
 app.include_router(result_reports_router)
+from .paper_lesson import router as paper_lesson_router
+app.include_router(paper_lesson_router)
 from .roster import router as roster_router
 app.include_router(roster_router)
 from .release import router as release_router

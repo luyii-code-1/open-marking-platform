@@ -84,8 +84,15 @@ def test_result_overview_uses_completed_papers_and_preserves_visibility(tmp_path
         assert subject['score_rate']==80 and {row['kind'] for row in rows}=={'card','subject','grade','class'}
         response=client.get('/api/v1/analysis/overview/export',params={'scope_ids':subject['id'],'format':'xlsx'},headers=headers)
         assert response.status_code==200 and load_workbook(io.BytesIO(response.content)).active.max_row==2
+        detail_params={'project_id':project['id'],'scope_id':subject['id'],'group_id':group['id']}
+        detail=client.get('/api/v1/analysis/overview/detail',params=detail_params,headers=headers)
+        assert detail.status_code==200 and len(detail.json()['students'])==2
+        assert {r['status'] for r in detail.json()['students']}=={'pending','completed'}
+        assert {r['group_id'] for r in detail.json()['students']}=={group['id']}
+        assert client.get('/api/v1/analysis/overview',params={'group_id':'other'},headers=headers).json()['scopes']==[]
         person={'username':'teacher','password':'teacher-password','name':'教师'}
         client.post('/api/v1/users',headers=headers,json=person)
         teacher={'Authorization':'Bearer '+client.post('/api/v1/auth/login',json=person).json()['token']}
+        assert client.get('/api/v1/analysis/overview/detail',params=detail_params,headers=teacher).status_code==404
         assert client.get('/api/v1/analysis/overview',headers=teacher).json()['scopes']==[]
         assert client.get('/api/v1/analysis/overview/export',params={'scope_ids':subject['id']},headers=teacher).status_code==403

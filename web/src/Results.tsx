@@ -9,7 +9,7 @@ import { Button } from './Button'
 import { ContentCard as Card } from './components'
 import { useResource, type Row } from './api'
 import { HierarchyPicker } from './HierarchyPicker'
-import { cardName } from './examNavigation'
+import { cardName,examPath } from './examNavigation'
 import { ResultExport } from './ResultExport'
 import {ResultOverview} from './ResultOverview'
 import {ResultFilters,useResultFilterOptions,classLabel,type ResultFilterOptions} from './ResultFilters'
@@ -18,6 +18,7 @@ import {emptyResultFilters,withResultFilters,type ResultFilterValue} from './res
 import {ClassResultSummary} from './ClassResultSummary'
 import './result-settings.css'
 import {ClassResults} from './ClassResults'
+import {PaperLesson,type LessonScope} from './PaperLesson'
 
 const number=(value:unknown)=>value===null||value===undefined?'—':String(value)
 const statusName:Record<string,string>={absent:'缺考',pending:'待结分',completed:'已完成',unscanned:'未扫描'}
@@ -39,10 +40,17 @@ function rangeSummary(filters:ResultFilterValue,options:ResultFilterOptions){
 }
 
 export function Results(props:{admin:boolean;groupId?:string;projectId?:string;projectOnly?:boolean}){
-  return <Tabs destroyOnHidden items={[{key:'classes',label:'班级成绩',children:<ClassResults {...props}/>},{key:'analysis',label:'统计分析',children:<AdvancedResults {...props}/>} ]}/>
+  const [tab,setTab]=useState('classes'),[exam,setExam]=useState('')
+  const [lesson,setLesson]=useState<LessonScope>({})
+  const openLesson=(scope:LessonScope)=>{setLesson(scope);setTab('lesson')}
+  const openExam=(id:string)=>{
+    if(props.admin&&(props.groupId||props.projectId&&props.projectId!==id)){window.location.hash=examPath({projectId:id,section:'summary'});return}
+    setExam(id);setTab('classes')
+  }
+  return <Tabs activeKey={tab} onChange={setTab} destroyOnHidden items={[{key:'classes',label:'班级成绩',children:<ClassResults key={exam} initialProject={exam} onLesson={props.admin?undefined:openLesson} {...props}/>},...(!props.admin?[{key:'lesson',label:'讲评试卷',children:<PaperLesson initial={lesson}/>}]:[]),{key:'analysis',label:'统计分析',children:<AdvancedResults {...props} onOpenExam={openExam}/>} ]}/>
 }
 
-function AdvancedResults({admin,groupId,projectId,projectOnly=false}:{admin:boolean;groupId?:string;projectId?:string;projectOnly?:boolean}) {
+function AdvancedResults({admin,groupId,projectId,projectOnly=false,onOpenExam}:{onOpenExam:(id:string)=>void;admin:boolean;groupId?:string;projectId?:string;projectOnly?:boolean}) {
   const groups=useResource<Row[]>('/groups',[]),projects=useResource<Row[]>('/projects',[]),subjects=useResource<Row[]>('/subjects',[])
   const [selectedGroupId,setGroup]=useState(groupId || ''),group=groupId || selectedGroupId,[selectedProject,setProject]=useState(projectId || ''),project=projectId || selectedProject,[metric,setMetric]=useState('raw'),[includeAbsent,setIncludeAbsent]=useState(false),[pass,setPass]=useState(60),[excellent,setExcellent]=useState(85),[cutoffs,setCutoffs]=useState({pass:60,excellent:85}),[view,setView]=useState('classes'),{message}=App.useApp()
   const [filters,setFilters]=useState(emptyResultFilters),[projectFilters,setProjectFilters]=useState(emptyResultFilters),[rankingClass,setRankingClass]=useState(''),[summaryClass,setSummaryClass]=useState(''),[projectTab,setProjectTab]=useState('cross')
@@ -115,5 +123,5 @@ function AdvancedResults({admin,groupId,projectId,projectOnly=false}:{admin:bool
     }),{title:'已记录原始分合计',dataIndex:'recorded_raw_sum',render:number},{title:'已记录采用分合计',dataIndex:'recorded_effective_sum',render:number}]}/></Card>:<Card loading={crossResource.loading}><Empty description="选择考试查看跨科汇总"/></Card>}
   </Space>},{key:'class-summary',label:'班级总表',children:<ClassResultSummary key={summaryQuery.toString()} project={project} query={summaryQuery} options={projectOptions.data} classIds={projectFilters.classIds} classId={summaryClass} onClass={setSummaryClass}/>} ]}/>
   </Space>
-  return <>{detail?.group===group&&detail&&<AnswerDetails key={[group,detail.q.id,roomTag,includeAbsent,query.toString()].join(':')} group={group} q={detail.q} room={roomTag} absent={includeAbsent} query={query} onClose={()=>setDetail(null)}/>}<Space direction="vertical" style={{width:'100%'}}>{(groups.error||projects.error||subjects.error)&&<Alert type="error" message={groups.error||projects.error||subjects.error}/>}{groupId ? <Tabs items={[{key:'details',label:'题卡成绩',children:groupView},{key:'overview',label:'概览与对比',children:<ResultOverview groupId={groupId}/>}]}/> : projectOnly ? <Tabs items={[{key:'overview',label:'概览与对比',children:<ResultOverview projectId={projectId}/>},{key:'project',label:'跨科汇总',children:projectView}]}/> : <Tabs items={[{key:'overview',label:'概览与对比',children:<ResultOverview/>},{key:'group',label:'科目与班级分析',children:groupView},{key:'project',label:'跨科汇总',children:projectView}]}/>}</Space></>
+  return <>{detail?.group===group&&detail&&<AnswerDetails key={[group,detail.q.id,roomTag,includeAbsent,query.toString()].join(':')} group={group} q={detail.q} room={roomTag} absent={includeAbsent} query={query} onClose={()=>setDetail(null)}/>}<Space direction="vertical" style={{width:'100%'}}>{(groups.error||projects.error||subjects.error)&&<Alert type="error" message={groups.error||projects.error||subjects.error}/>}{groupId ? <Tabs items={[{key:'details',label:'题卡成绩',children:groupView},{key:'overview',label:'概览与对比',children:<ResultOverview onOpenExam={onOpenExam} groupId={groupId}/>}]}/> : projectOnly ? <Tabs items={[{key:'overview',label:'概览与对比',children:<ResultOverview onOpenExam={onOpenExam} projectId={projectId}/>},{key:'project',label:'跨科汇总',children:projectView}]}/> : <Tabs items={[{key:'overview',label:'概览与对比',children:<ResultOverview onOpenExam={onOpenExam}/>},{key:'group',label:'科目与班级分析',children:groupView},{key:'project',label:'跨科汇总',children:projectView}]}/>}</Space></>
 }

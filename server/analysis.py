@@ -150,12 +150,14 @@ def result_filter_options(group_id:str|None=None,project_id:str|None=None,curren
         return {**filter_options(rows),'groups':groups}
 
 
-def overview_rows(db,current,project_id=None):
+def overview_rows(db,current,project_id=None,group_id=None,detail_id=None):
     """Comparable paper, subject, grade and class cohorts within the visible scope."""
     projects={p['id']:p for p in objects(db,'projects')}
     subjects={s['id']:s for s in objects(db,'subjects')}
     grades={g['id']:g for g in objects(db,'grades')}
     groups=[g for g in objects(db,'groups') if g.get('template_id') and g.get('subject_id') in subjects]
+    if group_id:
+        groups=[g for g in groups if g['id']==group_id]
     if project_id:
         require(db,project_id,'projects')
         groups=[g for g in groups if subjects[g['subject_id']]['project_id']==project_id]
@@ -163,6 +165,15 @@ def overview_rows(db,current,project_id=None):
         from .visibility import result_groups
         visible=result_groups(db,current['id'])
         groups=[g for g in groups if g['id'] in visible]
+    if detail_id:
+        kind,_,scope=detail_id.partition(':')
+        if kind=='card':
+            groups=[g for g in groups if g['id']==scope]
+        elif kind in ('subject','grade','class'):
+            subject_id=scope.partition(':')[0]
+            groups=[g for g in groups if g['subject_id']==subject_id]
+        else:
+            return []
     cohorts={}
     for group in groups:
         subject=subjects[group['subject_id']];project=projects.get(subject['project_id'])
@@ -178,10 +189,13 @@ def overview_rows(db,current,project_id=None):
             *[('class',subject['id']+':'+cid,next(r['class_name'] for r in rows if r['class_id']==cid),[r for r in rows if r['class_id']==cid],{'class_id':cid,'class_name':next(r['class_name'] for r in rows if r['class_id']==cid),'grade':next(r.get('grade') for r in rows if r['class_id']==cid)}) for cid in {r['class_id'] for r in rows}],
         ]:
             key=kind+':'+cohort_key
+            if detail_id and detail_id!=key:continue
             target=cohorts.setdefault(key,{'id':key,'kind':kind,'label':label,**base,**extra,'group_ids':set(),'values':[],'full_scores':set()})
             target['group_ids'].add(group['id'])
             target['full_scores'].add(maximum)
-            target['values'].extend({**r,'full_score':maximum} for r in subset)
+            record={'full_score':maximum}
+            if detail_id:record.update(group_id=group['id'],card=group['name'])
+            target['values'].extend({**r,**record} for r in subset)
     output=[]
     for cohort in cohorts.values():
         rows=cohort.pop('values');completed=[r for r in rows if r['status']=='completed' and r.get('total') is not None]
@@ -192,24 +206,36 @@ def overview_rows(db,current,project_id=None):
         stats['score_rate']=rounded(sum(rates)/len(rates)) if rates else None
         stats['pass_rate']=rounded(100*sum(r['total']>=r['full_score']*.6 for r in completed)/len(completed)) if completed else None
         stats['excellent_rate']=rounded(100*sum(r['total']>=r['full_score']*.85 for r in completed)/len(completed)) if completed else None
+        if detail_id:
+            fields=('group_id','card','student_id','name','candidate_number','class_name','grade','total','status','full_score')
+            cohort['students']=[{k:r.get(k) for k in fields} for r in rows]
         output.append({**cohort,'group_ids':sorted(cohort['group_ids']),'full_score':maximum,'records':len(rows),
                        **{status:sum(r['status']==status for r in rows) for status in ('completed','absent','pending','unscanned')},**stats})
     return sorted(output,key=lambda r:(r['project'],r['subject'],r['kind'],str(r.get('grade') or ''),r['label']))
 
 
 @router.get('/analysis/overview')
-def overview(project_id:str|None=None,current=Depends(user)):
+def overview(project_id:str|None=None,group_id:str|None=None,current=Depends(user)):
     with connect() as db:
         db.execute('BEGIN')
-        return {'scopes':overview_rows(db,current,project_id)}
+        return {'scopes':overview_rows(db,current,project_id,group_id)}
+
+
+@router.get('/analysis/overview/detail')
+def overview_detail(scope_id:str,project_id:str,group_id:str|None=None,current=Depends(user)):
+    with connect() as db:
+        db.execute('BEGIN')
+        rows=overview_rows(db,current,project_id,group_id,detail_id=scope_id)
+        if not rows:raise HTTPException(404,'此统计范围不存在或不可查看')
+        return rows[0]
 
 
 @router.get('/analysis/overview/export')
-def export_overview(scope_ids:str='',project_id:str|None=None,format:FileFormat='csv',current=Depends(user)):
+def export_overview(scope_ids:str='',project_id:str|None=None,group_id:str|None=None,format:FileFormat='csv',current=Depends(user)):
     requested=set(scope_ids.split(',')) if scope_ids else None
     with connect() as db:
         db.execute('BEGIN')
-        rows=overview_rows(db,current,project_id)
+        rows=overview_rows(db,current,project_id,group_id)
     if requested is not None:
         if requested-set(row['id'] for row in rows):raise HTTPException(403,'对比范围不存在或不可访问')
         rows=[row for row in rows if row['id'] in requested]

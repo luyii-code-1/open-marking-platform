@@ -1,5 +1,5 @@
 import {useEffect,useState} from 'react'
-import {Alert,Card,Empty,Input,Modal,Space,Tabs,Tag} from 'antd'
+import {Alert,Card,Empty,Input,Modal,Space,Tag} from 'antd'
 import {Button} from './Button'
 import {Table} from './DataTable'
 import {MultipleRecordSelect} from './RecordSelect'
@@ -8,6 +8,23 @@ import {AssetImage} from './components'
 import {ErrorNotice} from './EntityTable'
 import {rowNavigation} from './rowNavigation'
 
+function SheetFaces({sheet}:{sheet:Row}){
+  const [zoom,setZoom]=useState('')
+  const pages:Row[]=sheet.pages||[]
+  const sides=sheet.sides===2||pages.some(p=>p.side==='back')?['front','back']:['front']
+  return <section className="sheet-faces">
+    {zoom&&<Button onClick={()=>setZoom('')}>返回整张答卷</Button>}
+    <div className={'sheet-pair '+(zoom?'zoomed':'')} aria-label="扫描原图">
+      {sides.map(side=>{
+        const faces=pages.filter(p=>(p.side||'front')===side),label=side==='front'?'正面':'背面'
+        if(!faces.length)return !zoom&&<div key={side} className="sheet-missing">{label} · 缺面</div>
+        return faces.map(face=><button key={face.id} type="button" hidden={!!zoom&&zoom!==face.id} aria-label={(zoom?'缩小':'放大')+label} onClick={()=>setZoom(zoom?'':face.id)}>
+          <strong>{label}</strong><AssetImage src={face.image_url}/>
+        </button>)
+      })}
+    </div>
+  </section>
+}
 type Filters={grades:string[];classes:string[];subjects:string[];groups:string[]}
 type LookupResult={items:Row[];total:number;page:number;options:Record<keyof Filters,Row[]>;scope?:{project_id:string;group_id:string|null;scans_purged:boolean}}
 const emptyFilters:Filters={grades:[],classes:[],subjects:[],groups:[]}
@@ -23,14 +40,14 @@ export function SheetLookup({projectId,groupId,initialQuery=''}:{projectId:strin
   for(const [key,name] of [['grades','grade_ids'],['classes','class_ids'],['subjects','subject_ids'],['groups','group_ids']] as const)for(const id of filters[key])params.append(name,id)
   const result=useResource<LookupResult>(`/projects/${projectId}/scanned-sheets?${params}`,emptyResult)
   const data=result.data.scope?.project_id===projectId&&(result.data.scope?.group_id||'')===(groupId||'')?result.data:emptyResult
-  function filter(key:keyof Filters,ids:string[]){setFilters(current=>({...current,[key]:ids}));setPage(1);setSheet(null)}
+  function filter(key:keyof Filters,ids:string[]){setFilters(current=>({...current,[key]:ids,...(key==='groups'&&ids.length?{subjects:[]}: {})}));setPage(1);setSheet(null)}
   const grades=data.options.grades.map(row=>({value:row.id,label:row.name}))
   const fixed=groupId?data.options.groups.find(row=>row.id===groupId):undefined
   return <Card title="答题卡查询"><Space direction="vertical" size={12} style={{width:'100%'}}>
     <Space wrap align="start">
       <MultipleRecordSelect title="年级" value={filters.grades} onChange={ids=>filter('grades',ids)} records={data.options.grades}/>
       <MultipleRecordSelect title="班级" value={filters.classes} onChange={ids=>filter('classes',ids)} records={data.options.classes} label={row=>[row.grade,row.name].filter(Boolean).join(' · ')} columns={[{title:'年级',dataIndex:'grade'},{title:'班级',dataIndex:'name'}]} fields={[{key:'grade',label:'年级',options:grades,values:row=>[row.grade_id]}]}/>
-      {!groupId&&<><MultipleRecordSelect title="科目" value={filters.subjects} onChange={ids=>filter('subjects',ids)} records={data.options.subjects}/><MultipleRecordSelect title="题卡" value={filters.groups} onChange={ids=>filter('groups',ids)} records={data.options.groups} label={row=>[row.subject,row.grade,row.name].filter(Boolean).join(' · ')} columns={[{title:'科目',dataIndex:'subject'},{title:'年级',dataIndex:'grade'},{title:'题卡',dataIndex:'name'}]} fields={[{key:'grade',label:'年级',options:grades,values:row=>[row.grade_id]},{key:'subject',label:'科目',options:data.options.subjects.map(row=>({value:row.id,label:row.name})),values:row=>[row.subject_id]}]}/></>}
+      {!groupId&&<>{!filters.groups.length&&<MultipleRecordSelect title="科目" value={filters.subjects} onChange={ids=>filter('subjects',ids)} records={data.options.subjects}/>}<MultipleRecordSelect title="题卡" value={filters.groups} onChange={ids=>filter('groups',ids)} records={data.options.groups.filter(row=>!filters.subjects.length||filters.subjects.includes(row.subject_id))} label={row=>[row.subject,row.grade,row.name].filter(Boolean).join(' · ')} columns={[{title:'科目',dataIndex:'subject'},{title:'年级',dataIndex:'grade'},{title:'题卡',dataIndex:'name'}]} fields={[{key:'grade',label:'年级',options:grades,values:row=>[row.grade_id]},{key:'subject',label:'科目',options:data.options.subjects.map(row=>({value:row.id,label:row.name})),values:row=>[row.subject_id]}]}/></>}
       {Object.values(filters).some(ids=>ids.length>0)&&<Button onClick={()=>{setFilters(emptyFilters);setPage(1);setSheet(null)}}>重置范围</Button>}
     </Space>
     {fixed&&<Space wrap><Tag>{fixed.subject}</Tag><Tag>{fixed.grade}</Tag><Tag>{fixed.name}</Tag></Space>}
@@ -44,6 +61,6 @@ export function SheetLookup({projectId,groupId,initialQuery=''}:{projectId:strin
       columns={[{title:'姓名',dataIndex:'name'},{title:'准考证号',dataIndex:'candidate_number'},{title:'年级',dataIndex:'grade'},{title:'班级',dataIndex:'class_name'},{title:'科目',dataIndex:'subject'},{title:'题卡',dataIndex:'card'},{title:'扫描图像',dataIndex:'image_status',render:(value:string)=><Tag>{value==='purged'?'已清理':value==='available'?'可查看':'暂无图像'}</Tag>},
       {title:'操作',render:(_:unknown,row:Row)=><Button type="link" onClick={()=>setSheet(row)}>查看答卷</Button>}].map(column=>'dataIndex' in column?{...column,sortOrder:column.dataIndex===sort.field?sort.order:null}:column)}/>
   </Space><Modal title={sheet&&`${sheet.name} · ${sheet.candidate_number} · ${sheet.subject}`} width={900} open={!!sheet} onCancel={()=>setSheet(null)} footer={null}>
-    {sheet?.image_status==='purged'||data.scope?.scans_purged?<Alert type="info" showIcon message="该考试的扫描文件已清理，无法查看原卷。成绩和统计仍可查询与导出。"/>:sheet?.pages.length?<Tabs key={sheet.id} items={sheet.pages.map((p:Row)=>({key:p.id,label:p.side==='back'?'背面':'正面',children:<AssetImage src={p.image_url}/>}))}/>:<Empty description="暂无扫描图像"/>}
+    {sheet?.image_status==='purged'||data.scope?.scans_purged?<Alert type="info" showIcon message="该考试的扫描文件已清理，无法查看原卷。成绩和统计仍可查询与导出。"/>:sheet?.pages.length?<SheetFaces key={sheet.id} sheet={sheet}/>:<Empty description="暂无扫描图像"/>}
   </Modal></Card>
 }

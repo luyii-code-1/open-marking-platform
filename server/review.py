@@ -68,15 +68,22 @@ def completed(db,submission_id,question_id):
     return sorted(tasks_for_answer(db,submission_id,question_id,completed_only=True),key=lambda t:t['created_at'])
 
 
-def result_for(db,submission,question,scored_task=None):
+def objective_selections(db,submission):
+    answers={}
+    for pid in submission.get('pages',[]):
+        for qid,selected in require(db,pid,'pages').get('selections',{}).items():
+            answers.setdefault(qid,set()).update(selected)
+    answers.update({qid:set(selected) for qid,selected in submission.get('objective_overrides',{}).items()})
+    return answers
+
+
+def result_for(db,submission,question,scored_task=None,*,selections=None):
     if submission['status']=='absent': return 0
     if question['type']!='subjective':
         if not question.get('answer'):return None
         if question['id'] in submission.get('objective_overrides',{}):return objective_score(submission['objective_overrides'][question['id']],question.get('answer',[]),question['points'],question.get('rule'))
-        selected=[]
-        for page_id in submission['pages']:
-            selected.extend(require(db,page_id,'pages').get('selections',{}).get(question['id'],[]))
-        return objective_score(selected,question.get('answer',[]),question['points'],question.get('rule'))
+        answers=selections if selections is not None else objective_selections(db,submission)
+        return objective_score(answers.get(question['id'],()),question['answer'],question['points'],question.get('rule'))
     tasks=completed(db,submission['id'],question['id'])
     if scored_task is not None:
         for index, previous in enumerate(tasks):
@@ -508,6 +515,24 @@ def results(group_id:str,room_tag_id:str|None=None,current=Depends(user)):
 
 def results_for(db,group_id,current,convert_scores=True):
     group=require(db,group_id,'groups')
+    allowed_classes=result_class_scope(db,group,current)
+    rows=card_result_rows(db,group,convert_scores)
+    return [r for r in rows if allowed_classes is None or r['class_id'] in allowed_classes]
+
+
+def result_class_scope(db,group,current):
+    group_id=group['id']
+    allowed_classes=None
+    if current['role'] not in ('admin','manager'):
+        from .visibility import class_scope,groups_for_classes
+        allowed_classes=class_scope(db,current['id'],group.get('subject_id'))
+        if group_id not in groups_for_classes(db,allowed_classes): raise HTTPException(403,'成绩尚未发布或不属于任教班级')
+    return allowed_classes
+
+
+def card_result_rows(db,group,convert_scores=True):
+    """Internal scoring rows before applying a caller-authorized view."""
+    group_id=group['id']
     roster=require(db,group['roster_id'],'rosters') if group.get('roster_id') else None
     from .school import group_students,student_view
     from .room_tags import view as room_view
@@ -525,17 +550,16 @@ def results_for(db,group_id,current,convert_scores=True):
         return {'student_id':student['id'],'name':student['name'],'class_id':student['class_id'],
                 'class_name':student.get('class_name',label.get('class_name',cls.get('name',student['class_id']))),
                 'grade':student.get('grade',label.get('grade',cls.get('grade')))}
-    allowed_classes=None
-    if current['role'] not in ('admin','manager'):
-        from .visibility import class_scope,groups_for_classes
-        allowed_classes=class_scope(db,current['id'],group.get('subject_id'))
-        if group_id not in groups_for_classes(db,allowed_classes): raise HTTPException(403,'成绩尚未发布或不属于任教班级')
     output=[]
-    for submission in objects(db,'submissions'):
-        if submission['group_id']!=group_id: continue
+    versions={}
+    for submission in find(db,'submissions',group_id=group_id):
         student=submission.get('student_snapshot') or require(db,submission['student_id'],'students')
-        template=require(db,submission['template_id'],'templates')
-        scores={question_label(q):result_for(db,submission,q) for q in template['questions']}
+        tid=submission['template_id']
+        if tid not in versions:versions[tid]=require(db,tid,'templates')
+        questions=versions[tid]['questions']
+        read_options=submission['status']!='absent' and any(q['type']!='subjective' and q.get('answer') and q['id'] not in submission.get('objective_overrides',{}) for q in questions)
+        selections=objective_selections(db,submission) if read_options else None
+        scores={question_label(q):result_for(db,submission,q,selections=selections) for q in questions}
         ready=all(v is not None for v in scores.values())
         output.append({**identity(student),'candidate_number':student_view(db,student)['candidate_number'] if live else submission['candidate_number'],'scanned_candidate_number':submission['candidate_number'],'room_tags':room_view(db,submission.get('room_tags',[])) if live else submission.get('room_tags',[]),'scores':{k:v/100 if v is not None else None for k,v in scores.items()},'total':sum(scores.values())/100 if ready else None,'status':'absent' if submission['status']=='absent' else 'completed' if ready else 'pending'})
     if members is not None:
@@ -549,7 +573,7 @@ def results_for(db,group_id,current,convert_scores=True):
         conversion=active_config(group,require(db,group['conversion_id'],'score-conversions'))
         try:apply(output,conversion)
         except ValueError as error:raise HTTPException(422,str(error))
-    return [row for row in output if allowed_classes is None or row['class_id'] in allowed_classes]
+    return output
 
 
 @router.post('/results/publish')

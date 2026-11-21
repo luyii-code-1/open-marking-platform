@@ -366,7 +366,13 @@ def test_sheet_search_and_group_progress(school):
     by_name=f['request']('GET',path+student['name'])
     item=by_name['items'][0]
     assert by_name['total']==1 and item['candidate_number']==student['candidate_number']
-    assert item['pages'][0]['image_url'].endswith('/image')
+    assert item['sides']==1 and item['pages'][0]['image_url'].endswith('/image')
+    # An incomplete duplex submission still needs a back-side slot in the lookup.
+    with db.connect() as connection:
+        template=db.get(connection,f['templates'][0]['id'],'templates')
+        db.put(connection,'templates',{**template,'sides':2})
+    incomplete=f['request']('GET',path+student['name'])['items'][0]
+    assert incomplete['sides']==2 and [p['side'] for p in incomplete['pages']]==['front']
     assert f['request']('GET',path+student['candidate_number']+'&group_id='+f['groups'][1]['id'])['total']==0
     other=f['post']('projects',{'name':'其他考试'})
     assert f['request']('GET','projects/'+other['id']+'/scanned-sheets?q='+student['name'])['total']==0

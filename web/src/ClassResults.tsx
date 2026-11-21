@@ -1,92 +1,82 @@
-import {useEffect,useLayoutEffect,useRef,useState} from 'react'
-import {Alert,Drawer,Empty,Segmented,Select,Space,Tag,Typography} from 'antd'
+import {useState} from 'react'
+import {Alert,Drawer,Empty,Input,Select,Spin} from 'antd'
+import {ArrowLeftOutlined} from '@ant-design/icons'
 import {Button} from './Button'
 import {Table} from './DataTable'
 import {useResource,type Row} from './api'
 import {ResultExport} from './ResultExport'
-import {ResultReports,reportColumns} from './ResultReports'
+import type {LessonScope} from './PaperLesson'
+import {ClassCardReports} from './ResultReports'
 import {CardWorkflow} from './CardWorkflow'
+import {resultState} from './resultFilterParams'
 import './class-results.css'
 
-const states:Record<string,string>={completed:'已完成',pending:'待结分',absent:'缺考',unscanned:'未扫描',duplicate_subject:'科目题卡重复'}
-const display=(value:unknown)=>value===null||value===undefined?'—':String(value)
-const lastClass=()=>{try{return localStorage.getItem('omp-result-class')||''}catch{return ''}}
+const display=(value:unknown)=>value==null?'—':String(value)
 
-export function ClassResults({admin,projectId,groupId}:{admin:boolean;projectId?:string;groupId?:string}){
-  const catalog=useResource<{projects:Row[]}>('/analysis/class-catalog',{projects:[]})
-  const [project,setProject]=useState(projectId||''),[classId,setClass]=useState(lastClass),[card,setCard]=useState(groupId||''),[view,setView]=useState('scores'),[analysis,setAnalysis]=useState(false),[managing,setManaging]=useState(false)
-  const tableBox=useRef<HTMLDivElement>(null),[tableHeight,setTableHeight]=useState(320)
-  const selected=catalog.data.projects.find(p=>p.id===project)
-  const classes=(selected?.classes||[]).filter((c:Row)=>!groupId||selected?.cards.find((g:Row)=>g.id===groupId)?.class_ids.includes(c.id))
-  const cls=classes.find((c:Row)=>c.id===classId)
-  const cards=(selected?.cards||[]).filter((c:Row)=>c.class_ids.includes(classId)&&(!groupId||c.id===groupId))
-  const active=cards.find((c:Row)=>c.id===card)
-  useEffect(()=>{
-    if(!catalog.loaded)return
-    if(projectId&&project!==projectId){setProject(projectId);return}
-    const available=groupId?catalog.data.projects.filter(p=>p.cards.some((c:Row)=>c.id===groupId)):catalog.data.projects
-    if(!available.some(p=>p.id===(projectId||project)))setProject(projectId||available[0]?.id||'')
-  },[catalog.loaded,catalog.data,groupId,projectId,project])
-  useEffect(()=>{
-    if(!selected)return
-    if(!classes.some((c:Row)=>c.id===classId))setClass(classes.length===1?classes[0].id:'')
-  },[selected,classId,groupId])
-  useEffect(()=>{
-    const id=groupId||(cards.length===1&&!cls?.all_subjects?cards[0].id:'')
-    if(!cards.some((c:Row)=>c.id===card))setCard(id)
-    else if(groupId&&card!==groupId)setCard(groupId)
-  },[selected,classId,card,groupId])
-  useEffect(()=>{setView('scores');setAnalysis(false)},[card,classId,project])
-  const base=new URLSearchParams({project_id:project,class_ids:classId})
-  const cardQuery=new URLSearchParams({group_id:card,class_ids:classId})
-  const summary=useResource<any>(project&&classId&&!card?`/analysis/project/class-summary?${base}`:null,null)
-  const subject=useResource<any>(card&&classId&&view==='scores'?`/analysis/group?${cardQuery}`:null,null)
-  const items=useResource<any>(card&&classId&&view==='items'?`/analysis/reports?${cardQuery}`:null,null)
-  const resource=card?(view==='items'?items:subject):summary
-  const rows=resource.loading?[]:resource.data?.students||[]
-  useLayoutEffect(()=>{
-    const box=tableBox.current;if(!box)return
-    const measure=()=>{
-      const body=box.querySelector('.ant-table-body'),pager=box.querySelector('.ant-pagination')
-      if(body)setTableHeight(Math.max(120,Math.floor(window.innerHeight-body.getBoundingClientRect().top-(pager?.getBoundingClientRect().height||32)-64)))
+function ClassDirectory({classes,onSelect}:{classes:Row[];onSelect:(id:string)=>void}){
+  const [term,setTerm]=useState('')
+  const grades=new Map<string,Row[]>()
+  for(const cls of classes){
+    const grade=String(cls.grade||'未设置年级')
+    if(!(grade+cls.name).toLocaleLowerCase().includes(term.trim().toLocaleLowerCase()))continue
+    if(!grades.has(grade))grades.set(grade,[])
+    grades.get(grade)!.push(cls)
+  }
+  return <div className="class-directory">
+    <div className="class-directory-heading"><h3>选择班级</h3><Input.Search allowClear placeholder="搜索年级或班级" aria-label="搜索年级或班级" value={term} onChange={e=>setTerm(e.target.value)}/></div>
+    {[...grades].map(([grade,rows])=><section key={grade}><h4>{grade}</h4><div className="class-directory-list">{rows.sort((a,b)=>String(a.name).localeCompare(String(b.name),'zh-CN',{numeric:true})).map(cls=><button key={cls.id} type="button" onClick={()=>onSelect(cls.id)}>{cls.name}</button>)}</div></section>)}
+    {!grades.size&&<Empty description={term?'没有匹配的班级':'此范围暂无可查看的班级'}/>}
+  </div>
+}
+
+function ClassTotals({project,cls,cards,onCard}:{project:Row;cls:Row;cards:Row[];onCard:(id:string)=>void}){
+  const query=new URLSearchParams({project_id:project.id,class_ids:cls.id})
+  query.set('group_ids',cards.map(card=>card.id).join(','))
+  const data=useResource<any>('/analysis/project/class-summary?'+query,null)
+  const columns=(data.data?.columns||[]).filter((col:Row)=>cards.some(card=>card.id===col.id)).map((col:Row)=>{
+    const duplicate=cards.filter(card=>card.subject===col.subject).length>1
+    const title=<button className="report-subject-link" type="button" onClick={()=>onCard(col.id)}>{col.subject}{duplicate?' · '+col.group:''}</button>
+    const score=(key:string)=>(_:unknown,row:Row)=>{
+      const value=row.scores[col.id]
+      return value?.status==='completed'?display(value[key]):resultState[value?.status]||'—'
     }
-    measure();const observer=new ResizeObserver(measure);observer.observe(box)
-    window.addEventListener('resize',measure)
-    return()=>{observer.disconnect();window.removeEventListener('resize',measure)}
-  },[classId,card,view,resource.loading,rows.length])
-  const scoreCell=(record:Row)=>record.status==='completed'?display(record.total):states[record.status]||'—'
-  const allSubjectColumns=(summary.data?.columns||[]).map((column:Row)=>({key:column.id,title:<Button type="link" onClick={()=>setCard(column.id)}>{column.subject}{column.grade&&cards.filter((c:Row)=>c.subject===column.subject).length>1?' · '+column.grade:''}</Button>,children:[
-    {title:'原始分',key:column.id+'-raw',render:(_:unknown,row:Row)=>{const value=row.scores[column.id];return value?value.status==='completed'?display(value.raw):states[value.status]||'—':'—'}},
-    ...(column.conversion_enabled?[{title:'赋分',key:column.id+'-converted',render:(_:unknown,row:Row)=>display(row.scores[column.id]?.converted)}]:[])
-  ]}))
-  const totalsLabel=cls?.all_subjects?'总分':'任教科目合计'
-  const summaryColumns=[{title:'准考证号',dataIndex:'candidate_number',fixed:'left' as const,width:150},{title:'姓名',dataIndex:'name',fixed:'left' as const,width:100},...allSubjectColumns,{title:totalsLabel,dataIndex:'total',render:display},{title:cls?.all_subjects?'班内名次':'合计班内名次',dataIndex:'class_rank',render:display,defaultSortOrder:'ascend' as const,sorter:(a:Row,b:Row)=>(a.class_rank??Infinity)-(b.class_rank??Infinity)},{title:'状态',dataIndex:'status',render:(value:string)=>states[value]||value}]
-  const subjectColumns=[{title:'准考证号',dataIndex:'candidate_number',fixed:'left' as const,width:150},{title:'姓名',dataIndex:'name',fixed:'left' as const,width:100},{title:'原始分',render:(_:unknown,row:Row)=>scoreCell(row)},...(active?.conversion_enabled?[{title:'赋分',dataIndex:'converted_score',render:display}]:[]),{title:'班内名次',dataIndex:'class_rank',render:display,defaultSortOrder:'ascend' as const,sorter:(a:Row,b:Row)=>(a.class_rank??Infinity)-(b.class_rank??Infinity)},{title:'可见范围名次',dataIndex:'scope_rank',render:display},{title:'状态',dataIndex:'status',render:(value:string)=><Tag>{states[value]||value}</Tag>}]
-  const classGroups=[...new Set(classes.map((c:Row)=>String(c.grade||'未设置年级')))].map(grade=>({label:grade,options:classes.filter((c:Row)=>String(c.grade||'未设置年级')===grade).map((c:Row)=>({label:c.name,value:c.id}))}))
+    return col.conversion_enabled?{key:col.id,title,children:[{key:col.id+'-raw',title:'原始分',width:76,render:score('raw')},{key:col.id+'-converted',title:'赋分',width:76,render:score('converted')}]}:{key:col.id,title,width:94,render:score('raw')}
+  })
+  return <section className="class-report-panel">
+    <div className="class-report-heading"><h3>班级成绩总表</h3><ResultExport scope={{kind:'project',id:project.id,query,cardCount:cards.length}} parts={[project.name,cls.grade,cls.name]} disabled={!data.data||!!data.error} initialReport="class-summary" quickReport="class-summary"/></div>
+    {data.error&&<Alert type="error" message={data.error}/>}
+    {data.data?.warnings?.length>0&&<Alert type="warning" message="同一学生同科有多张题卡，点击科目可核对各题卡成绩。"/>}
+    <Table<Row> bordered columnChooser={false} rowKey="student_id" loading={data.loading} dataSource={data.data?.students||[]} scroll={{x:'max-content',y:'max(180px, calc(100dvh - 400px))'}} columns={[
+      {title:'姓名',dataIndex:'name',width:92,fixed:'left'},{title:'准考证号',dataIndex:'candidate_number',width:122},
+      {title:cls.all_subjects?'班内名次':'合计班内名次',dataIndex:'class_rank',width:94,render:display,defaultSortOrder:'ascend',sorter:(a,b)=>(a.class_rank??Infinity)-(b.class_rank??Infinity)},
+      {title:cls.all_subjects?'总分':'任教科目合计',dataIndex:'total',width:100,render:display},...columns,
+      {title:'状态',dataIndex:'status',width:108,render:(s:string)=>resultState[s]||s},
+    ]}/>
+    {!columns.length&&!data.loading&&cards.length>0&&<div className="class-directory-list">{cards.map(card=><Button key={card.id} onClick={()=>onCard(card.id)}>{card.subject} · {card.name}</Button>)}</div>}
+  </section>
+}
+
+export function ClassResults({admin,projectId,groupId,initialProject,onLesson}:{onLesson?:(scope:LessonScope)=>void;admin:boolean;projectId?:string;groupId?:string;initialProject?:string}){
+  const catalog=useResource<{projects:Row[]}>('/analysis/class-catalog',{projects:[]})
+  const [choice,setChoice]=useState(initialProject||''),[classId,setClass]=useState(''),[cardId,setCard]=useState(''),[managing,setManaging]=useState(false)
+  const projects=catalog.data.projects
+  const project=projectId?projects.find(p=>p.id===projectId):projects.find(p=>p.id===choice)||(groupId?projects.find(p=>p.cards.some((g:Row)=>g.id===groupId)):projects[0])
+  const fixed=groupId?project?.cards.find((c:Row)=>c.id===groupId):undefined
+  const classes:Row[]=(project?.classes||[]).filter((c:Row)=>!groupId||fixed?.class_ids.includes(c.id))
+  const cls=classes.find(c=>c.id===classId)
+  const cards:Row[]=(project?.cards||[]).filter((c:Row)=>c.class_ids.includes(classId)&&(!groupId||c.id===groupId))
+  const card=cards.find(c=>c.id===(groupId||cardId))
+  const managementCard=fixed||card
+  if(catalog.error)return <Alert type="error" message={catalog.error} action={<Button onClick={catalog.reload}>重试</Button>}/>
+  if(!catalog.loaded)return <Spin/>
   return <section className="class-results">
-    <div className="class-results-toolbar">
-      <div className="class-results-selectors">
-        {!projectId&&!groupId&&<label>考试<Select aria-label="成绩考试" showSearch optionFilterProp="label" value={project||undefined} placeholder="选择考试" options={catalog.data.projects.map(p=>({value:p.id,label:p.name}))} onChange={id=>{setProject(id);setCard('')}}/></label>}
-        <label>班级<Select aria-label="成绩班级" showSearch optionFilterProp="label" value={cls?classId:undefined} placeholder="选择班级" disabled={!selected} options={classGroups} onChange={id=>{setClass(id);setCard(groupId||'');try{localStorage.setItem('omp-result-class',id)}catch{}}}/></label>
-        {!groupId&&<label>科目<Select aria-label="成绩科目" showSearch optionFilterProp="label" value={active?card:''} disabled={!cls} options={[{label:cls?.all_subjects?'全科总表':'任教科目汇总',value:''},...cards.map((c:Row)=>({value:c.id,label:c.subject+(cards.filter((other:Row)=>other.subject===c.subject).length>1?' · '+c.name:'')}))]} onChange={setCard}/></label>}
-      </div>
-      <div className="class-results-actions">
-        <Button onClick={()=>void resource.reload()} disabled={!cls} loading={resource.loading}>刷新</Button>
-        {card&&cls&&<Button onClick={()=>setAnalysis(true)}>分析报表</Button>}
-        {admin&&card&&<Button onClick={()=>setManaging(true)}>成绩管理</Button>}
-        {selected&&cls&&<ResultExport scope={card?{kind:'card',id:card,query:cardQuery,studentCount:subject.data?.summary?.records||0}:{kind:'project',id:project,query:base,cardCount:cards.length}} parts={[selected.name,String(cls.grade||''),cls.name,active?.subject||'']} disabled={resource.loading||!!resource.error} initialReport="workbook"/>}
-      </div>
+    <div className="class-results-heading">
+      {!projectId&&!groupId&&<Select aria-label="成绩考试" showSearch optionFilterProp="label" value={project?.id} placeholder="选择考试" options={projects.map(p=>({label:p.name,value:p.id}))} onChange={id=>{setChoice(id);setClass('');setCard('');setManaging(false)}}/>}
+      {cls&&<><Button type="text" icon={<ArrowLeftOutlined/>} onClick={()=>{if(card&&!groupId)setCard('');else{setClass('');setCard('')}setManaging(false)}}>{card&&!groupId?'班级总表':'班级列表'}</Button><strong>{[cls.grade,cls.name,card?.subject].filter(Boolean).join(' / ')}</strong></>}
+      {onLesson&&cls&&card?.published&&project&&<Button onClick={()=>onLesson({project:project.id,cls:cls.id,card:card.id})}>讲评试卷</Button>}
+      {admin&&managementCard&&<Button className="class-management" onClick={()=>setManaging(true)}>成绩管理</Button>}
     </div>
-    {(catalog.error||resource.error)&&<Alert type="error" message={catalog.error||resource.error}/>}
-    {!cls?<Empty description={catalog.loading?'正在加载考试和班级…':!selected?'暂无可查看的题卡成绩':classes.length?'选择班级后查看成绩':'当前考试暂无可查看班级'}/>:<>
-      <div className="class-results-context"><Typography.Text strong>{[selected?.name,cls.grade,cls.name,active?.subject].filter(Boolean).join(' / ')}</Typography.Text>
-        {active?<Segmented aria-label="成绩视图" value={view} onChange={setView} options={[{value:'scores',label:'成绩名单'},{value:'items',label:'小题分'}]}/>:<Typography.Text type="secondary">{cls.all_subjects?'点击科目查看单科成绩与小题分':'仅显示已授权的任教科目成绩'}</Typography.Text>}
-      </div>
-      {card&&view==='scores'&&subject.data&&<div className="class-results-summary"><span>应考 {subject.data.summary.records} 人</span><span>已结分 {subject.data.summary.completed} 人</span><span>平均 {display(subject.data.summary.average)} 分</span><span>缺考 {subject.data.summary.absent} · 未扫描 {subject.data.summary.unscanned} · 待结分 {subject.data.summary.pending}</span></div>}
-      {summary.data?.warnings?.length>0&&!card&&<Alert type="warning" message="同一学生同一科目有多份题卡成绩，暂不合计。请切换科目查看各题卡明细。"/>}
-      <div ref={tableBox} className="class-results-table">{card&&view==='items'?<Table rowKey="candidate_number" loading={items.loading} dataSource={items.loading?[]:items.data?.reports?.items?.rows||[]} columns={reportColumns(items.data?.reports?.items?.columns||[])} scroll={{x:'max-content',y:tableHeight}}/>:<Table<Row> rowKey="student_id" loading={resource.loading} dataSource={rows} columns={card?subjectColumns:summaryColumns} scroll={{x:'max-content',y:tableHeight}}/>}</div>
-    </>}
-    {card&&cls&&<ResultReports key={card+classId} groupId={card} classId={classId} open={analysis} onClose={()=>setAnalysis(false)}/>}
-    <Drawer title="题卡成绩管理" width={720} open={managing} onClose={()=>setManaging(false)}>{card&&admin&&<CardWorkflow key={card} groupId={card} onSaved={async()=>{await resource.reload();await catalog.reload()}}/>}</Drawer>
+    {!project?<Empty description="暂无可查看的考试成绩"/>:!cls?<ClassDirectory key={project.id} classes={classes} onSelect={id=>{setClass(id);setCard('')}}/>:card?<ClassCardReports key={card.id+cls.id} project={project} card={card} cls={cls}/>:<ClassTotals key={project.id+cls.id} project={project} cls={cls} cards={cards} onCard={setCard}/>}
+    {admin&&managementCard&&<Drawer title="题卡成绩管理" width={720} open={managing} onClose={()=>setManaging(false)}><CardWorkflow groupId={managementCard.id} onSaved={catalog.reload}/></Drawer>}
   </section>
 }

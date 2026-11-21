@@ -70,7 +70,7 @@ export function App() {
       ...(management ? [{key:'scanner',icon:<ScanOutlined/>,label:'扫描台'},{ key: 'exams', icon: <BookOutlined />, label: '考试项目' },{key:'subject-catalog',icon:<BookOutlined/>,label:'科目管理'},{key:'electives',icon:<TeamOutlined/>,label:'选科管理'}] : []),
       ...(!management ? [{ key: 'marking', icon: <AuditOutlined />, label: '阅卷中心' }] : []),
       ...(management ? [{ key: 'exceptions', icon: <FileSearchOutlined />, label: '异常总览' }] : []),
-      { key: 'results', icon: <ReadOutlined />, label: '成绩总览' },
+      { key: 'results', icon: <ReadOutlined />, label: management?'成绩总览':'成绩分析' },
       ...(management && user.role==='admin' ? [{key:'conversions',icon:<ReadOutlined/>,label:'赋分方案'}] : []),
     ] },
     ...(management ? [{ type: 'group' as const, key: 'management', label: '基础管理', children: [
@@ -110,7 +110,7 @@ function Dashboard({ onNavigate, admin }: { onNavigate: (value: string) => void;
   const resource = useResource<Record<string, number>>('/dashboard', {})
   const shortcuts = admin
     ? [['exams', '考试项目'], ['exceptions', '异常总览'], ['results', '成绩总览']]
-    : [['marking', '阅卷中心'], ['results', '成绩与分析']]
+    : [['marking', '阅卷中心'], ['results', '成绩分析']]
   return <Space direction="vertical" size={16} style={{ width: '100%' }}>
     {resource.error && <Alert type="error" showIcon message={resource.error} action={<Button onClick={resource.reload}>重试</Button>} />}
     <div className="stat-grid">{[['projects', '考试项目'], ['groups', '题卡'], ['students', '学生'], ['pending_tasks', '待评作答'], ['exceptions', '待处理异常']].map(([key, label]) => <Card key={key}><Statistic loading={resource.loading} title={label} value={resource.data[key] ?? '—'} /></Card>)}</div>

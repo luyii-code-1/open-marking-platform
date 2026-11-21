@@ -140,3 +140,13 @@ html,body,#root{height:100%;margin:0}
  .scan-identity-editor{grid-template-columns:minmax(95px,1fr) minmax(55px,.6fr) minmax(90px,1fr) auto;align-items:end;gap:8px}
  .scan-identity-editor>.ant-btn{grid-column:auto;justify-self:stretch;font-size:12px;padding-inline:8px}
 }
+.scan-paper-pair{border:1px solid #dce3eb;border-radius:6px;padding:8px;margin-bottom:6px}
+.scan-paper-pair.is-selected{border-color:#9bbcf0;background:#f5f9ff}
+.scan-paper-pair header,.scan-paper-faces{display:flex;align-items:center;gap:8px}
+.scan-paper-pair header{justify-content:space-between;font-size:12px;margin-bottom:6px}
+.scan-paper-pair small{display:block;color:#576574;font-size:11px}
+.scan-paper-faces{align-items:stretch;margin-bottom:4px}
+.scan-face{flex:1;min-width:0;min-height:48px;display:flex;align-items:center;justify-content:center;gap:6px;border:1px solid #d9e1ea;border-radius:4px;background:white;font:inherit;font-size:12px;color:inherit;cursor:pointer}
+.scan-face img{width:30px;height:42px;object-fit:contain}
+.scan-face:hover,.scan-face:focus-visible,.scan-face.is-selected{border-color:#4c87de;background:#edf5ff}
+.scan-face.is-missing{flex-direction:column;gap:0;border-style:dashed;background:transparent;color:#586576;cursor:default}

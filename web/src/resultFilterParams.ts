@@ -26,3 +26,5 @@ export function resultExportRequest(kind:'card'|'project',id:string,base:URLSear
   params.set('view',report)
   return {path:'/analysis/group/export',params}
 }
+
+export const resultState:Record<string,string>={completed:'已完成',pending:'待结分',absent:'缺考',unscanned:'未扫描',duplicate_subject:'科目题卡重复'}

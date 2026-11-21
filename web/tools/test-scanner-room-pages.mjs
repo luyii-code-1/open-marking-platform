@@ -14,12 +14,13 @@ const call=async(method,args)=>{
 }
 const first=await scannerRoomState(call,'sheet0',1)
 assert.equal(first.page_total,56)
-assert.equal(first.pages.length,50)
-assert.deepEqual(first.pages.slice(-2).map(p=>[p.batch_id,p.side,p.sheet_number]),[['sheet24','front',25],['sheet24','back',25]])
+assert.equal(first.paper_total,28)
+assert.equal(first.pages.length,56)
+assert.deepEqual(first.pages.slice(-2).map(p=>[p.batch_id,p.side,p.sheet_number]),[['sheet27','front',28],['sheet27','back',28]])
 const second=await scannerRoomState(call,'sheet0',2)
-assert.equal(second.pages.length,6)
-assert.equal(second.pages[0].batch_id,'sheet25')
-assert.equal(second.pages.at(-1).sheet_number,28)
+assert.equal(second.pages.length,0)
+assert.deepEqual(first.papers[25].front.id,'sheet25front')
+assert.deepEqual(first.papers[25].back.id,'sheet25back')
 assert(!calls.some(a=>String(a.batch_id).startsWith('other')))
 const rows=Array.from({length:103},(_,i)=>({id:String(i),sequence:i+1,side:'front'}))
 const single=async(method,args)=>({batches:[{...sheets[0],total:103,front_count:103,back_count:0}],pages:rows.slice(args.offset,args.offset+50)})
@@ -36,3 +37,29 @@ const run=await scannerRoomState(call,'sheet0',1,{anchorId:'sheet0',previousIds:
 assert.deepEqual(run.pages.map(r=>r.batch_id),['sheet0','sheet0','sheet26','sheet26','sheet27','sheet27'])
 assert.equal(run.page_total,6)
 console.log('Current acquisition excludes earlier records and includes every new sheet')
+
+const passes=(side,n)=>Array.from({length:n},(_,i)=>({id:side+i,sequence:i+1,side,status:'pending',batch_id:'b'}))
+const front=passes('front',55),back=passes('back',54)
+function host(faces,settings={},pairs=[]){
+  const b={id:'b',group_id:'g',created_at:'0',sides:2,total:faces.length,front_count:faces.filter(f=>f.side==='front').length,back_count:faces.filter(f=>f.side==='back').length,...settings}
+  return async(method,args)=>method==='pageReview'?pairs:{batches:[b],room_pages:true,pages:faces.slice(args.offset,args.offset+50)}
+}
+const normal=host([...front,...back],{capture_mode:'duplex'})
+const head=await scannerRoomState(normal,'b',1),tailPairs=await scannerRoomState(normal,'b',2)
+assert.equal(head.papers.length,50)
+assert.equal(head.papers[49].back.id,'back49')
+assert.equal(tailPairs.papers[0].front.id,'front50')
+assert.equal(tailPairs.papers.at(-1).front.id,'front54')
+assert.equal(tailPairs.papers.at(-1).back,undefined)
+const reverse=await scannerRoomState(host([...front,...back],{capture_mode:'separate',back_order:'reverse'}),'b',1)
+assert.equal(reverse.papers[0].back,undefined)
+assert.equal(reverse.papers[1].back.id,'back53')
+const confirmed=await scannerRoomState(host([...front.slice(0,2),...back.slice(0,2)],{capture_mode:'separate',paired_sheets:2},[
+  {sides:[front[0],back[1]]},{sides:[front[1],back[0]]}
+]),'b',1)
+assert.equal(confirmed.papers[0].back.id,'back1')
+const excludedFront={...front[0],status:'excluded'}
+const excluded=await scannerRoomState(host([excludedFront,front[1],back[1]],{capture_mode:'duplex',pending:2,blocked:0,uploaded:0}),'b',1)
+assert.equal(excluded.papers[0].back,undefined)
+assert.equal(excluded.papers[1].front.sequence,excluded.papers[1].back.sequence)
+console.log('Physical sheets stay together across face chunks, missing sides, reverse passes and exclusions')

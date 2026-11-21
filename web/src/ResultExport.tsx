@@ -14,7 +14,7 @@ const reports:Record<ResultReport,string>={workbook:'完整成绩分析（五张
 const cardReports:ResultReport[]=[...formalReports,'ranking','students','classes','distribution']
 const projectReports:ResultReport[]=[...formalReports,'class-summary','summary']
 
-export function ResultExport({scope,parts,room,disabled,initialReport='workbook'}:{scope:ExportScope;parts:string[];room?:string;disabled:boolean;initialReport?:ResultReport}){
+export function ResultExport({scope,parts,room,disabled,initialReport='workbook',quickReport='workbook'}:{quickReport?:ResultReport;scope:ExportScope;parts:string[];room?:string;disabled:boolean;initialReport?:ResultReport}){
   const [open,setOpen]=useState(false),[report,setReport]=useState<ResultReport>('items'),[format,setFormat]=useState<'xlsx'|'csv'>('xlsx'),[busy,setBusy]=useState(false),[error,setError]=useState('')
   const [filters,setFilters]=useState<ResultFilterValue>(()=>readResultFilters(scope.query)),[selectedRoom,setRoom]=useState(scope.kind==='card'?scope.roomId:scope.query?.get('room_tag_id')||undefined)
   const [selectedRoomLabel,setRoomLabel]=useState(room)
@@ -48,7 +48,7 @@ export function ResultExport({scope,parts,room,disabled,initialReport='workbook'
   }
   return <>
     <Space.Compact>
-      <Button type="primary" icon={<DownloadOutlined/>} loading={busy&&!open} disabled={disabled||noCards} onClick={()=>exportFile('workbook','xlsx')}>导出成绩报表</Button>
+      <Button type="primary" icon={<DownloadOutlined/>} loading={busy&&!open} disabled={disabled||noCards} onClick={()=>exportFile(quickReport,'xlsx')}>{quickReport==='workbook'?'导出成绩报表':'导出当前表'}</Button>
       <Button type="primary" icon={<DownOutlined/>} aria-label="导出选项" aria-haspopup="dialog" title="导出选项" disabled={disabled||busy} onClick={()=>{
         setRoomLabel(room);setReport(noCards?'summary':initialReport);setFormat('xlsx');setFilters(readResultFilters(scope.query));setRoom(scope.kind==='card'?scope.roomId:scope.query?.get('room_tag_id')||undefined);setStep(Number(scope.query?.get('score_step'))||10);setRanks(scope.query?.get('ranks')||'10,30,50,100,200');setError('');setOpen(true)
       }}/>

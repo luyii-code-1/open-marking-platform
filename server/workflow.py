@@ -266,14 +266,18 @@ def scanned_sheets(identifier:str,q:str='',group_id:str|None=None,page:int=1,
         direction='DESC' if sort_order=='desc' else 'ASC'
         matches=db.execute(f"SELECT s.id,s.body,{name} AS name,{image_status} AS image_status,"+projection.removeprefix('SELECT ')+filtered+
                            f" ORDER BY lower({sort_fields[sort_by]}) {direction},s.id ASC LIMIT 20 OFFSET ?",(*params,(page-1)*20))
-        items=[]
+        items=[];template_sides={}
         for row in matches:
             sub=json.loads(row['body']);pages=[]
             if not purged:
                 for pid in sub['pages']:
                     image=get(db,pid,'pages')
                     if image:pages.append({'id':pid,'side':image.get('side'),'image_url':f'/api/v1/pages/{pid}/image'})
-            items.append({'id':row['id'],'name':row['name'],
+            template_id=sub.get('template_id')
+            if template_id and template_id not in template_sides:
+                template_sides[template_id]=(get(db,template_id,'templates') or {}).get('sides',1)
+            sides=max(template_sides.get(template_id) or 1,2 if any(p['side']=='back' for p in pages) else 1)
+            items.append({'id':row['id'],'name':row['name'],'sides':sides,
                           'candidate_number':sub['candidate_number'],**{key:row[key] for key in ('subject','subject_id','card','group_id','grade','grade_id','class_id','class_name')},'pages':pages,
                           'image_status':row['image_status']})
         return {'items':items,'total':total,'page':page,'options':{name:sorted(values.values(),key=lambda row:(row['name'] or '',row['id'])) for name,values in options.items()},

@@ -1,10 +1,30 @@
-.class-results{display:flex;flex-direction:column;gap:14px;min-width:0}
-.class-results-toolbar{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:16px;background:var(--ant-color-bg-container,#fff);border:1px solid var(--ant-color-border-secondary,#edf0f3);border-radius:8px}
-.class-results-selectors{display:flex;gap:12px;flex-wrap:wrap;min-width:0}
-.class-results-selectors label{display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--ant-color-text-secondary,#64748b)}
-.class-results-selectors .ant-select{min-width:180px;max-width:300px}
-.class-results-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.class-results-context{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
-.class-results-summary{display:flex;gap:12px 24px;flex-wrap:wrap;color:var(--ant-color-text-secondary,#64748b);font-size:13px}
-.class-results-table{min-width:0;background:var(--ant-color-bg-container,#fff);padding:12px 16px;border-radius:8px;border:1px solid var(--ant-color-border-secondary,#edf0f3)}
-@media(max-width:760px){.class-results-toolbar{padding:12px}.class-results-selectors{width:100%}.class-results-selectors label{flex:1;min-width:140px}.class-results-selectors .ant-select{min-width:0;width:100%}.class-results-table{padding:8px}.class-results-actions{width:100%}}
+.class-results{display:grid;gap:12px;min-width:0}
+.class-results-heading,.class-report-heading,.class-directory-heading,.report-parameters,.report-counts{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.class-results-heading:empty{display:none}
+.class-results-heading .ant-select{width:min(300px,100%)}
+.class-management{margin-inline-start:auto}
+.class-report-panel,.class-directory{padding:16px 18px;background:var(--ant-color-bg-container,#fff);border:1px solid var(--ant-color-border-secondary,#e8ecf1);border-radius:8px;min-width:0}
+.class-report-heading,.class-directory-heading{justify-content:space-between;margin-bottom:12px}
+.class-report-heading h3,.class-directory-heading h3,.class-directory h4{font-size:15px;margin:0}
+.class-directory-heading .ant-input-search{width:min(220px,100%)}
+.class-directory section+section{margin-top:18px}
+.class-directory h4{color:var(--ant-color-text-secondary);font-size:13px;margin-bottom:7px}
+.class-directory-list,.recent-exam-links{display:flex;flex-wrap:wrap;gap:8px}
+.class-directory-list button,.recent-exam-links a{border:1px solid var(--ant-color-border,#d9d9d9);background:var(--ant-color-bg-container,#fff);border-radius:5px;padding:6px 14px;font:inherit;color:inherit;cursor:pointer}
+.class-directory-list button:hover,.recent-exam-links a:hover{color:var(--ant-color-primary,#1668dc);border-color:currentColor}
+.class-report-panel .ant-table-cell,.scope-students .ant-table-cell{font-variant-numeric:tabular-nums;white-space:nowrap}
+.class-report-panel .ant-table-small .ant-table-cell{padding:5px 9px}
+.class-report-panel .ant-table-thead th{font-size:13px}
+.report-subject-link{padding:0;border:0;background:none;font:inherit;color:var(--ant-color-link,#1677ff);cursor:pointer}
+.report-subject-link:hover{text-decoration:underline}
+.report-counts{font-size:13px;color:var(--ant-color-text-secondary);gap:6px 20px}
+.report-parameters{margin:0 0 10px}.report-parameters label{display:flex;align-items:center;gap:8px}
+.recent-exam-links{align-items:center;margin:0 0 12px}.recent-exam-links strong{margin-inline-end:4px}
+@media(max-width:700px){.class-report-panel,.class-directory{padding:12px}.class-results-heading{gap:7px}}
+
+.sheet-pair{display:flex;align-items:stretch;gap:12px;border:1px solid #dce3ea;border-radius:6px;background:#f7f9fb;padding:10px}
+.sheet-pair button,.sheet-missing{flex:1 1 0;min-width:0;border:1px solid #d9e1ea;border-radius:3px;background:white;text-align:center;color:inherit}
+.sheet-pair button{cursor:zoom-in;padding:6px}.sheet-pair button:focus-visible{outline:2px solid #1677ff}
+.sheet-pair button strong{display:block;margin:4px 0}.sheet-pair img{max-height:55vh;object-fit:contain;vertical-align:middle}
+.sheet-missing{display:grid;place-items:center;border-style:dashed;color:#596575}.sheet-pair.zoomed button{cursor:zoom-out}.sheet-pair.zoomed img{max-height:none;width:100%}
+.sheet-faces>button{margin-bottom:8px}

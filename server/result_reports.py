@@ -50,7 +50,7 @@ def class_catalog(current=Depends(user)):
             rows=[]
             for cid in ids:
                 cls=classes[cid];grade=grades.get(cls.get('grade_id'),cls.get('grade',''))
-                rows.append({'id':cid,'name':cls['name'],'grade':grade,'all_subjects':admin or cls.get('teaching',{}).get(current['id'],{}).get('homeroom') is True})
+                rows.append({'id':cid,'name':cls['name'],'grade':grade,'grade_id':cls.get('grade_id'),'all_subjects':admin or cls.get('teaching',{}).get(current['id'],{}).get('homeroom') is True})
             projects.append({'id':project['id'],'name':project['name'],'cards':selected,'classes':sorted(rows,key=lambda c:(str(c['grade'] or ''),c['name']))})
         return {'projects':projects}
 

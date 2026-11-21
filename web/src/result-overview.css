@@ -4,3 +4,6 @@
 .result-comparison-track{height:16px;border-radius:4px;background:var(--ant-color-fill-tertiary,#f0f2f5);overflow:hidden}
 .result-comparison-bar{height:100%;background:var(--ant-color-primary,#1677ff);border-radius:4px}
 @media(max-width:760px){.result-comparison-row{grid-template-columns:1fr;gap:5px}}
+
+.result-comparison-label{border:0;background:transparent;padding:0;text-align:start;font:inherit;color:var(--ant-color-link,#1677ff);cursor:pointer}
+.result-comparison-label:hover{text-decoration:underline}
