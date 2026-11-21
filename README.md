@@ -2,7 +2,8 @@
 
 <div align="center">
 
-# <img src="web/public/branding/omp-mark.svg" height="28" width="28"/> Open Marking Platform
+# <div><img src="web/public/branding/omp-mark.svg" height="280" width="280">  
+ Open Marking Platform 开源全流程考试与阅卷管理系统</div>
 
 [![Stars](https://img.shields.io/github/stars/luyii-code-1/open-marking-platform?label=Stars)](https://github.com/luyii-code-1/open-marking-platform)
 [![Release](https://img.shields.io/github/v/release/luyii-code-1/open-marking-platform?include_prereleases&style=flat-square&color=%233fb950&label=版本)](https://github.com/luyii-code-1/open-marking-platform/releases)
@@ -78,7 +79,6 @@ Open Marking Platform（OMP）是一套开源的全流程网上阅卷系统，<b
 - [x] 后台一键创建、下载数据库备份，可开启每日自动备份
 - [x] 扫描文件可存放在本地、S3 兼容对象存储、WebDAV 或 SFTP
 - [x] 提供 Docker Compose 一键部署，自带 HTTPS 反向代理
-- [x] 支持从旧版 SQLite 数据库迁移
 - [ ] ……
 
 ## 开始使用
