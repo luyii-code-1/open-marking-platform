@@ -13,6 +13,8 @@ DEFAULT_SETTINGS = {
     'mode': 'observe', 'retention_days': 60, 'allow_ips': [], 'deny_ips': [],
     'allow_countries': [], 'deny_countries': [], 'rate_per_minute': 0,
     'block_sensitive_paths': True, 'sqli_mode': 'observe', 'xss_mode': 'observe', 'managed_ips': [],
+    'business_content_profile': 'uniform', 'adaptive_enabled': False,
+    'anonymous_rate_per_minute': 120, 'authenticated_rate_per_minute': 600,
 }
 BUCKET_SECONDS = {1: 60, 24: 1800, 168: 10800, 720: 43200}
 LATENCY_BOUNDS = (1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 30000, 60000)

@@ -17,8 +17,10 @@ LABELS = {
     'deny_ips': 'IP 封禁名单', 'allow_countries': '允许地区', 'deny_countries': '封禁地区',
     'rate_per_minute': 'IP 限流', 'block_sensitive_paths': '敏感路径',
     'sqli_mode': 'SQL 注入检测', 'xss_mode': 'XSS 检测',
+    'business_content_profile': '业务内容识别', 'adaptive_enabled': '动态限流',
+    'anonymous_rate_per_minute': '匿名每分钟额度', 'authenticated_rate_per_minute': '已验证身份每分钟额度',
 }
-MODES = {'observe': '观察', 'off': '关闭', 'enforce': '拦截'}
+MODES = {'observe': '观察', 'off': '关闭', 'enforce': '拦截', 'uniform': '统一检测', 'verified_business': '识别已验证业务内容'}
 
 
 def current_policy(policy):

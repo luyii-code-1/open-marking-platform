@@ -9,6 +9,7 @@ from pathlib import Path
 import re
 import sys
 from urllib.parse import unquote_plus
+from starlette.routing import compile_path
 
 
 VERSION = '4.0.2'
@@ -24,10 +25,39 @@ _SENSITIVE_KEYS = {
     'credential_id', 'assertion', 'clientdatajson', 'attestationobject',
 }
 _TEMPLATE_ROUTE = re.compile(r'/api/v1/(?:templates(?:/[^/]+)?|groups/[^/]+/drafts/[^/]+)')
-_RICH_FIELDS = {
-    ('questions', '[]', 'content_html'), ('questions', '[]', 'parts', '[]', 'content_html'),
-    ('print_notes', '[]', 'html'), ('question', 'content_html'),
-}
+# None marks an array item, which cannot collide with a JSON object key.
+_TEMPLATE_TEXT = frozenset({('questions', None, 'content_html'),
+                            ('questions', None, 'parts', None, 'content_html'), ('print_notes', None, 'html')})
+_QUESTION_TEXT = frozenset({('question', 'content_html')})
+_FOOTER_TEXT = frozenset({('html',)})
+_LEGACY_TEMPLATE_TEXT = _TEMPLATE_TEXT | _QUESTION_TEXT
+_MANAGERS = frozenset({'admin', 'manager'})
+_ACCOUNTS = _MANAGERS | {'teacher'}
+_BUSINESS_ROUTES = (
+    ('POST', '/templates', _MANAGERS, _TEMPLATE_TEXT),
+    ('PUT', '/templates/{identifier}', _MANAGERS, _TEMPLATE_TEXT),
+    ('POST', '/templates/check', _MANAGERS, _TEMPLATE_TEXT),
+    ('POST', '/templates/preview', _MANAGERS, _TEMPLATE_TEXT),
+    ('POST', '/templates/subjective-layout', _MANAGERS, _TEMPLATE_TEXT),
+    ('POST', '/templates/objective-preview', _MANAGERS, _QUESTION_TEXT),
+    ('PUT', '/groups/{group_id}/drafts/{identifier}', _MANAGERS,
+     frozenset(('value', *keys) for keys in _TEMPLATE_TEXT)),
+    ('POST', '/tasks/{identifier}/report', _ACCOUNTS, frozenset({('reason',)})),
+    ('POST', '/tasks/{identifier}/regrade-from', _ACCOUNTS, frozenset({('reason',)})),
+    ('POST', '/exceptions/resolve', _MANAGERS, frozenset({('resolution',)})),
+    ('POST', '/exceptions/{identifier}/resolve', _MANAGERS, frozenset({('resolution',)})),
+    ('PUT', '/system/login-footer', {'admin'}, _FOOTER_TEXT),
+    ('POST', '/system/login-footer/preview', {'admin'}, _FOOTER_TEXT),
+)
+_BUSINESS_PATTERNS = [(method, compile_path('/api/v1' + path)[0], roles, fields)
+                      for method, path, roles, fields in _BUSINESS_ROUTES]
+
+
+def business_fields(method, path, role=None):
+    for verb, pattern, roles, fields in _BUSINESS_PATTERNS:
+        if method == verb and (role is None or role in roles) and pattern.fullmatch(path):
+            return fields
+    return frozenset()
 
 
 @lru_cache(maxsize=1)
@@ -74,9 +104,7 @@ def _parameters(raw):
             yield unquote_plus(value.decode('utf-8', 'replace'))
 
 
-def _json_values(document, path):
-    footer = path in ('/api/v1/system/login-footer', '/api/v1/system/login-footer/preview')
-    template = bool(_TEMPLATE_ROUTE.fullmatch(path))
+def _json_values(document):
     visited = 0
 
     def walk(value, keys):
@@ -85,10 +113,7 @@ def _json_values(document, path):
         if visited > 512 or len(keys) > 12:
             return
         if isinstance(value, str):
-            template_keys = keys[1:] if keys[:1] == ('value',) else keys
-            if (footer and keys == ('html',)) or (template and template_keys in _RICH_FIELDS):
-                return
-            yield value
+            yield keys, value
         elif isinstance(value, dict):
             for key, child in value.items():
                 if visited >= 512:
@@ -99,8 +124,37 @@ def _json_values(document, path):
             for child in value:
                 if visited >= 512:
                     break
-                yield from walk(child, (*keys, '[]'))
+                yield from walk(child, (*keys, None))
     return walk(document, ())
+
+
+def _inspect_json(inspect, document, scope, profile):
+    path = scope['path']
+    legacy = profile == 'uniform'
+    footer = legacy and path in ('/api/v1/system/login-footer', '/api/v1/system/login-footer/preview')
+    template = legacy and _TEMPLATE_ROUTE.fullmatch(path)
+    state = scope.get('state', {})
+    fields = ()
+    if not legacy and state.get('http_guard_verified') is True:
+        fields = business_fields(scope['method'], path, state.get('http_guard_role') or '')
+
+    regular, business = [], []
+    for keys, value in _json_values(document):
+        if legacy:
+            relative = keys[1:] if keys[:1] == ('value',) else keys
+            if (footer and keys in _FOOTER_TEXT) or (template and relative in _LEGACY_TEMPLATE_TEXT):
+                continue
+        values = business if keys in fields else regular
+        if len(values) < FIELD_LIMIT:
+            values.append(value)
+        if len(regular) == FIELD_LIMIT and (not fields or len(business) == FIELD_LIMIT):
+            break
+    inspect.scan(regular)
+    if not inspect.reason and business:
+        inspect.scan(business)
+        if inspect.reason:
+            return inspect.reason + '_business'
+    return inspect.reason
 
 
 class _Inspection:
@@ -192,7 +246,7 @@ async def inspect_request(scope, receive, policy):
         except (ValueError, UnicodeDecodeError, RecursionError):
             pass
         else:
-            inspect.scan(_json_values(document, scope['path']))
+            return _inspect_json(inspect, document, scope, getattr(policy, 'business_content_profile', 'uniform')), replay
     elif body:
         inspect.scan(_parameters(body))
     return inspect.reason, replay

@@ -36,6 +36,10 @@ class Settings(BaseModel):
     deny_countries: Rules
     sqli_mode: Mode | None = None
     xss_mode: Mode | None = None
+    business_content_profile: Literal['uniform', 'verified_business'] | None = None
+    adaptive_enabled: bool | None = None
+    anonymous_rate_per_minute: int | None = Field(None, ge=1, le=1_000_000)
+    authenticated_rate_per_minute: int | None = Field(None, ge=1, le=1_000_000)
     managed_ips: list[dict] | None = Field(None, max_length=512, exclude=True)
 
 

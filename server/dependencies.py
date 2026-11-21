@@ -30,7 +30,19 @@ def authenticate_session(db, authorization, request=None):
     return person
 
 
+def verified_in_request(request, authorization, kind):
+    checked = getattr(request.state, '_http_guard_auth', None) if request is not None else None
+    if not checked or checked[0] != authorization or checked[1] != kind:
+        return None
+    _, _, person, status, detail = checked
+    if status:
+        raise HTTPException(status, detail)
+    return person
+
+
 def user(authorization: Annotated[str | None, Header()] = None,request:Request=None):
+    if person := verified_in_request(request, authorization, 'user'):
+        return person
     if not authorization or not authorization.startswith('Bearer '):
         raise HTTPException(401,'请先登录')
     with connect() as db:
@@ -52,6 +64,8 @@ def system_admin(current=Depends(user)):
 
 
 def scan_user(authorization:Annotated[str|None,Header()]=None,request:Request=None):
+    if person := verified_in_request(request, authorization, 'scanner'):
+        return person
     from .scanner_auth import scan_user as authenticate
     current=authenticate(authorization)
     set_request_actor(request, current)

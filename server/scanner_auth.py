@@ -9,7 +9,7 @@ from cryptography.hazmat.primitives import serialization,hashes
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.exceptions import InvalidSignature,UnsupportedAlgorithm
 from .db import connect,find,get,objects,put
-from .dependencies import admin,system_admin,user,require,password_hash,set_request_actor
+from .dependencies import admin,system_admin,user,require,password_hash,set_request_actor,authenticate_session
 
 router=APIRouter(prefix='/api/v1/scanner')
 
@@ -124,12 +124,12 @@ def authenticate(body:dict,request:Request=None):
 
 
 def scan_user(authorization):
-    try:return user(authorization)
-    except HTTPException as error:
-        if error.status_code!=401:raise
     if not authorization or not authorization.startswith('Bearer '):raise HTTPException(401,'请连接已注册扫描设备')
     digest=hashlib.sha256(authorization[7:].encode()).hexdigest()
     with connect() as db:
+        try:return authenticate_session(db,authorization)
+        except HTTPException as error:
+            if error.status_code!=401:raise
         sessions=find(db,'scanner-sessions',token_hash=digest)
         if not sessions or sessions[0]['expires_at']<time.time():raise HTTPException(401,'设备连接已过期，请重新连接')
         device=active(db,sessions[0]['device_id'])

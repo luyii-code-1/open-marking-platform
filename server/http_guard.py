@@ -14,7 +14,8 @@ import time
 from starlette.responses import JSONResponse
 
 from .http_geoip import GeoIP
-from .http_guard_inspection import inspect_request
+from .http_guard_adaptive import AdaptiveLimiter, RouteIndex, credential, verify
+from .http_guard_inspection import business_fields, inspect_request
 from .http_guard_store import DEFAULT_SETTINGS, GuardStore
 
 
@@ -55,6 +56,8 @@ def validate_settings(settings):
     for key in ('sqli_mode', 'xss_mode'):
         if result[key] not in ('off', 'observe', 'enforce'):
             raise ValueError('请选择有效的内容检测模式')
+    if result['business_content_profile'] not in ('uniform', 'verified_business'):
+        raise ValueError('请选择有效的业务内容检测策略')
     managed = result['managed_ips']
     if not isinstance(managed, list) or len(managed) > 512:
         raise ValueError('精确 IP 策略最多可保留 512 项')
@@ -68,11 +71,14 @@ def validate_settings(settings):
             raise ValueError('精确 IP 策略包含无效地址')
         exact[str(address)] = {'ip': str(address), 'action': item['action'], 'expires': item['expires']}
     result['managed_ips'] = list(exact.values())
-    for key, low, high in [('retention_days', 1, 365), ('rate_per_minute', 0, 1000000)]:
+    for key, low, high in [('retention_days', 1, 365), ('rate_per_minute', 0, 1000000),
+                           ('anonymous_rate_per_minute', 1, 1000000), ('authenticated_rate_per_minute', 1, 1000000)]:
         if type(result[key]) is not int or not low <= result[key] <= high:
             raise ValueError(f'{key} 需要介于 {low} 和 {high} 之间的整数')
     if type(result['block_sensitive_paths']) is not bool:
         raise ValueError('敏感路径防护需要布尔值')
+    if type(result['adaptive_enabled']) is not bool:
+        raise ValueError('动态限流开关需要布尔值')
     for key in ('allow_ips', 'deny_ips', 'allow_countries', 'deny_countries'):
         items = result[key]
         if not isinstance(items, list) or len(items) > 512:
@@ -129,6 +135,10 @@ class Policy:
     sqli_mode: str
     xss_mode: str
     managed_ips: dict
+    business_content_profile: str
+    adaptive_enabled: bool
+    anonymous_rate_per_minute: int
+    authenticated_rate_per_minute: int
 
     @classmethod
     def compile(cls, settings):
@@ -168,6 +178,8 @@ class Guard:
         self._rates = OrderedDict()
         self._rate_minute = None
         self._rate_lock = threading.Lock()
+        self.routes = None
+        self.adaptive = AdaptiveLimiter()
         self._events = queue.Queue(maxsize=4096)
         self._stop = threading.Event()
         self._thread = None
@@ -180,6 +192,9 @@ class Guard:
         self._thread = threading.Thread(target=self._run, name='omp-http-guard', daemon=True)
         self._updater.start()
         self._thread.start()
+
+    def prepare_routes(self, app):
+        self.routes = RouteIndex(app)
 
     def close(self):
         self._stop.set()
@@ -202,6 +217,9 @@ class Guard:
                 if self.policy.rate_per_minute != policy.rate_per_minute:
                     with self._rate_lock:
                         self._rates.clear()
+                if (self.policy.adaptive_enabled, self.policy.anonymous_rate_per_minute, self.policy.authenticated_rate_per_minute) != (
+                        policy.adaptive_enabled, policy.anonymous_rate_per_minute, policy.authenticated_rate_per_minute):
+                    self.adaptive = AdaptiveLimiter()
                 self.policy = policy
                 self._settings = settings
 
@@ -348,14 +366,42 @@ class Guard:
                 and not any(name.lower() == b'x-forwarded-for' for name, _ in scope.get('headers', []))):
             # The container's local readiness check must keep working when an
             # administrator limits traffic by country or source network.
+            scope.setdefault('state', {})['http_guard_rate_exempt'] = True
             return ip, country, ''
         reason, allowed = policy.source(address, country)
+        if allowed:
+            scope.setdefault('state', {})['http_guard_rate_exempt'] = True
         if not allowed and not reason:
             if policy.block_sensitive_paths and _SENSITIVE.search(scope['path']):
                 reason = 'sensitive_path'
             elif policy.rate_per_minute and self._over_limit(ip, policy.rate_per_minute):
                 reason = 'rate_limit'
         return ip, country, reason
+
+    async def adaptive_check(self, scope, policy, ip):
+        method, path = scope['method'], scope['path']
+        state = scope.setdefault('state', {})
+        adaptive = policy.adaptive_enabled and not state.get('http_guard_rate_exempt')
+        content = (policy.business_content_profile == 'verified_business'
+                   and (policy.sqli_mode != 'off' or policy.xss_mode != 'off')
+                   and business_fields(method, path))
+        if not adaptive and not content:
+            return '', 0
+        if self.routes is None:
+            self.prepare_routes(scope['app'])
+        if adaptive and self.routes.resource(method, path):
+            kind, key, rate = 'resource', ip, min(policy.anonymous_rate_per_minute * 20, 1000000)
+        else:
+            credentials = credential(scope, self.routes)
+            if credentials is not None:
+                if adaptive:
+                    return await self.adaptive.credentials(scope, credentials, ip, policy)
+                await verify(scope, credentials)
+            if not adaptive:
+                return '', 0
+            kind, key, rate = 'anonymous', ip, policy.anonymous_rate_per_minute
+        retry = self.adaptive.check(kind, key, rate)
+        return (f'adaptive_{kind}', retry) if retry else ('', 0)
 
 
 class HttpGuardMiddleware:
@@ -375,11 +421,18 @@ class HttpGuardMiddleware:
             if blocked:
                 return await send({'type': 'websocket.close', 'code': 1008})
             return await self.app(scope, receive, send)
-        if not reason and (policy.sqli_mode != 'off' or policy.xss_mode != 'off'):
-            reason, receive = await inspect_request(scope, receive, policy)
-            if reason:
-                mode = policy.sqli_mode if reason == 'sqli' else policy.xss_mode
-                blocked = policy.mode == 'enforce' and mode == 'enforce'
+        retry = 0
+        if not reason and (policy.adaptive_enabled or policy.business_content_profile == 'verified_business'):
+            reason, retry = await guard.adaptive_check(scope, policy, ip)
+            blocked = bool(reason) and policy.mode == 'enforce'
+        if not blocked and (policy.sqli_mode != 'off' or policy.xss_mode != 'off'):
+            match, receive = await inspect_request(scope, receive, policy)
+            if match in ('sqli', 'xss'):
+                mode = policy.sqli_mode if match == 'sqli' else policy.xss_mode
+                if not reason or (policy.mode == 'enforce' and mode == 'enforce'):
+                    reason, blocked = match, policy.mode == 'enforce' and mode == 'enforce'
+            elif match and not reason:
+                reason = match
         status = 500
         bytes_out = 0
         content_length = 0
@@ -400,15 +453,21 @@ class HttpGuardMiddleware:
 
         try:
             if blocked:
-                code = 429 if reason == 'rate_limit' else 403
+                code = 429 if reason == 'rate_limit' or retry else 403
+                headers = {'Cache-Control': 'no-store'}
+                if retry:
+                    headers['Retry-After'] = str(retry)
                 response = JSONResponse({'detail': '请求过于频繁' if code == 429 else '请求被防护策略拦截'},
-                                        status_code=code, headers={'Cache-Control': 'no-store'})
+                                        status_code=code, headers=headers)
                 return await response(scope, receive, send_counted)
             return await self.app(scope, receive, send_counted)
         finally:
             # A route template never includes arbitrary submitted paths, query
             # strings or the archive download ticket occupying a path segment.
-            route = getattr(scope.get('route'), 'path', None) or ('<blocked>' if blocked else '<unmatched>')
+            route = getattr(scope.get('route'), 'path', None)
+            if not route and blocked and guard.routes is not None and (retry or reason in ('sqli', 'xss')):
+                _, route = guard.routes.match(scope['method'], scope['path'])
+            route = route or ('<blocked>' if blocked else '<unmatched>')
             state = scope.get('state', {})
             guard.offer({'ts': time.time(), 'ip': ip, 'country': country,
                          'method': scope['method'][:16], 'route': route[:256],

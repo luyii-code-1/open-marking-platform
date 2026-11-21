@@ -27,9 +27,14 @@ const reasons: Record<string, string> = {
   deny_country: '地区封禁',
   country_not_allowed: '来源地区未获准',
   sensitive_path: '敏感路径',
-  rate_limit: '请求频率超限',
+  rate_limit: 'IP 固定上限',
+  adaptive_anonymous: '未登录来源动态限流',
+  adaptive_authenticated: '已登录账号或设备动态限流',
+  adaptive_resource: '公开静态资源动态限流',
   sqli: 'SQL 注入',
   xss: '跨站脚本',
+  sqli_business: '业务文本 SQLi 观察',
+  xss_business: '业务文本 XSS 观察',
 }
 const lifetimes = [
   { value: 1, label: '1 小时' },

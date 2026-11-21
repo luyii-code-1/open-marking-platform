@@ -2,6 +2,7 @@ import time
 
 from fastapi.testclient import TestClient
 from server import db
+from server import http_guard_inspection as inspection
 from server.http_guard import Policy
 from server.main import app
 
@@ -48,3 +49,33 @@ def test_bulk_ip_policy_atomicity_expiry_and_history(tmp_path, monkeypatch):
         changes = client.get(api + '/policy-history', headers=headers).json()['items']
         assert len(changes) == 3 and changes[0]['actor'] == 'operator'
         assert set(changes[-1]['ips']) == {ips[0], ips[2]}
+
+
+def test_verified_business_profile_on_protected_preview(tmp_path, monkeypatch):
+    class Markers:
+        def libinjection_sqli(self, value, *args): return int(value == b'content-marker')
+        def libinjection_xss(self, *args): return 0
+
+    monkeypatch.setattr(db, 'ROOT', tmp_path)
+    monkeypatch.setattr(inspection, '_engine', Markers)
+    api = '/api/v1'
+    settings_path = api + '/system/http-guard/settings'
+    preview = api + '/system/login-footer/preview'
+    account = {'username': 'publisher', 'password': 'publisher-test-password', 'name': '管理员'}
+    body = {'html': 'content-marker'}
+    with TestClient(app, client=('192.0.2.33', 5124)) as client:
+        client.post(api + '/auth/bootstrap', json=account).raise_for_status()
+        token = client.post(api + '/auth/login', json=account).json()['token']
+        headers = {'Authorization': 'Bearer ' + token}
+        settings = client.get(settings_path, headers=headers).json()
+        config = {**settings, 'mode': 'enforce', 'sqli_mode': 'enforce', 'business_content_profile': 'verified_business'}
+        client.put(settings_path, json=config, headers=headers).raise_for_status()
+        assert client.post(preview, json=body).status_code == 403
+        assert client.post(preview, json=body, headers=headers).status_code == 200
+        assert client.post(preview, params={'q': 'content-marker'}, json=body, headers=headers).status_code == 403
+        client.post(api + '/auth/logout', headers=headers).raise_for_status()
+        assert client.post(preview, json=body, headers=headers).status_code == 403
+        store = app.state.http_guard.store
+    # Lifespan shutdown flushes pending audit events.
+    events = store.events(1, '', 'observed', None, 10, reason='sqli_business')['items']
+    assert len(events) == 1 and events[0]['route'] == preview and events[0]['actor_label'] == 'publisher'

@@ -1,5 +1,6 @@
 export const guardApi = '/system/http-guard'
 export type Mode = 'off' | 'observe' | 'enforce'
+export type BusinessContentProfile = 'uniform' | 'verified_business'
 export type Decision = 'pass' | 'observed' | 'blocked'
 export type Action = 'allow' | 'deny'
 export type ManagedIp = { ip: string; action: Action; expires: number }
@@ -7,6 +8,8 @@ export type Policy = {
   mode: Mode; retention_days: number; allow_ips: string[]; deny_ips: string[]
   allow_countries: string[]; deny_countries: string[]; rate_per_minute: number
   block_sensitive_paths: boolean; sqli_mode: Mode; xss_mode: Mode
+  business_content_profile?: BusinessContentProfile; adaptive_enabled?: boolean
+  anonymous_rate_per_minute?: number; authenticated_rate_per_minute?: number
   revision: number; managed_ips: ManagedIp[]
 }
 export type AccessEvent = {

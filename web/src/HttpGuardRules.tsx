@@ -18,6 +18,12 @@ const modeHelp: Record<Mode, string> = {
   observe: '采集请求并记录规则命中，流量继续放行。',
   enforce: '执行来源、限流和敏感路径策略。内容检测按照各自的模式处理。',
 }
+const contentProfiles = [
+  { value: 'uniform', label: '统一按规则处理' },
+  { value: 'verified_business', label: '已认证业务文本仅观察' },
+]
+const adaptiveRates = [60, 120, 300, 600, 1200, 3000]
+const adaptiveRateRules = [{ required: true, type: 'integer' as const, min: 1, max: 1000000, message: '请输入 1 至 1000000 的整数' }]
 
 const countryCodes = (
   'AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS BT BV BW BY BZ ' +
@@ -102,6 +108,8 @@ export function HttpGuardRules({ policy, onSaved, reload, status }: Props) {
   const [removeError, setRemoveError] = useState('')
   const [conflict, setConflict] = useState(false)
   const mode: Mode = Form.useWatch('mode', form) || policy.mode
+  const profile = Form.useWatch('business_content_profile', form) ?? policy.business_content_profile ?? 'uniform'
+  const adaptive = Form.useWatch('adaptive_enabled', form) ?? policy.adaptive_enabled ?? false
   const allowIps: string[] = Form.useWatch('allow_ips', form) || policy.allow_ips
   useUnsavedChanges(dirty)
 
@@ -181,7 +189,13 @@ export function HttpGuardRules({ policy, onSaved, reload, status }: Props) {
           disabled={saving || !!removing}
           onValuesChange={() => setDirty(true)}
           onFinish={save}
-          initialValues={policy}
+          initialValues={{
+            ...policy,
+            business_content_profile: policy.business_content_profile ?? 'uniform',
+            adaptive_enabled: policy.adaptive_enabled ?? false,
+            anonymous_rate_per_minute: policy.anonymous_rate_per_minute ?? 120,
+            authenticated_rate_per_minute: policy.authenticated_rate_per_minute ?? 600,
+          }}
         >
           <Tabs
             items={[
@@ -259,7 +273,18 @@ export function HttpGuardRules({ policy, onSaved, reload, status }: Props) {
                         </Tag>
                         {status?.engine?.version && <span className="guard-mono">libinjection {status.engine.version}</span>}
                       </Space>
-                      <Typography.Text type="secondary">全局观察模式下仅记录命中；全局拦截模式下按各规则模式执行。</Typography.Text>
+                      <Typography.Text type="secondary">全局观察模式仅记录命中。全局拦截模式按各规则及业务文本策略处理。</Typography.Text>
+                    </div>
+                    <div className="guard-rule-box">
+                      <Form.Item
+                        name="business_content_profile"
+                        label="业务文本检测策略"
+                        extra={profile === 'verified_business'
+                          ? '具备接口权限的账号提交题卡富文本、重阅原因等指定字段时，SQLi、XSS 命中只记日志。查询参数、其他字段和未登录请求继续按下方规则处理。'
+                          : '沿用各规则的统一处置方式，保留题卡富文本等原有字段例外。'}
+                      >
+                        <Select options={contentProfiles} aria-label="业务文本检测策略" style={{ maxWidth: 360 }} />
+                      </Form.Item>
                     </div>
                     <div className="http-guard-fields">
                       {(['sqli_mode', 'xss_mode'] as const).map((key, i) => (
@@ -267,7 +292,7 @@ export function HttpGuardRules({ policy, onSaved, reload, status }: Props) {
                           <Form.Item
                             name={key}
                             label={i ? '跨站脚本（XSS）' : 'SQL 注入（SQLi）'}
-                            extra={i ? '检测请求参数、路径与载荷中的常见 XSS 攻击特征。' : '检测请求参数与路径中的 SQL 注入语法特征。'}
+                            extra={i ? '检测查询参数和支持的请求正文中的跨站脚本特征。' : '检测查询参数和支持的请求正文中的 SQL 注入特征。'}
                           >
                             <Radio.Group optionType="button" buttonStyle="solid" options={modes} />
                           </Form.Item>
@@ -302,8 +327,8 @@ export function HttpGuardRules({ policy, onSaved, reload, status }: Props) {
                       <div className="guard-rule-box">
                         <Form.Item
                           name="rate_per_minute"
-                          label="单个 IP 每分钟请求上限"
-                          extra="每个服务进程独立计数，超出后触发限流策略。"
+                          label="单个 IP 每分钟固定上限"
+                          extra="每个服务进程独立计数。设为 0 关闭固定上限，可与动态限流同时使用。"
                           rules={[{ required: true, type: 'integer', min: 0, max: 1000000, message: '请输入 0 至 1000000 的整数' }]}
                         >
                           <PresetNumber presets={[0, 60, 120, 300, 600, 1200]} min={0} max={1000000} unit="次 / 分钟" />
@@ -319,6 +344,29 @@ export function HttpGuardRules({ policy, onSaved, reload, status }: Props) {
                           <PresetNumber presets={[7, 30, 60, 90, 180, 365]} min={1} max={365} unit="天" />
                         </Form.Item>
                       </div>
+                    </div>
+                    <div className="guard-rule-box">
+                      <Form.Item
+                        name="adaptive_enabled"
+                        label="动态限流"
+                        valuePropName="checked"
+                        extra={(adaptive ? '' : '可提前设置下方额度，开启后生效。') + '每个服务进程独立计数。空闲时可积攒 10 秒的额度用于短时突发，请求数向上取整。'}
+                      >
+                        <Switch checkedChildren="开启" unCheckedChildren="关闭" />
+                      </Form.Item>
+                      <div className="http-guard-fields">
+                        <Form.Item name="anonymous_rate_per_minute" label="未登录来源的基准额度"
+                          extra="按 IP 计数。10 秒内连续 3 次额度不足时，补充速度减半 60 秒。持续超额会延长收紧时间，期满自动恢复。" rules={adaptiveRateRules}>
+                          <PresetNumber presets={adaptiveRates} min={1} max={1000000} unit="次 / 分钟" />
+                        </Form.Item>
+                        <Form.Item name="authenticated_rate_per_minute" label="已登录账号或设备的基准额度"
+                          extra="服务器验证身份后按账号或设备分别计数。共用 IP 的不同账号各用自己的额度，按配置的基准速度补充。" rules={adaptiveRateRules}>
+                          <PresetNumber presets={adaptiveRates} min={1} max={1000000} unit="次 / 分钟" />
+                        </Form.Item>
+                      </div>
+                      <Typography.Text type="secondary">
+                        公开的页面、脚本、字体等静态资源按 IP 单独计数，额度为未登录基准的 20 倍，每个进程最高 100 万次 / 分钟。
+                      </Typography.Text>
                     </div>
                   </div>
                 ),

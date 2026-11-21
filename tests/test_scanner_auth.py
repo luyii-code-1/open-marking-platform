@@ -40,6 +40,23 @@ def connect(client,key,device):
     return {'Authorization':'Bearer '+response.json()['token']},challenge
 
 
+def test_adaptive_device_identity_rechecks_revocation_on_each_request(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, 'ROOT', tmp_path)
+    with TestClient(app) as client:
+        admin, _ = initialize(client)
+        key, device, _ = enroll(client, admin)
+        headers, _ = connect(client, key, device)
+        config = client.get('/api/v1/system/http-guard/settings', headers=admin).json()
+        assert client.put('/api/v1/system/http-guard/settings', headers=admin, json={
+            **config, 'mode': 'enforce', 'adaptive_enabled': True}).status_code == 200
+        assert client.get('/api/v1/projects', headers=headers).status_code == 200
+        # The same valid device bearer is insufficient for a browser-only dependency.
+        assert client.get('/api/v1/users', headers=headers).status_code == 401
+        url = f"/api/v1/scanner/devices/{device['id']}/status"
+        assert client.post(url, json={'enabled': False, 'reason': '设备停用验证'}, headers=admin).status_code == 200
+        assert client.get('/api/v1/projects', headers=headers).status_code == 403
+
+
 def test_device_scope_ownership_revocation_and_challenge_replay(tmp_path,monkeypatch):
     monkeypatch.setattr(db,'ROOT',tmp_path)
     with TestClient(app) as client:

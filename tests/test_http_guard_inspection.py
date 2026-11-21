@@ -29,10 +29,10 @@ HTML_DATA = '<script type="application/json">{}</script>'
 
 
 def check(*, body=b'', path='/api/v1/example', query=b'', content=b'application/json',
-          headers=(), rules=policy, frames=None):
+          method='POST', state=None, headers=(), rules=policy, frames=None):
     original = frames if frames is not None else [{'type': 'http.request', 'body': body, 'more_body': False}]
     pending = deque(original)
-    scope = {'type': 'http', 'path': path, 'method': 'POST', 'query_string': query,
+    scope = {'type': 'http', 'path': path, 'method': method, 'state': state or {}, 'query_string': query,
              'headers': [(b'content-type', content), *headers]}
 
     async def receive():
@@ -88,6 +88,37 @@ def test_stream_replay_bounds_and_binary_bypass(monkeypatch):
     assert check(frames=disconnect) == ('', 2)
     tiny = [chunks[0]] * (inspection.MESSAGE_LIMIT + 1) + [chunks[-1]]
     assert check(frames=tiny) == ('', inspection.MESSAGE_LIMIT)
+
+
+def test_verified_business_fields_and_strict_priority(monkeypatch):
+    class Markers:
+        def libinjection_sqli(self, value, *args): return int(value == b'sql-marker')
+        def libinjection_xss(self, value, *args): return int(value == b'html-marker')
+
+    monkeypatch.setattr(inspection, '_engine', Markers)
+    rules = SimpleNamespace(sqli_mode='enforce', xss_mode='observe', business_content_profile='verified_business')
+    admin = {'http_guard_verified': True, 'http_guard_role': 'admin'}
+    teacher = {**admin, 'http_guard_role': 'teacher'}
+    draft = '/api/v1/groups/group/drafts/draft'
+
+    def submit(body, path=draft, method='PUT', state=admin, **kwargs):
+        return check(body=json.dumps(body).encode(), path=path, method=method, state=state, rules=rules, **kwargs)[0]
+
+    fields = {'questions': [{'content_html': 'sql-marker'}, {'parts': [{'content_html': 'html-marker'}]}]}
+    assert submit({'value': fields}) == 'sqli_business'
+    assert submit({'value': {'print_notes': [{'html': 'html-marker'}]}}) == 'xss_business'
+    assert submit({'value': fields}, state={}) == 'sqli'
+    assert submit({'value': fields}, state={'http_guard_role': 'admin'}) == 'sqli'
+    assert submit({'value': fields}, state=teacher) == 'sqli'
+    assert submit({'value': fields}, method='POST') == 'sqli'
+    assert submit(fields) == 'sqli'
+    assert submit({'value': fields, 'request_id': 'sql-marker'}) == 'sqli'
+    assert submit({'value': fields}, query=b'q=sql-marker') == 'sqli'
+    assert submit({'value': {'questions': {'[]': {'content_html': 'sql-marker'}}}}) == 'sqli'
+    assert submit({'reason': 'sql-marker'}, '/api/v1/tasks/t/report', 'POST', teacher) == 'sqli_business'
+    assert submit({'reason': 'sql-marker'}, '/api/v1/tasks/t/score', 'POST', teacher) == 'sqli'
+    assert submit({'html': 'html-marker'}, '/api/v1/system/login-footer/preview', 'POST') == 'xss_business'
+    assert submit({'html': 'html-marker'}, '/api/v1/other', 'POST') == 'xss'
 
 
 def test_missing_native_library_is_visible_and_keeps_stream_intact(tmp_path, monkeypatch):

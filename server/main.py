@@ -46,6 +46,7 @@ async def lifespan(app):
     review_writer = ReviewWriter(database.ROOT, persistent=True)
     from .http_guard import Guard
     guard = Guard(database.ROOT)
+    await asyncio.to_thread(guard.prepare_routes, app)
     await asyncio.to_thread(guard.start)
     app.state.http_guard = guard
     try:yield {'review_writer': review_writer}
