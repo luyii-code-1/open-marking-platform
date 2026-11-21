@@ -26,7 +26,7 @@ const updates=automaticPwaUpdates({
 try{
   await flush();assert.equal(attempts,1)
   online=false;updates.tick();await flush();assert.equal(attempts,1)
-  online=true;updates.tick();await flush();assert.equal(attempts,2);assert.equal(reported,1);assert.equal(checks,1)
+  online=true;updates.tick();await flush();assert.equal(attempts,2);assert.equal(reported,1);assert.equal(checks,0,'An initial worker installation is already downloading the current build')
   registration.waiting=worker;worker.state='installed';worker.dispatchEvent(new Event('statechange'))
   assert.equal(messages.length,0,'Dirty or active pages must defer activation')
   ready=true;visible=false;updates.tick();assert.equal(messages.length,0)
@@ -34,10 +34,10 @@ try{
   updates.tick();assert.equal(messages.length,1,'An unready peer window must not cause a tight activation loop')
   clock+=30000;updates.tick();assert.equal(messages.length,2)
   registration.waiting=null;clock+=300000;failCheck=true;updates.tick();await flush()
-  assert.equal(checks,2)
-  clock+=30000;failCheck=false;updates.tick();await flush();assert.equal(checks,3,'An update check must recover after network failure')
+  assert.equal(checks,1)
+  clock+=30000;failCheck=false;updates.tick();await flush();assert.equal(checks,2,'An update check must recover after network failure')
 }finally{updates.stop()}
-clock+=300000;updates.tick();assert.equal(checks,3)
+clock+=300000;updates.tick();assert.equal(checks,2)
 console.log('Automatic updates passed: idle/input/write guards, registration recovery, background checks, hidden windows, activation backoff and cleanup')
 
 let verdict

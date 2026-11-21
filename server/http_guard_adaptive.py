@@ -14,6 +14,7 @@ from starlette.routing import Mount
 from starlette.staticfiles import StaticFiles
 
 from . import dependencies
+from .web_static import WebStaticFiles
 
 
 _BEARER = re.compile(rb'Bearer [A-Za-z0-9_-]{54}')
@@ -46,6 +47,9 @@ class RouteIndex:
         self.resources = set()
         for route in routes:
             original = getattr(route, 'original_route', route)
+            if isinstance(original, Mount) and isinstance(original.app, WebStaticFiles):
+                self.resources.update(original.path + path for path in original.app.files)
+                continue
             if isinstance(original, Mount) and isinstance(original.app, StaticFiles) and original.app.directory:
                 folder = Path(original.app.directory)
                 for item in folder.rglob('*'):

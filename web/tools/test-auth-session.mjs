@@ -98,9 +98,32 @@ disposeGuard()
 assert.equal(windowEvents.dispatchEvent(new Event('beforeunload',{cancelable:true})),true)
 assert.equal(nav.exports.hasUnsavedChanges(),false)
 
+const readsModule={exports:{}}
+vm.runInNewContext(await compile('resourceReads.ts'),{module:readsModule,exports:readsModule.exports,structuredClone})
+const reads=new readsModule.exports.ResourceReads()
+const resolvers=[]
+const startRead=()=>new Promise(resolve=>resolvers.push(resolve))
+const oldRead=reads.read('a','/dashboard',startRead)
+const joined=reads.read('a','/dashboard',startRead)
+const otherUser=reads.read('b','/dashboard',startRead)
+assert.equal(resolvers.length,2,'Concurrent readers may only share a GET within one session')
+reads.invalidate()
+const fresh=reads.read('a','/dashboard',startRead)
+resolvers[0]({count:1});resolvers[1]({count:2})
+const original=await oldRead
+const copy=await joined
+assert.equal(copy.count,original.count);assert.notEqual(copy,original)
+assert.equal((await otherUser).count,2)
+const refreshed=reads.read('a','/dashboard',startRead,true)
+const afterRefresh=reads.read('a','/dashboard',startRead)
+resolvers[2]({count:3});resolvers[3]({count:4})
+assert.equal((await fresh).count,3);assert.equal((await refreshed).count,4);assert.equal((await afterRefresh).count,4)
+assert.equal(await reads.read('a','/dashboard',async()=>5),5,'Completed results must not survive as a private API cache')
+
 function browser(local){
   const win=new EventTarget(),module={exports:{}};let handler=async()=>new Response('{}')
-  vm.runInNewContext(apiSource,{exports:module.exports,module,require:name=>name==='react'?{}:name==='./sharedSession'?shared.exports:name==='./updatePolicy'?{beginMutation:()=>()=>{}}:null,
+  const dependencies={react:{},'./sharedSession':shared.exports,'./resourceReads':readsModule.exports,'./updatePolicy':{beginMutation:()=>()=>{},watchMutations:()=>{},hasPendingMutations:()=>false}}
+  vm.runInNewContext(apiSource,{exports:module.exports,module,require:name=>dependencies[name],
     localStorage:local,sessionStorage:storage(),window:win,EventTarget,Event,CustomEvent,Headers,FormData,fetch:(...args)=>handler(...args),setTimeout,clearTimeout})
   return {api:module.exports,setFetch:fn=>handler=fn,refresh(){const event=new Event('storage');Object.defineProperty(event,'key',{value:sessionKey});win.dispatchEvent(event)}}
 }

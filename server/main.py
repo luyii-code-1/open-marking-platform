@@ -12,7 +12,6 @@ from uuid import uuid4
 
 from fastapi import FastAPI, Depends, Header, HTTPException, UploadFile, File, Form, Request, Body
 from fastapi.responses import Response, JSONResponse, FileResponse
-from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -60,6 +59,11 @@ async def lifespan(app):
 
 
 app = FastAPI(title='Open Marking Platform',version='0.1.0',lifespan=lifespan)
+from .web_static import WebStaticFiles, PublicAssetMiddleware
+web_distribution=Path(__file__).resolve().parents[1]/'web'/'dist'
+web_files=WebStaticFiles(web_distribution) if web_distribution.is_dir() else None
+if web_files is not None:
+    app.add_middleware(PublicAssetMiddleware, files=web_files)
 from .paper_fonts import router as paper_fonts_router
 app.include_router(paper_fonts_router)
 from .request_log import RequestLogMiddleware
@@ -610,6 +614,5 @@ app.include_router(http_guard_router)
 from .http_guard_analytics import router as http_analytics_router
 app.include_router(http_analytics_router)
 
-web_distribution=Path(__file__).resolve().parents[1]/'web'/'dist'
-if web_distribution.exists():
-    app.mount('/',StaticFiles(directory=web_distribution,html=True),name='web')
+if web_files is not None:
+    app.mount('/',web_files,name='web')

@@ -1,10 +1,7 @@
 import './pwaCoordinator'
 import React from 'react'
 import { createRoot } from 'react-dom/client'
-import { ConfigProvider, App as AntApp } from 'antd'
-import zhCN from 'antd/locale/zh_CN'
 import { App } from './App'
 import { PwaRuntime } from './PwaStatus'
-import { uiTheme } from './uiTheme'
-import './styles.css'
-createRoot(document.getElementById('root')!).render(<React.StrictMode><ConfigProvider locale={zhCN} theme={uiTheme}><AntApp><PwaRuntime><App /></PwaRuntime></AntApp></ConfigProvider></React.StrictMode>)
+import './login.css'
+createRoot(document.getElementById('root')!).render(<React.StrictMode><PwaRuntime><App /></PwaRuntime></React.StrictMode>)

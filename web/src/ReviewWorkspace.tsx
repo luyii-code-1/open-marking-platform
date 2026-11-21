@@ -13,6 +13,27 @@ const Context=createContext<Workspace|null>(null)
 export function useReviewWorkspace(){const value=useContext(Context);if(!value)throw new Error('阅卷工作区尚未初始化');return value}
 
 export function ReviewWorkspace({user,offline,onVerified,onLoginRequired,children}:{user:User;offline:boolean;onVerified:(user:User)=>void;onLoginRequired:()=>void;children:ReactNode}){
+  useEffect(() => {
+    if (!import.meta.env.PROD || user.role === 'admin' || !('serviceWorker' in navigator)) return
+    let mounted = true
+    function warmReview() {
+      if (!navigator.onLine) return
+      void navigator.serviceWorker.ready.then(registration => {
+        if (!mounted) return
+        const message = { type: 'PREPARE_REVIEW_SHELL' }
+        registration.active?.postMessage(message)
+        registration.waiting?.postMessage(message)
+      }).catch(() => {})
+    }
+    warmReview()
+    window.addEventListener('online', warmReview)
+    navigator.serviceWorker.addEventListener('controllerchange', warmReview)
+    return () => {
+      mounted = false
+      window.removeEventListener('online', warmReview)
+      navigator.serviceWorker.removeEventListener('controllerchange', warmReview)
+    }
+  }, [user.role])
   const [records,setRecords]=useState<ReviewRecord[]>([]),[storageError,setStorageError]=useState(''),[locked,setLocked]=useState(isReviewUpdateLocked()),[status,setStatus]=useState<SyncReport>({state:offline?'offline':'ready',sent:0})
   const [ready,setReady]=useState(false)
   const retryNeeded=useRef(false)

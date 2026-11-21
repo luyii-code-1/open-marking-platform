@@ -6,15 +6,16 @@ import {settleReviewWrites} from './reviewStore'
 export function BuildVersionMonitor(){
   useEffect(()=>{
     if(!import.meta.env.PROD)return
-    let stopped=false,checking=false
+    let stopped=false,checking=false,checkedAt=0
     async function check(){
-      if(checking||!navigator.onLine||document.visibilityState!=='visible')return
+      if(checking||!navigator.onLine||document.visibilityState!=='visible'||Date.now()-checkedAt<10000)return
       checking=true
       try{
         const remote=await serverBuild(),current=document.querySelector('meta[name="omp-build"]')?.getAttribute('content')
         const controller=navigator.serviceWorker?.controller
         const controlled=controller?await workerBuild(controller).catch(()=>undefined):undefined
         if(stopped)return
+        checkedAt=Date.now()
         const matches=remote.shell_version===current&&(!controller||controlled===current)
         if(!matches){
           const registration=await navigator.serviceWorker?.getRegistration()
@@ -27,7 +28,8 @@ export function BuildVersionMonitor(){
       }catch{/* Retry the version check after connectivity recovers. */}
       finally{checking=false}
     }
-    void check()
+    // A first, uncontrolled visit already loaded the current HTML from the server.
+    if(navigator.serviceWorker?.controller)void check()
     const timer=setInterval(check,60000)
     window.addEventListener('online',check);document.addEventListener('visibilitychange',check)
     return()=>{stopped=true;clearInterval(timer);window.removeEventListener('online',check);document.removeEventListener('visibilitychange',check)}

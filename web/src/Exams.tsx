@@ -1,6 +1,4 @@
-import {SheetLookup} from './SheetLookup'
 import {ExamCatalog} from './ExamCatalog'
-import {AnswerPool} from './AnswerPool'
 import './cardFlow.css'
 import {CatalogPicker} from './Electives'
 import { RoomTagManager } from './RoomTags'
@@ -12,18 +10,23 @@ import { ArrowLeftOutlined,RightOutlined,PlusOutlined } from '@ant-design/icons'
 import { announceChanges,send,useResource,type Row,type Template } from './api'
 import { HierarchyDelete } from './HierarchyDelete'
 import { EntityTable,ErrorNotice } from './EntityTable'
-import { ArchiveManager } from './ArchiveManager'
-import { Roster } from './Roster'
-import { TemplateEditor } from './TemplateEditor'
-import { Scans } from './Management'
-import { ReviewAllocation } from './ReviewAllocation'
-import { Exceptions } from './Exceptions'
-import { Results } from './Results'
-import { ProjectStorage } from './StorageConnections'
 import { cardName,examPath,groupSections,rememberExamContext,resolveExam,subjectGrades,unassignedGrade,type ExamLocation } from './examNavigation'
 import type { ProjectFilter } from './reviewProjects'
 import {useReviewWorkspace} from './ReviewWorkspace'
 import { rowNavigation } from './rowNavigation'
+
+import { loadPage } from './loadPage'
+
+const SheetLookup = loadPage(() => import('./SheetLookup').then(module => ({ default: module.SheetLookup })))
+const AnswerPool = loadPage(() => import('./AnswerPool').then(module => ({ default: module.AnswerPool })))
+const ArchiveManager = loadPage(() => import('./ArchiveManager').then(module => ({ default: module.ArchiveManager })))
+const Roster = loadPage(() => import('./Roster').then(module => ({ default: module.Roster })))
+const TemplateEditor = loadPage(() => import('./TemplateEditor').then(module => ({ default: module.TemplateEditor })))
+const Scans = loadPage(() => import('./Management').then(module => ({ default: module.Scans })))
+const ReviewAllocation = loadPage(() => import('./ReviewAllocation').then(module => ({ default: module.ReviewAllocation })))
+const Exceptions = loadPage(() => import('./Exceptions').then(module => ({ default: module.Exceptions })))
+const Results = loadPage(() => import('./Results').then(module => ({ default: module.Results })))
+const ProjectStorage = loadPage(() => import('./StorageConnections').then(module => ({ default: module.ProjectStorage })))
 
 const { Title,Text }=Typography
 export function Exams({location,navigate}:{location:ExamLocation;navigate:(path:string,replace?:boolean)=>void}){

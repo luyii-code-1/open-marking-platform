@@ -1,18 +1,16 @@
-export { Results } from './Results'
-export { Exceptions } from './Exceptions'
-export { ErrorNotice } from './EntityTable'
 import { useState } from 'react'
 import { Tabs } from 'antd'
-import { ScanCapture } from './ScanCapture'
-import { Corrections } from './Corrections'
-import { Personnel } from './Personnel'
-import { ScannerDevices } from './ScannerDevices'
-import { AuditLog } from './AuditLog'
-import { StorageConnections } from './StorageConnections'
-import { LoginPageSettings } from './LoginPageSettings'
-import { DatabaseBackups } from './DatabaseBackups'
 import { readExamContext, rememberExamContext } from './examNavigation'
-export function DataManagement(props:{systemAdmin?:boolean;tab?:string;onTab?:(key:string)=>void}) {return <Personnel {...props}/>}
+import { loadPage } from './loadPage'
+
+const ScanCapture = loadPage(() => import('./ScanCapture').then(module => ({ default: module.ScanCapture })))
+const Corrections = loadPage(() => import('./Corrections').then(module => ({ default: module.Corrections })))
+const ScannerDevices = loadPage(() => import('./ScannerDevices').then(module => ({ default: module.ScannerDevices })))
+const AuditLog = loadPage(() => import('./AuditLog').then(module => ({ default: module.AuditLog })))
+const StorageConnections = loadPage(() => import('./StorageConnections').then(module => ({ default: module.StorageConnections })))
+const LoginPageSettings = loadPage(() => import('./LoginPageSettings').then(module => ({ default: module.LoginPageSettings })))
+const DatabaseBackups = loadPage(() => import('./DatabaseBackups').then(module => ({ default: module.DatabaseBackups })))
+
 export function Scans({groupId,tab,onTab}:{groupId?:string;tab?:string;onTab?:(key:string)=>void}) {
   const [activeTab,setActiveTab]=useState(tab||'capture')
   const [selectedGroup,setSelectedGroup]=useState(()=>groupId||readExamContext().groupId)

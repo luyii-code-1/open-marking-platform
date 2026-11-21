@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { beginMutation } from './updatePolicy'
+import { beginMutation, hasPendingMutations, watchMutations } from './updatePolicy'
+import { ResourceReads } from './resourceReads'
 import { SharedSession,sessionKey,type SessionLease } from './sharedSession'
 
 export type Row = Record<string, any> & { id: string }
@@ -23,7 +24,9 @@ function expired(response:Response,path:string,authorization:string|null){
   if(response.status===401&&!publicAuth&&authorization?.startsWith('Bearer '))session.clear(authorization.slice(7))
 }
 const resourceEvents=new EventTarget()
-export function announceChanges(roots?:string[]){resourceEvents.dispatchEvent(new CustomEvent('change',{detail:roots}))}
+const resourceReads = new ResourceReads()
+watchMutations(() => resourceReads.invalidate())
+export function announceChanges(roots?:string[]){resourceReads.invalidate();resourceEvents.dispatchEvent(new CustomEvent('change',{detail:roots}))}
 export function watchChanges(callback:(roots?:string[])=>void){const handler=(event:Event)=>callback((event as CustomEvent<string[]|undefined>).detail);resourceEvents.addEventListener('change',handler);return()=>resourceEvents.removeEventListener('change',handler)}
 export class ApiError extends Error { constructor(message: string, public status: number) { super(message) } }
 export async function request<T = any>(path: string, init: RequestInit = {}): Promise<T> {
@@ -72,14 +75,23 @@ export async function downloadArchive(identifier:string,filename:string) {
 export function useResource<T>(path: string | null, initial: T, options:{live?:boolean}={}) {
   const [data, setData] = useState<T>(initial), [loading, setLoading] = useState(false), [loaded, setLoaded] = useState(false), [error, setError] = useState('')
   const version=useRef(0),currentPath=useRef(path),initialData=useRef(initial);currentPath.current=path
-  const reload = useCallback(async () => {
+  const load = useCallback(async (refresh: boolean) => {
     if (!path) return
     const sequence=++version.current
+    const owner=currentToken()
+    const active=()=>sequence===version.current&&path===currentPath.current&&currentToken()===owner
     setLoading(true); setError('')
-    try { const next=await request<T>(path);if(sequence===version.current&&path===currentPath.current)setData(next) } catch (e) { if(sequence===version.current&&path===currentPath.current){setError(e instanceof Error ? e.message : '请求失败');if(e instanceof ApiError&&[401,403,404].includes(e.status))setData(initialData.current)} } finally { if(sequence===version.current&&path===currentPath.current){setLoading(false);setLoaded(true)} }
+    try {
+      const fetchData=()=>request<T>(path)
+      const next=await (hasPendingMutations()?fetchData():resourceReads.read(owner,path,fetchData,refresh))
+      if(active())setData(next)
+    } catch(e) {
+      if(active()){setError(e instanceof Error?e.message:'请求失败');if(e instanceof ApiError&&[401,403,404].includes(e.status))setData(initialData.current)}
+    } finally {if(active()){setLoading(false);setLoaded(true)}}
   }, [path])
-  useEffect(() => { setLoaded(false);if(!path){setData(initialData.current);setLoading(false);setError('')}else void reload();return()=>{version.current++} }, [path,reload])
-  useEffect(()=>watchChanges(roots=>{if(options.live!==false&&path&&(!roots||roots.includes(path.split('/')[1].split('?')[0])))void reload()}),[path,reload,options.live])
+  const reload=useCallback(()=>load(true),[load])
+  useEffect(() => { setLoaded(false);if(!path){setData(initialData.current);setLoading(false);setError('')}else void load(false);return()=>{version.current++} }, [path,load])
+  useEffect(()=>watchChanges(roots=>{if(options.live!==false&&path&&(!roots||roots.includes(path.split('/')[1].split('?')[0])))void load(false)}),[path,load,options.live])
   return { data, loading, loaded, error, reload, setData }
 }
 export function newQuestion(number: number): Question { return { id: crypto.randomUUID(), number, type: 'subjective', options: 4, answer: [], points: 10, regions: [], rule: { mode: 'exact' }, review_mode: 'single', threshold: 2, threshold_inclusive:false } }

@@ -1,0 +1,11 @@
+:root{font-family:'Segoe UI','Microsoft YaHei UI','Microsoft YaHei',sans-serif;color:#141414;background:#f5f7fa;font-size:14px;line-height:1.5714285714;color-scheme:light}
+*{box-sizing:border-box}body{margin:0}button,input{font:inherit}
+:focus-visible{outline:2px solid #0866ff;outline-offset:2px}
+.brand{height:72px;padding:0 12px;display:flex;align-items:center;gap:8px;flex-shrink:0;overflow:hidden;white-space:nowrap}
+.brand img{display:block;flex-shrink:0;object-fit:contain}
+.brand-logo{display:flex;flex-direction:column;align-items:center;gap:3px;min-width:0}
+.brand-commit{font-family:ui-monospace,Consolas,monospace;font-size:10px;line-height:14px;color:#667085;font-variant-numeric:tabular-nums}
+.brand-collapsed .brand-commit{font-size:8px;letter-spacing:-.2px}
+.brand-name{font-size:12px;font-weight:600;color:#374151}
+.brand-collapsed{justify-content:center;padding:0 8px}
+.brand-login{height:auto;padding:0;justify-content:center;margin:0 auto 24px}

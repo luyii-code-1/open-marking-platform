@@ -12,7 +12,17 @@ const build = {
 export default defineConfig({
   plugins: [react(), {name: 'omp-build-info', generateBundle() {this.emitFile({type: 'asset', fileName: 'version.json', source: JSON.stringify(build)})}}],
   define: { __OMP_BUILD__: JSON.stringify(build) },
-  build: { rollupOptions: { input: { main: 'index.html', scanner: 'scanner.html' } } },
+  build: {
+    manifest: true,
+    rollupOptions: {
+      input: { main: 'index.html', scanner: 'scanner.html' },
+      output: {
+        manualChunks(id) {
+          if (/\/node_modules\/(react|react-dom|scheduler)\//.test(id.replaceAll('\\', '/'))) return 'react-runtime'
+        },
+      },
+    },
+  },
   server: { proxy },
   preview: { proxy },
 })

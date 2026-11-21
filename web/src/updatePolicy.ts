@@ -38,6 +38,7 @@ export function automaticPwaUpdates(options:{
       const value=await options.register()
       if(stopped)return
       registration=value;value.addEventListener('updatefound',found);watch(value.installing)
+      if(value.installing&&!value.active)lastCheck=now()
       options.onReady();tick()
     }catch{/* Network recovery is retried in the background. */}
     finally{registering=false}

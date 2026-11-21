@@ -1,19 +1,35 @@
-import { useEffect, useState } from 'react'
-import { Alert, App, Card, Form, Input, Divider, Typography } from 'antd'
-import { Button } from './Button'
-import { ArrowLeftOutlined, KeyOutlined, AuditOutlined, SettingOutlined } from '@ant-design/icons'
-import { ApiError, request, send, setToken, type User,type AuthSession } from './api'
+import { useEffect, useState, type FormEvent, type InputHTMLAttributes } from 'react'
+import { ApiError, request, send, setToken, type User, type AuthSession } from './api'
 import { loginPasskey } from './passkeys'
 import { Brand } from './Brand'
 import { LoginFooter } from './LoginFooter'
 
 export type Portal = 'marking' | 'admin'
-const { Title, Paragraph } = Typography
-export function Login({ portal, onPortal, onLogin }: { portal?: Portal; onPortal: (portal?: Portal) => void; onLogin: (user: User, portal: Portal) => void }) {
-  const [mode, setMode] = useState<'password' | 'passkey' | 'forgot' | 'bootstrap'>('password'), [loading, setLoading] = useState(false), [error, setError] = useState('')
-  const [loginForm] = Form.useForm(), [resetForm] = Form.useForm(), [bootstrapForm] = Form.useForm(), { message } = App.useApp()
-  useEffect(() => { setMode('password'); setError('') }, [portal])
-  const [canCreate, setCanCreate] = useState(false)
+type Mode = 'password' | 'passkey' | 'forgot' | 'bootstrap'
+type Props = { portal?: Portal; onPortal: (portal?: Portal) => void; onLogin: (user: User, portal: Portal) => void }
+type FieldProps = InputHTMLAttributes<HTMLInputElement> & { label: string; name: string }
+
+function Field({ label, name, type = 'text', ...props }: FieldProps) {
+  const [visible, setVisible] = useState(false)
+  const password = type === 'password'
+  const id = 'login-' + name
+  return <div className="login-field">
+    <label htmlFor={id}>{label}</label>
+    <div className="login-input">
+      <input id={id} name={name} required type={password && visible ? 'text' : type} {...props}/>
+      {password && <button type="button" className="login-eye" aria-label={visible ? '隐藏密码' : '显示密码'} aria-pressed={visible}
+        onClick={() => setVisible(!visible)}><span aria-hidden="true" className={'login-glyph ' + (visible ? 'glyph-eye' : 'glyph-eye-off')}/></button>}
+    </div>
+  </div>
+}
+
+export function Login({ portal, onPortal, onLogin }: Props) {
+  const [mode, setMode] = useState<Mode>('password'), [loading, setLoading] = useState(false)
+  const [error, setError] = useState(''), [notice, setNotice] = useState('')
+  const [username, setUsername] = useState(''), [password, setPassword] = useState('')
+  const [resetUsername, setResetUsername] = useState(''), [canCreate, setCanCreate] = useState(false)
+  function selectMode(next: Mode) { setMode(next); setError(''); setNotice('') }
+  useEffect(() => { selectMode('password') }, [portal])
   useEffect(() => {
     setCanCreate(false)
     if (portal !== 'admin') return
@@ -31,66 +47,78 @@ export function Login({ portal, onPortal, onLogin }: { portal?: Portal; onPortal
     window.addEventListener('focus',refresh)
     return () => { controller.abort(); window.removeEventListener('focus',refresh) }
   }, [portal])
-  async function login(values: Record<string, string>) {
-    if (!portal) return
-    setLoading(true); setError('')
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (loading || !portal) return
+    const form = new FormData(event.currentTarget)
+    const value = (name: string) => String(form.get(name) || '')
+    const account = value('username')
+    setError(''); setNotice('')
+    if (mode === 'forgot' && value('new_password') !== value('confirm_password')) {
+      setError('两次输入的密码不一致')
+      return
+    }
+    setLoading(true)
     try {
-      if (mode === 'bootstrap') {
-        await send('/auth/bootstrap', values)
-        setCanCreate(false); setMode('password')
-        loginForm.setFieldsValue({username:values.username})
+      if (mode === 'forgot') {
+        await send('/auth/recovery-reset', { username: account, code: value('code').trim(), new_password: value('new_password') })
+        setUsername(account); setPassword(''); setMode('password'); setNotice('密码已重置，请使用新密码登录')
+        return
       }
-      const result = mode === 'passkey' ? await loginPasskey(values.username, portal) : await send<AuthSession&{token:string}>('/auth/login', { username: values.username, password: values.password, portal })
-      setToken(result.token,result); onLogin(result.user, portal)
+      if (mode === 'bootstrap') {
+        await send('/auth/bootstrap', { username: account, name: value('name'), password: value('password') })
+        setCanCreate(false); setMode('password'); setUsername(account)
+      }
+      const result = mode === 'passkey' ? await loginPasskey(account, portal)
+        : await send<AuthSession & {token:string}>('/auth/login', { username: account, password: value('password'), portal })
+      setToken(result.token, result); onLogin(result.user, portal)
     } catch (e) {
       if (mode === 'bootstrap' && e instanceof ApiError && e.status === 409) { setCanCreate(false); setMode('password') }
       setError((e as Error).message)
-    }
-    finally { setLoading(false) }
+    } finally { setLoading(false) }
   }
-  async function reset(values: Record<string, string>) {
-    setLoading(true); setError('')
-    try {
-      await send('/auth/recovery-reset', { username: values.username, code: values.code.trim(), new_password: values.new_password })
-      loginForm.setFieldsValue({ username: values.username, password: '' }); resetForm.resetFields(); setMode('password')
-      message.success('密码已重置，请使用新密码登录')
-    } catch (e) { setError((e as Error).message) }
-    finally { setLoading(false) }
-  }
-  if (!portal) return <div className="login-screen"><main className="login-content"><div className="portal-picker"><Brand login /><Title level={2}>登录</Title><div className="portal-grid">
-    <Card><AuditOutlined className="portal-icon" /><Title level={3}>阅卷台</Title><Button type="primary" size="large" block onClick={() => onPortal('marking')}>登录阅卷台</Button></Card>
-    <Card><SettingOutlined className="portal-icon" /><Title level={3}>管理后台</Title><Button size="large" block onClick={() => onPortal('admin')}>登录管理后台</Button></Card>
-  </div></div></main><LoginFooter /></div>
-  return <div className="login-screen"><main className="login-content"><Card className="login-card">
-    <Button type="text" className="login-back" icon={<ArrowLeftOutlined />} disabled={loading} onClick={() => { if (mode === 'forgot' || mode === 'bootstrap') { setMode('password'); setError('') } else onPortal() }}>{mode === 'forgot' || mode === 'bootstrap' ? '返回登录' : '选择登录入口'}</Button>
-    <Brand login />
-    <Title level={3}>{mode === 'forgot' ? '重置密码' : mode === 'bootstrap' ? '创建管理员' : portal === 'admin' ? '登录管理后台' : '登录阅卷台'}</Title>
-    {error && <Alert type="error" showIcon message={error} className="login-error" />}
-    {mode === 'forgot' ? <>
-      <Paragraph type="secondary">使用已保存的恢复码设置新密码。恢复码仅可使用一次，重置后原登录会话失效。</Paragraph>
-      <Form form={resetForm} layout="vertical" requiredMark={false} onFinish={reset}>
-        <Form.Item name="username" label="账号" rules={[{ required: true }]}><Input autoComplete="username" /></Form.Item>
-        <Form.Item name="code" label="恢复码" rules={[{ required: true, whitespace: true }]}><Input autoComplete="one-time-code" spellCheck={false} /></Form.Item>
-        <Form.Item name="new_password" label="新密码" rules={[{ required: true, min: 10, max: 200, message: '密码需10至200个字符' }]}><Input.Password autoComplete="new-password" /></Form.Item>
-        <Form.Item name="confirm_password" label="确认新密码" dependencies={['new_password']} rules={[{ required: true }, ({ getFieldValue }) => ({ validator: (_, value) => !value || getFieldValue('new_password') === value ? Promise.resolve() : Promise.reject(new Error('两次输入的密码不一致')) })]}><Input.Password autoComplete="new-password" /></Form.Item>
-        <Button type="primary" htmlType="submit" size="large" block loading={loading}>重置密码</Button>
-      </Form><Paragraph type="secondary" className="forgot-help">没有可用恢复码时，请联系管理员重置密码。</Paragraph>
-    </> : mode === 'bootstrap' ? <>
-      <Paragraph type="secondary">仅首次部署可创建管理员。</Paragraph><Form form={bootstrapForm} layout="vertical" requiredMark={false} onFinish={login}>
-        <Form.Item name="username" label="账号" rules={[{ required: true }]}><Input autoComplete="username" /></Form.Item>
-        <Form.Item name="name" label="姓名" rules={[{ required: true, whitespace: true }]}><Input /></Form.Item>
-        <Form.Item name="password" label="密码" rules={[{ required: true, min: 10, max: 200, message: '密码需10至200个字符' }]}><Input.Password autoComplete="new-password" /></Form.Item>
-        <Button type="primary" htmlType="submit" size="large" block loading={loading}>创建并登录</Button>
-      </Form>
-    </> : <>
-      <Form form={loginForm} layout="vertical" requiredMark={false} onFinish={login}>
-        <Form.Item name="username" label="账号" rules={[{ required: true }]}><Input size="large" autoComplete="username" /></Form.Item>
-        {mode === 'password' && <Form.Item name="password" label="密码" rules={[{ required: true, message: '请输入密码' }]}><Input.Password size="large" autoComplete="current-password" /></Form.Item>}
-        <Button type="primary" htmlType="submit" size="large" block loading={loading}>{mode === 'passkey' ? '使用通行密钥登录' : '登录'}</Button>
-      </Form>
-      <div className="login-links"><Button type="link" onClick={() => { resetForm.setFieldsValue({ username: loginForm.getFieldValue('username') || '' }); setMode('forgot'); setError('') }}>忘记密码</Button>{portal === 'admin' && canCreate && <Button type="link" onClick={() => { setMode('bootstrap'); setError('') }}>首次部署创建管理员</Button>}</div>
-      <Divider plain>其他登录方式</Divider>
-      <Button block size="large" disabled={loading} icon={mode==='password'?<KeyOutlined/>:undefined} onClick={()=>{setMode(mode==='password'?'passkey':'password');setError('')}}>{mode==='password'?'使用通行密钥':'使用密码登录'}</Button>
+
+  if (!portal) return <div className="login-screen"><main className="login-content"><div className="portal-picker">
+    <Brand login/><h2>登录</h2><div className="portal-grid">
+      <section className="portal-card"><span aria-hidden="true" className="login-glyph glyph-marking"/><h3>阅卷台</h3>
+        <button className="login-button primary" onClick={() => onPortal('marking')}>登录阅卷台</button></section>
+      <section className="portal-card"><span aria-hidden="true" className="login-glyph glyph-settings"/><h3>管理后台</h3>
+        <button className="login-button" onClick={() => onPortal('admin')}>登录管理后台</button></section>
+    </div></div></main><LoginFooter/></div>
+  const recovery = mode === 'forgot', bootstrap = mode === 'bootstrap'
+  const title = recovery ? '重置密码' : bootstrap ? '创建管理员' : portal === 'admin' ? '登录管理后台' : '登录阅卷台'
+  return <div className="login-screen"><main className="login-content"><section className="login-card">
+    <button type="button" className="login-back" disabled={loading} onClick={() => recovery || bootstrap ? selectMode('password') : onPortal()}>
+      <span className="login-glyph glyph-back" aria-hidden="true"/>{recovery || bootstrap ? '返回登录' : '选择登录入口'}</button>
+    <Brand login/><h3>{title}</h3>
+    {error && <div className="login-error" role="alert">{error}</div>}
+    {notice && <div className="login-notice" role="status">{notice}</div>}
+    {recovery && <p>使用已保存的恢复码设置新密码。恢复码仅可使用一次，重置后原登录会话失效。</p>}
+    {bootstrap && <p>仅首次部署可创建管理员。</p>}
+    <form onSubmit={submit} key={recovery ? 'reset' : bootstrap ? 'create' : 'login'}>
+      {recovery ? <>
+        <Field name="username" label="账号" autoComplete="username" value={resetUsername} onChange={e => setResetUsername(e.target.value)}/>
+        <Field name="code" label="恢复码" autoComplete="one-time-code" spellCheck={false} pattern={'.*\\S.*'}/>
+        <Field name="new_password" type="password" label="新密码" autoComplete="new-password" minLength={10} maxLength={200}/>
+        <Field name="confirm_password" type="password" label="确认新密码" autoComplete="new-password"/>
+      </> : bootstrap ? <>
+        <Field name="username" label="账号" autoComplete="username"/><Field name="name" label="姓名" autoComplete="name" pattern={'.*\\S.*'}/>
+        <Field name="password" type="password" label="密码" autoComplete="new-password" minLength={10} maxLength={200}/>
+      </> : <>
+        <Field name="username" label="账号" autoComplete="username" value={username} onChange={e => setUsername(e.target.value)}/>
+        {mode === 'password' && <Field name="password" type="password" label="密码" autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)}/>}
+      </>}
+      <button className="login-button primary" type="submit" disabled={loading} aria-busy={loading}>
+        {loading ? '正在提交…' : recovery ? '重置密码' : bootstrap ? '创建并登录' : mode === 'passkey' ? '使用通行密钥登录' : '登录'}</button>
+    </form>
+    {recovery && <p className="forgot-help">没有可用恢复码时，请联系管理员重置密码。</p>}
+    {!recovery && !bootstrap && <>
+      <div className="login-links"><button type="button" disabled={loading} onClick={() => { setResetUsername(username); selectMode('forgot') }}>忘记密码</button>
+        {portal === 'admin' && canCreate && <button disabled={loading} type="button" onClick={() => selectMode('bootstrap')}>首次部署创建管理员</button>}</div>
+      <div className="login-divider">其他登录方式</div>
+      <button type="button" className="login-button" disabled={loading} onClick={() => selectMode(mode === 'password' ? 'passkey' : 'password')}>
+        {mode === 'password' && <span className="login-glyph glyph-key" aria-hidden="true"/>}{mode === 'password' ? '使用通行密钥' : '使用密码登录'}</button>
     </>}
-  </Card></main><LoginFooter /></div>
+  </section></main><LoginFooter/></div>
 }

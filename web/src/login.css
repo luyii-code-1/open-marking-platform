@@ -1,0 +1,56 @@
+@import './base.css';
+
+.login-screen{min-height:100vh;min-height:100dvh;display:flex;flex-direction:column}
+.login-content,.screen-center{display:grid;place-items:center}
+.login-content{flex:1;width:100%;padding:32px 20px}
+.screen-center{min-height:100vh}
+.route-loading{display:flex;min-height:128px;align-items:center;justify-content:center;gap:12px;color:#526174}
+.route-loading button,.login-links button,.login-back,.login-eye{background:transparent;border:0;cursor:pointer}
+.route-loading button,.login-links button{color:#0866ff}
+.login-card,.portal-card{background:#fff;border:1px solid #e3e7ed}
+.portal-picker{width:min(100%,620px);text-align:center}
+.portal-picker h2{font-size:22px;line-height:1.4;margin:0 0 20px}
+.portal-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}
+.portal-card{border-radius:8px;padding:24px}
+.portal-card h3,.login-card h3{font-size:20px;line-height:1.4;font-weight:600}
+.portal-card h3{margin:12px 0 20px}
+.login-glyph{display:inline-block;width:1em;height:1em;background:currentColor;mask:var(--icon) center/contain no-repeat}
+.portal-card>.login-glyph{font-size:24px;color:#0866ff;vertical-align:middle}
+.glyph-marking{--icon:url('@fluentui/svg-icons/icons/clipboard_task_20_regular.svg')}
+.glyph-settings{--icon:url('@fluentui/svg-icons/icons/settings_20_regular.svg')}
+.glyph-back{--icon:url('@fluentui/svg-icons/icons/arrow_left_20_regular.svg')}
+.glyph-key{--icon:url('@fluentui/svg-icons/icons/key_20_regular.svg')}
+.glyph-eye{--icon:url('@fluentui/svg-icons/icons/eye_20_regular.svg')}
+.glyph-eye-off{--icon:url('@fluentui/svg-icons/icons/eye_off_20_regular.svg')}
+.login-card{width:min(100%,420px);border-radius:12px;padding:28px clamp(20px,5vw,36px) 32px}
+.login-card .brand-login{margin-bottom:10px}
+.login-card .brand-login img{width:120px;height:auto}
+.login-card h3{text-align:center;margin:0 0 24px}
+.login-card p{margin:0 0 16px;color:#434343}
+.login-card .forgot-help{margin:16px 0 0}
+.login-button,.login-back,.login-eye{display:inline-flex;align-items:center;justify-content:center;gap:8px}
+.login-back{color:#526174;padding:6px 0;min-height:36px;margin:0 0 12px}
+.login-button{width:100%;min-height:40px;background:#fff;border:1px solid #d9d9d9;border-radius:6px;color:#141414;font-size:16px;padding:6px 14px;cursor:pointer}
+.login-button.primary{background:#0866ff;color:white;border-color:#0866ff}
+.login-screen button:disabled{opacity:.6;cursor:default}
+@media(hover:hover){.login-button:not(.primary):enabled:hover{color:#0866ff;border-color:#0866ff}.login-button.primary:enabled:hover{background:#277aff}}
+.login-field{margin-bottom:16px}
+.login-field label{display:block;margin-bottom:6px}
+.login-input{display:flex;align-items:stretch;border:1px solid #d9d9d9;border-radius:6px;background:#fff}
+.login-input:focus-within{border-color:#0866ff;box-shadow:0 0 0 2px #0866ff1a}
+.login-input input{width:100%;min-width:0;min-height:38px;padding:6px 11px;border:0;border-radius:inherit;background:transparent;color:inherit;font:inherit;font-size:16px}
+.login-input input:focus{outline:0}
+.login-eye{align-self:stretch;width:38px;flex-shrink:0;color:#667085;font-size:16px}
+.login-links{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;margin:12px -12px 0}
+.login-links button{padding:6px 12px;min-height:36px}
+.login-divider{display:flex;align-items:center;gap:14px;color:#667085;margin:20px 0 14px}
+.login-divider::before,.login-divider::after{content:'';flex:1;border-top:1px solid #e3e7ed}
+.login-error,.login-notice{border-radius:4px;padding:8px 12px;margin-bottom:16px;overflow-wrap:anywhere}
+.login-error{background:#fff2f0;border:1px solid #ffccc7;color:#8b2525}
+.login-notice{background:#f0faf4;border:1px solid #bbdfc6;color:#246345}
+.login-footer{flex-shrink:0;width:100%;padding:0 20px max(16px,env(safe-area-inset-bottom))}
+.login-footer-content{color:#434343;font-size:12px;line-height:1.8;text-align:center;overflow-wrap:anywhere}
+.login-footer-content :where(p,div,ul,ol){margin:0}
+.login-footer-content a{color:inherit;text-decoration:underline;text-underline-offset:2px}
+.login-footer-content img{max-width:100%;vertical-align:middle}
+@media(max-width:700px){.portal-grid{grid-template-columns:1fr}.login-content{padding:24px 16px}}

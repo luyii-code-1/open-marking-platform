@@ -14,8 +14,9 @@ const caches={
     if(!stores.has(name))stores.set(name,new Map())
     const data=stores.get(name)
     return {
-      async addAll(urls){for(const url of urls)data.set(key(url),new Response(await readFile(path.join(root,key(url)))))},
+      async addAll(urls){if(offline&&urls.length)throw new TypeError('offline');for(const url of urls)data.set(key(url),new Response(await readFile(path.join(root,key(url)))))},
       async match(request){return data.get(key(request))?.clone()},
+      async put(request,response){data.set(key(request),response)},
     }
   },
 }
@@ -37,6 +38,24 @@ await event('install')
 assert.equal(skipped,0,'Installing an update must not activate it before readiness')
 const current=(await caches.keys()).find(name=>stores.get(name)?.has('/index.html')&&name.startsWith('omp-shell-'))
 assert.ok(current)
+const manifest=JSON.parse(await readFile(path.join(root,'.vite/manifest.json'),'utf8'))
+const indexHtml=await readFile(path.join(root,'index.html'),'utf8')
+assert.match(indexHtml,/<main class="omp-start"/)
+assert.doesNotMatch(indexHtml,/<link[^>]+rel="stylesheet"/,'The initial HTML frame should not wait for external CSS')
+const entrypoints=['index.html',manifest['index.html'].dynamicImports.find(key=>manifest[key].name==='main')]
+const dependencies=new Set()
+function checkHints(key){
+  if(dependencies.has(key))return
+  dependencies.add(key)
+  const chunk=manifest[key]
+  for(const url of [chunk.file,...chunk.css||[]])assert.ok(indexHtml.includes('"/'+url+'"'),'Missing startup resource hint for '+url)
+  for(const imported of chunk.imports||[])checkHints(imported)
+}
+entrypoints.forEach(checkHints)
+const assetFor=name=>'/'+Object.values(manifest).find(chunk=>chunk.name===name&&chunk.isDynamicEntry).file
+const reviewAssets=['AuthenticatedApp','ReviewTasks','Marking'].map(assetFor)
+const adminAsset=assetFor('HttpGuard')
+for(const url of [...reviewAssets,adminAsset])assert.ok(!stores.get(current).has(url),'Anonymous install fetched '+url)
 await event('activate')
 assert.equal(claimed,1);assert.ok(stores.has('unrelated'));assert.ok(stores.has('omp-shell-old'),'Old shell must remain while old windows are open')
 for(const request of [
@@ -53,6 +72,14 @@ assert.ok(asset)
 assert.ok((await event('fetch',{request:{url:origin+asset,method:'GET',mode:'cors'}})).ok)
 assert.equal(await event('fetch',{request:{url:origin+asset+'?private=1',method:'GET',mode:'cors'}}),undefined)
 assert.ok(![...stores.get(current).keys()].some(url=>url.startsWith('/api/')))
+offline=false
+assert.ok((await event('fetch',{request:{url:origin+adminAsset,method:'GET',mode:'cors'}})).ok)
+offline=true
+assert.ok((await event('fetch',{request:{url:origin+adminAsset,method:'GET',mode:'cors'}})).ok,'Visited routes should be available offline')
+offline=false
+await event('message',{data:{type:'PREPARE_REVIEW_SHELL'}})
+offline=true
+for(const url of reviewAssets)assert.ok(stores.get(current).has(url),'Offline review dependency missing: '+url)
 await event('message',{data:{type:'OTHER'}});assert.equal(skipped,0)
 function client(id){return {id,url:origin+'/',postMessage(data){messages.push({id,...data});if(data.type==='CHECK_UPDATE'&&replies.has(id))queueMicrotask(()=>void event('message',{source:{id},data:{type:'UPDATE_READY',requestId:data.requestId,ready:replies.get(id)}}))}}}
 clients=[client('one'),client('two')];replies.set('one',true);replies.set('two',false)
@@ -85,6 +112,13 @@ assert.ok(stores.has('omp-shell-older'))
 await event('message',{source:{id:'two'},data:{type:'CLIENT_READY',build:version}})
 assert.equal([...stores.keys()].filter(k=>k.startsWith('omp-shell-')).length,2)
 assert.ok(stores.has('unrelated')&&stores.has('omp-review-private'),'Only shell caches may be pruned')
+// A teacher upgrading from the old eager shell can still open the grading view offline.
+stores.set('omp-shell-legacy',new Map([['/scanner.html',new Response('legacy')]]))
+stores.get(current).delete('/.omp-offline-review')
+for(const url of reviewAssets)stores.get(current).delete(url)
+offline=false
+await event('install')
+for(const url of reviewAssets)assert.ok(stores.get(current).has(url),'Upgrade dropped offline grading')
 clients=[client('one')]
 await event('message',{source:client('one'),data:{type:'SKIP_WAITING'}});assert.equal(skipped,2)
 console.log('PWA worker passed: pinned offline shell, API bypass, two-window readiness/refusal/cancellation/timeout, legacy gating, old assets and isolated cache pruning')

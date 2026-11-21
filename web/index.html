@@ -1,2 +1,29 @@
 <!doctype html>
-<html lang="zh-CN"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><meta name="theme-color" content="#0866ff"/><title>Open Marking Platform · 开放阅卷平台</title><link rel="icon" type="image/svg+xml" href="/branding/omp-logo-square.svg"/><link rel="manifest" href="/manifest.webmanifest"/><link rel="apple-touch-icon" href="/icons/omp-192.png"/></head><body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body></html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0866ff" />
+  <title>Open Marking Platform · 开放阅卷平台</title>
+  <link rel="icon" type="image/svg+xml" href="/branding/omp-logo-square.svg" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="/icons/omp-192.png" />
+  <style>
+    .omp-start { position: fixed; inset: 0; display: grid; place-content: center; background: #f5f7fa; color: #25344b; font: 16px/1.5 system-ui, sans-serif; }
+    .omp-start div { min-width: 14rem; padding: 1.5rem; border: 1px solid #e3e7ed; border-radius: 10px; background: white; }
+    .omp-start p { margin: .5rem 0 0; font-size: 14px; color: #53657b; }
+    .omp-start button { margin-top: .5rem; font: inherit; cursor: pointer; }
+  </style>
+  <!--app-preload--><!--/app-preload-->
+</head>
+<body>
+  <div id="root">
+    <main class="omp-start" aria-live="polite">
+      <div><strong>开放阅卷平台</strong><p id="start-status">正在加载工作台…</p><button id="start-retry" type="button" hidden>重新加载</button>
+        <noscript>请启用 JavaScript 以打开工作台。</noscript>
+      </div>
+    </main>
+  </div>
+  <script type="module" src="/src/start.ts"></script>
+</body>
+</html>

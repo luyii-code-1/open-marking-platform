@@ -13,7 +13,7 @@ import { useReviewWorkspace } from './ReviewWorkspace'
 import { cacheReview, enqueueReview, forgetReview, getReview, hasUnsentReview, listReviews, saveReviewDraft, settleReviewWrites, type ReviewRecord } from './reviewStore'
 import { useUnsavedChanges } from './useNavigation'
 import { ApiError, request, send, useResource, watchChanges, type Row, type Template } from './api'
-import { ErrorNotice } from './Management'
+import { ErrorNotice } from './EntityTable'
 
 export function Marking({ admin, groupId, initialProjectId, initialTemplateId, initialQuestionId, onExit }: { admin: boolean; groupId?: string; initialProjectId?:string; initialTemplateId?: string; initialQuestionId?: string; onExit?: (projectId?:string) => void }) {
   const workspace=useReviewWorkspace()
