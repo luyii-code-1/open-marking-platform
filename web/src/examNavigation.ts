@@ -5,9 +5,49 @@ export const groupSections = [
   ['scans', '扫描与补扫'], ['sheets','答题卡查询'], ['marking', '阅卷分配'], ['exceptions', '异常核查'], ['results', '成绩'],
 ] as const
 export type GroupSection = typeof groupSections[number][0]
-export type ExamLocation = { projectId?: string; subjectId?: string; gradeId?:string; groupId?: string; section?: string; scanTab?:'correct' }
+export type ExamLocation = { projectId?: string; subjectId?: string; gradeId?:string; groupId?: string; section?: string; scanTab?:'correct'; correction?:CorrectionTarget }
 export const unassignedGrade='unassigned'
 export const cardName=(group:Row,subject?:Row)=>group.is_default||group.name==='Default'?`${subject?.name||''}题卡`:group.name
+export function cardScopeLabel(group?:Row,subjects:Row[]=[],projects:Row[]=[],grades:Row[]=[]){
+  if(!group)return '—'
+  const subject=subjects.find(s=>s.id===group.subject_id)
+  const project=projects.find(p=>p.id===subject?.project_id)
+  const grade=grades.find(g=>g.id===group.grade_id)?.name||group.grade_name||(group.grade_id?'':'待设置年级')
+  return [project?.name,subject?.name,grade,cardName(group,subject)].filter(Boolean).join(' / ')
+}
+const activeProjectKey='omp-active-project',activeGroupKey='omp-active-group'
+export function setExamContextOwner(userId:string){
+  try{
+    const storage=globalThis.sessionStorage
+    if(!storage||storage.getItem('omp-context-owner')===userId)return
+    storage.removeItem(activeProjectKey)
+    storage.removeItem(activeGroupKey)
+    if(userId)storage.setItem('omp-context-owner',userId)
+    else storage.removeItem('omp-context-owner')
+  }catch{}
+}
+export function rememberExamContext(context:{projectId?:string;groupId?:string}){
+  try{
+    if(context.projectId!==undefined){
+      if(context.projectId!==(globalThis.sessionStorage?.getItem(activeProjectKey)||''))globalThis.sessionStorage?.removeItem(activeGroupKey)
+      if(context.projectId)globalThis.sessionStorage?.setItem(activeProjectKey,context.projectId)
+      else globalThis.sessionStorage?.removeItem(activeProjectKey)
+    }
+    if(context.groupId!==undefined){
+      if(context.groupId)globalThis.sessionStorage?.setItem(activeGroupKey,context.groupId)
+      else globalThis.sessionStorage?.removeItem(activeGroupKey)
+    }
+  }catch{}
+}
+export function readExamContext():{projectId:string;groupId:string}{
+  try{
+    return {
+      projectId:globalThis.sessionStorage?.getItem(activeProjectKey)||'',
+      groupId:globalThis.sessionStorage?.getItem(activeGroupKey)||'',
+    }
+  }catch{return {projectId:'',groupId:''}}
+}
+export type CorrectionTarget={batchId?:string;submissionId?:string;pageId?:string}
 export function subjectGrades(subject:Row,groups:Row[],grades:Row[]=[]):Row[]{
   const children=groups.filter(g=>g.subject_id===subject.id)
   const ids=[...new Set([...(subject.grade_ids||[]),...children.map(g=>g.grade_id||unassignedGrade)])] as string[]
@@ -31,13 +71,22 @@ export function examPath(location: ExamLocation = {}) {
   if (subjectId && gradeId) path += '/grades/' + encodeURIComponent(gradeId)
   if (subjectId && groupId) path += (gradeId?'/cards/':'/groups/') + encodeURIComponent(groupId)
   if (section && section !== 'overview') path += '/' + encodeURIComponent(section)
-  if (groupId && section==='scans' && location.scanTab==='correct') path += '/correct'
+  if (groupId && section==='scans' && location.scanTab==='correct') {
+    path += '/correct'
+    const params=new URLSearchParams()
+    const target=location.correction
+    if(target?.batchId)params.set('batch',target.batchId)
+    if(target?.pageId)params.set('page',target.pageId)
+    if(target?.submissionId)params.set('submission',target.submissionId)
+    if(params.size)path += '?' + params.toString()
+  }
   return path
 }
 
 export function readLocation(hash: string): Location {
   try {
-    const parts = hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent)
+    const [route,query]=hash.split('?',2)
+    const parts = route.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent)
     const page = parts[0] || 'dashboard'
     if (!pages.has(page)) return { page: 'dashboard' }
     if (page === 'login') return { page, section: ['admin', 'marking'].includes(parts[1]) ? parts[1] : undefined }
@@ -48,6 +97,7 @@ export function readLocation(hash: string): Location {
         ? { ...project, templateId: parts[4], questionId: parts[5] } : project
     }
     if (page==='people' && ['users','grades','classes','teaching','students'].includes(parts[1])) return {page,section:parts[1]}
+    if (page==='settings' && ['login','devices','storage','backups','audit'].includes(parts[1])) return {page,section:parts[1]}
     if (page !== 'exams') return { page }
     if (!parts[1]) return { page }
     const location: Location = { page, projectId: parts[1] }
@@ -63,7 +113,16 @@ export function readLocation(hash: string): Location {
       location.groupId = parts[5]
       location.section = groupSections.some(([key]) => key === parts[6]) ? parts[6] : 'overview'
     }
-    if (location.groupId && location.section==='scans' && parts[location.gradeId?9:7]==='correct') location.scanTab='correct'
+    if (location.groupId && location.section==='scans' && parts[location.gradeId?9:7]==='correct') {
+      location.scanTab='correct'
+      const params=new URLSearchParams(query)
+      const target:CorrectionTarget={}
+      for (const [param,key] of [['batch','batchId'],['page','pageId'],['submission','submissionId']] as const) {
+        const value=params.get(param)
+        if(value)target[key]=value
+      }
+      if(Object.keys(target).length)location.correction=target
+    }
     return location
   } catch { return { page: 'dashboard' } }
 }

@@ -58,7 +58,7 @@ export function ReviewTasks({projectId,filter,onFilter,onProject,onOpen}:Props) 
   const emptyText=projects.length?<span>此状态下暂无考试。<Button type="link" onClick={()=>onFilter('all')}>查看全部考试</Button></span>
     :workspace.offline?'本机暂无缓存的阅卷任务。联网后可在阅卷中心领取作答。'
     :!catalog.loaded||catalog.error?'考试列表尚未加载。'
-    :'暂无分配给你的阅卷考试。请联系管理员或管理教师，在题卡的「阅卷分配 → 阅卷池」中将你加入对应题目的阅卷池或仲裁池。'
+    :'暂无分配给你的阅卷考试。请联系管理员或管理教师，在题卡的「阅卷分配 / 阅卷池」中将你加入对应题目的阅卷池或仲裁池。'
   return <Card title="我的阅卷考试" extra={!workspace.offline&&<Button onClick={catalog.reload} loading={catalog.loading}>刷新</Button>}>
     <ErrorNotice error={catalog.error}/>
     <Segmented<ProjectFilter> aria-label="考试状态" value={filter} onChange={onFilter} style={{marginBottom:12}} options={[

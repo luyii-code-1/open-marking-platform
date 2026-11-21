@@ -39,11 +39,14 @@ export function ReviewAllocation({templateId,frozen}:{templateId:string;frozen:b
       await Promise.all([assignments.reload(),summary.reload()]);setEditing(null);message.success('分配已保存')
     }catch(e){message.error((e as Error).message)}finally{setSaving(false)}
   }
-  const poolTags=(ids:string[]=[],weights:Record<string,number>={})=>ids.length?ids.map(id=><Tag key={id}>{users.data.find(u=>u.id===id)?.name||id}{weights[id]===0?'（暂停）':''}</Tag>):'待分配'
+  const poolTags=(ids:string[]=[],weights:Record<string,number>={})=>ids.length?ids.map(id=><Tag key={id}>{users.data.find(u=>u.id===id)?.name||id}{weights[id]===0?'（暂停）':''}</Tag>):<Tag color="orange">待分配</Tag>
   const progressRows=summary.data.flatMap(q=>(q.teachers||[]).map((teacher:Row)=>({...teacher,id:q.question_id+':'+teacher.user_id,question_id:q.question_id})))
   const error=templates.error||assignments.error||users.error||summary.error
+  const unassigned=templates.loaded&&assignments.loaded?questions.filter(q=>!assignment(q)?.user_ids?.length):[]
   function poolField(name:'user_ids'|'arbitrator_ids',label:string,ids:string[]){return <Form.Item label={label} required><Form.Item name={name} hidden rules={[{required:true,type:'array',min:1,message:'请选择'+label+'教师'}]}><input/></Form.Item><Space wrap>{ids.map(id=><Tag key={id} closable onClose={()=>form.setFieldValue(name,ids.filter(value=>value!==id))}>{users.data.find(u=>u.id===id)?.name||id}</Tag>)}<Button onClick={()=>setPool(name)}>选择教师</Button></Space></Form.Item>}
-  return <><Space direction="vertical" size={20} style={{width:'100%'}}>{error&&<Alert type="error" message={error}/>}
+  return <><Space direction="vertical" size={20} style={{width:'100%'}}>{error&&<Alert type="error" showIcon message={error} action={<Button onClick={()=>{void templates.reload();void assignments.reload();void users.reload();void summary.reload()}}>重试</Button>}/>}
+    {frozen&&<Alert type="info" showIcon message="当前题卡成绩已发布，阅卷教师分配已锁定。如需调整分配，请先在「成绩」中发起成绩复核。"/>}
+    {!frozen&&unassigned.length>0&&<Alert type="warning" showIcon message={`第 ${unassigned.map(questionLabel).join('、')} 题尚未分配阅卷教师，分配后教师即可在阅卷中心领取任务。`}/>}
     <Radio.Group value="equal" aria-label="分配模式"><Radio.Button value="equal">按题等量分配</Radio.Button><Radio.Button value="whole" disabled>单一批卷</Radio.Button></Radio.Group>
     <Typography.Text type="secondary">各题在阅卷池中等量分配。调整教师后，已完成和正在评阅的答卷保留，其余答卷重新分配。</Typography.Text>
     <Table<Question> rowKey="id" dataSource={questions} loading={!templates.loaded||!assignments.loaded} locale={{emptyText:'当前题卡没有主观题'}} columns={[

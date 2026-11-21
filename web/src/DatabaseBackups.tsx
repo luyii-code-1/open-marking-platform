@@ -38,7 +38,7 @@ export function DatabaseBackups() {
     await backups.reload()
     message.success('备份已删除')
   }
-  return <Card title="数据库备份" extra={<Button type="primary" loading={busy === 'create'} disabled={!!busy} onClick={() => run('create', create)}>立即备份</Button>}>
+  return <Card title="数据库备份" extra={<Space><Button disabled={!!busy} loading={backups.loading} onClick={() => { void policy.reload(); void backups.reload() }}>刷新</Button><Button type="primary" loading={busy === 'create'} disabled={!!busy} onClick={() => run('create', create)}>立即备份</Button></Space>}>
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
       <ErrorNotice error={policy.error || backups.error} retry={() => Promise.all([policy.reload(), backups.reload()])} />
       <Space wrap>
@@ -49,7 +49,7 @@ export function DatabaseBackups() {
         <Typography.Text type="secondary">每天 03:00（北京时间）{policy.data?.next_run ? '，下次备份 ' + date(policy.data.next_run) : ''}</Typography.Text>
       </Space>
       <Table<Backup> rowKey="id" size="small" loading={backups.loading} dataSource={backups.data}
-        pagination={{ pageSize: 10, hideOnSinglePage: true }} scroll={{ x: 760 }} columns={[
+        pagination={{ defaultPageSize: 50, hideOnSinglePage: true }} scroll={{ x: 760 }} columns={[
           { title: '文件名', dataIndex: 'filename', ellipsis: true },
           { title: '来源', width: 110, dataIndex: 'origin', render: (value: string) => origins[value] || value },
           { title: '时间（北京）', width: 175, dataIndex: 'created_at', render: date },

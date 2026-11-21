@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { App, Card, Form, Input, Modal, Space, Typography } from 'antd'
 import { Table } from './DataTable'
 import { Button } from './Button'
+import { ErrorNotice } from './EntityTable'
 import { send, useResource, type Row, type User } from './api'
 import { registerPasskey } from './passkeys'
 import { useAction } from './useAction'
@@ -19,23 +20,24 @@ export function Account({user,onProfile,onLogout}:{user:User;onProfile:(user:Use
       <Form.Item name="name" label="姓名" rules={[{required:true}]}><Input maxLength={100}/></Form.Item>
       <Button htmlType="submit" loading={profileAction.pending==='profile'}>保存资料</Button>
     </Form></Card>
-    {user.role==='teacher'&&<Card title="我的任教关系"><Table rowKey={r=>r.class_id} dataSource={teaching.data} columns={[{title:'年级',dataIndex:'grade'},{title:'行政班',dataIndex:'class_name'},{title:'任教学科',render:(_,r)=>r.subjects?.join('、')||(r.homeroom?'—':'待补全')},{title:'班主任',render:(_,r)=>r.homeroom?'是':'—'}]}/></Card>}
+    {user.role==='teacher'&&<Card title="我的任教关系"><ErrorNotice error={teaching.error} retry={teaching.reload}/><Table rowKey={r=>r.class_id} dataSource={teaching.data} loading={teaching.loading} columns={[{title:'年级',dataIndex:'grade'},{title:'行政班',dataIndex:'class_name'},{title:'任教学科',render:(_,r)=>r.subjects?.join('、')||(r.homeroom?'—':'待补全')},{title:'班主任',render:(_,r)=>r.homeroom?'是':'—'}]}/></Card>}
     <Card title="账号安全"><Form layout="vertical" disabled={passwordAction.busy||action.busy} onFinish={values=>act('password',async()=>{await send('/auth/password',values);message.success('密码已修改，请重新登录');onLogout()})}>
       <Form.Item name="password" label="当前密码" rules={[{required:true}]}><Input.Password autoComplete="current-password"/></Form.Item>
       <Form.Item name="new_password" label="新密码" rules={[{required:true,min:10}]}><Input.Password autoComplete="new-password"/></Form.Item>
       <Button htmlType="submit" loading={passwordAction.pending==='password'}>修改密码并退出旧会话</Button>
     </Form></Card>
-    <Card title="通行密钥与恢复码">
+    <Card title="通行密钥与恢复码" extra={<Button onClick={passkeys.reload} loading={passkeys.loading}>刷新</Button>}>
+      <ErrorNotice error={passkeys.error} retry={passkeys.reload}/>
       <Typography.Paragraph>使用设备上的通行密钥登录。恢复码用于“忘记密码”中的密码重置，每个恢复码仅可使用一次。</Typography.Paragraph>
-      <Input.Password placeholder="输入当前密码以管理密钥和恢复码" disabled={action.busy||passwordAction.busy} value={password} onChange={e=>setPassword(e.target.value)} style={{maxWidth:400,marginBottom:12}}/>
+      <Input.Password aria-label="验证当前密码" placeholder="先输入当前密码以管理密钥和恢复码" disabled={action.busy||passwordAction.busy} value={password} onChange={e=>setPassword(e.target.value)} style={{maxWidth:400,marginBottom:12}}/>
       <Space wrap style={{marginBottom:12}}>
-        <Button disabled={action.busy||passwordAction.busy} loading={action.pending==='passkey'} onClick={()=>act('passkey',async()=>{await registerPasskey(password,'我的通行密钥');await passkeys.reload();message.success('通行密钥已添加')})}>添加通行密钥</Button>
-        <Button disabled={action.busy||passwordAction.busy} loading={action.pending==='recovery'} onClick={()=>Modal.confirm({title:'重新生成恢复码？',content:'此前的恢复码将全部失效。',onOk:()=>act('recovery',async()=>{const response=await send<{codes:string[]}>('/auth/recovery-codes',{password});setCodes(response.codes)})})}>生成恢复码</Button>
+        <Button disabled={!password.trim()||action.busy||passwordAction.busy} loading={action.pending==='passkey'} onClick={()=>act('passkey',async()=>{await registerPasskey(password,'我的通行密钥');await passkeys.reload();message.success('通行密钥已添加')})}>添加通行密钥</Button>
+        <Button disabled={!password.trim()||action.busy||passwordAction.busy} loading={action.pending==='recovery'} onClick={()=>Modal.confirm({title:'重新生成恢复码？',content:'此前的恢复码将全部失效。',onOk:()=>act('recovery',async()=>{const response=await send<{codes:string[]}>('/auth/recovery-codes',{password});setCodes(response.codes)})})}>生成恢复码</Button>
       </Space>
       <Table rowKey="id" dataSource={passkeys.data} loading={passkeys.loading} columns={[
         {title:'名称',dataIndex:'name'},
         {title:'创建时间',dataIndex:'created_at',render:value=>new Date(value*1000).toLocaleString()},
-        {title:'操作',width:100,render:(_,row)=><Button danger disabled={action.busy||passwordAction.busy} loading={action.pending===`revoke:${row.id}`} onClick={()=>act(`revoke:${row.id}`,async()=>{await send(`/auth/passkeys/${row.id}/revoke`,{password});await passkeys.reload();message.success('密钥已撤销')})}>撤销</Button>},
+        {title:'操作',width:100,render:(_,row)=><Button danger disabled={!password.trim()||action.busy||passwordAction.busy} loading={action.pending===`revoke:${row.id}`} onClick={()=>act(`revoke:${row.id}`,async()=>{await send(`/auth/passkeys/${row.id}/revoke`,{password});await passkeys.reload();message.success('密钥已撤销')})}>撤销</Button>},
       ]}/>
     </Card>
     <Modal title="保存恢复码" open={!!codes.length} onCancel={()=>setCodes([])} footer={<Button onClick={()=>setCodes([])}>已保存，关闭</Button>}>

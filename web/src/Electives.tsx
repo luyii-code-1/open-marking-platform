@@ -1,6 +1,6 @@
 import {DeleteRecord} from './DeleteRecord'
-import {useState} from 'react'
-import {App,Card,Select,Space,Upload,Input,Radio,Tag,Checkbox,Tabs,Modal,Alert} from 'antd'
+import {useEffect,useState} from 'react'
+import {App,Card,Empty,Select,Space,Upload,Input,Radio,Tag,Checkbox,Tabs,Modal,Alert,Typography} from 'antd'
 import {Table} from './DataTable'
 import {Button} from './Button'
 import {RecordPicker} from './RecordPicker'
@@ -9,14 +9,15 @@ import {request,send,useResource,type Row} from './api'
 export function Electives({grades,students,classes}:{grades:Row[];students:Row[];classes:Row[]}){
   const lists=useResource<Row[]>('/electives',[]),subjects=useResource<Row[]>('/subject-tags',[])
   const [grade,setGrade]=useState(''),[subject,setSubject]=useState(''),[ids,setIds]=useState<string[]>([]),[busy,setBusy]=useState(false),[picker,setPicker]=useState(false),[kind,setKind]=useState('elective')
-  const {message}=App.useApp(),classNames=new Map(classes.filter(c=>c.grade_id===grade).map(c=>[c.id,c.name]))
+  const {message}=App.useApp(),activeGrades=grades.filter(g=>!g.archived),classNames=new Map(classes.filter(c=>c.grade_id===grade).map(c=>[c.id,c.name]))
   const roster=students.filter(s=>classNames.has(s.class_id))
   function choose(g:string,s:string){setGrade(g);setSubject(s);const row=lists.data.find(l=>l.grade_id===g&&l.subject===s);setIds(row?.student_ids||[]);setKind(row?.kind_of_subject||'elective')}
-  async function save(){setBusy(true);try{await send('/electives',{grade_id:grade,subject,student_ids:kind==='required'?[]:ids,kind},'PUT');await lists.reload();message.success('应考范围已保存')}catch(e){message.error((e as Error).message)}finally{setBusy(false)}}
+  useEffect(()=>{if(!grade&&activeGrades.length)choose(activeGrades[0].id,subject)},[grade,activeGrades.length])
+  async function save(){setBusy(true);try{await send('/electives',{grade_id:grade,subject,student_ids:kind==='required'?[]:ids,kind},'PUT');await lists.reload();message.success('应考范围已保存，可在题卡「应考名单」中同步应用')}catch(e){message.error((e as Error).message)}finally{setBusy(false)}}
   const studentColumns=[{title:'准考证号',dataIndex:'candidate_number'},{title:'姓名',dataIndex:'name'},{title:'行政班',render:(_:unknown,s:Row)=>classNames.get(s.class_id)}]
   return <Space direction="vertical" size={16} style={{width:'100%'}}>
-    {(lists.error||subjects.error)&&<Alert type="error" showIcon message={lists.error||subjects.error}/>}
-    <Card title="年级选科名单"><Tabs items={grades.filter(g=>!g.archived).map(g=>({key:g.id,label:g.name,children:<Table<Row> rowKey="id" dataSource={lists.data.filter(row=>row.grade_id===g.id)} loading={lists.loading} columns={[{title:'科目',dataIndex:'subject'},{title:'应考范围',render:(_,r)=>r.kind_of_subject==='required'?'年级全体':`选考 · ${r.student_ids.length} 人`},{title:'操作',render:(_,r)=><Space><Button onClick={()=>choose(r.grade_id,r.subject)}>编辑</Button><DeleteRecord kind="electives" row={{...r,name:r.subject}} reload={async()=>{await lists.reload();if(grade===r.grade_id&&subject===r.subject)choose('','')}}/></Space>}]}/>}))}/></Card>
+    {(lists.error||subjects.error)&&<Alert type="error" showIcon message={lists.error||subjects.error} action={<Button onClick={()=>{void lists.reload();void subjects.reload()}}>重试</Button>}/>}
+    <Card title="年级选科名单" extra={<Button onClick={()=>{void lists.reload();void subjects.reload()}} loading={lists.loading}>刷新</Button>}>{activeGrades.length?<Tabs activeKey={grade||activeGrades[0]?.id} onChange={g=>choose(g,subject)} items={activeGrades.map(g=>({key:g.id,label:g.name,children:<Table<Row> rowKey="id" dataSource={lists.data.filter(row=>row.grade_id===g.id)} loading={lists.loading} columns={[{title:'科目',dataIndex:'subject'},{title:'应考范围',render:(_,r)=>r.kind_of_subject==='required'?'年级全体':`选考 · ${r.student_ids.length} 人`},{title:'操作',render:(_,r)=><Space><Button onClick={()=>choose(r.grade_id,r.subject)}>编辑</Button><DeleteRecord kind="electives" row={{...r,name:r.subject}} reload={async()=>{await lists.reload();if(grade===r.grade_id&&subject===r.subject)choose(g.id,'')}}/></Space>}]}/>}))}/>:<Empty description={<>暂无可用年级，请先前往 <a href="#/people/grades">人员与班级 / 年级</a> 创建年级</>}/>}</Card>
     <Card title="设置应考范围"><Space wrap style={{marginBottom:12}}>
       <Select disabled={busy} showSearch optionFilterProp="label" placeholder="选择年级" style={{width:160}} value={grade||undefined} onChange={g=>choose(g,subject)} options={grades.filter(g=>!g.archived||g.id===grade).map(g=>({value:g.id,label:g.name}))}/>
       <Select disabled={busy} showSearch optionFilterProp="label" placeholder="选择科目" style={{width:220}} value={subject||undefined} onChange={s=>choose(grade,s)} options={subjects.data.map(s=>({value:s.name,label:s.name}))}/>
@@ -24,6 +25,7 @@ export function Electives({grades,students,classes}:{grades:Row[];students:Row[]
       {kind==='elective'&&<Button disabled={!grade||!subject||busy} onClick={()=>setPicker(true)}>选择应考学生（{ids.length}）</Button>}
       <Button type="primary" loading={busy} disabled={!grade||!subject||busy} onClick={save}>保存名单</Button>
     </Space>
+      {subjects.loaded&&!subjects.data.length&&<Typography.Paragraph type="secondary">尚未维护全校科目，<a href="#/subject-catalog">前往科目管理添加科目</a>。</Typography.Paragraph>}
       {kind==='elective'?<Table<Row> rowKey="id" dataSource={roster.filter(s=>ids.includes(s.id))} columns={studentColumns}/>:<Tag>使用该年级全体学生</Tag>}
     </Card>
     <RecordPicker<Row> open={picker} onClose={()=>setPicker(false)} title="选择应考学生" records={roster} columns={studentColumns} value={ids} onChange={setIds} label={s=>`${s.name}（${s.candidate_number}）`} fields={[{key:'class',label:'行政班',options:[...classNames].map(([value,label])=>({value,label})),values:s=>[s.class_id]}]}
@@ -33,14 +35,14 @@ export function Electives({grades,students,classes}:{grades:Row[];students:Row[]
 
 export function ElectiveManagement(){
   const grades=useResource<Row[]>('/grades',[]),students=useResource<Row[]>('/students',[]),classes=useResource<Row[]>('/classes',[])
-  return <>{(grades.error||students.error||classes.error)&&<Alert type="error" showIcon message={grades.error||students.error||classes.error}/>}<Electives grades={grades.data} students={students.data} classes={classes.data}/></>
+  return <>{(grades.error||students.error||classes.error)&&<Alert type="error" showIcon message={grades.error||students.error||classes.error} action={<Button onClick={()=>{void grades.reload();void students.reload();void classes.reload()}}>重试</Button>}/>}<Electives grades={grades.data} students={students.data} classes={classes.data}/></>
 }
 
 export function SubjectCatalog(){
   const tags=useResource<Row[]>('/subject-tags',[]),[name,setName]=useState(''),[busy,setBusy]=useState(false),[editing,setEditing]=useState<Row|null>(null),[open,setOpen]=useState(false),{message}=App.useApp()
   function edit(row?:Row){setEditing(row||null);setName(row?.name||'');setOpen(true)}
   async function save(){setBusy(true);try{await send(editing?'/subject-tags/'+editing.id:'/subject-tags',{name:name.trim()},editing?'PUT':'POST');await tags.reload();setOpen(false);message.success(editing?'科目名称已保存':'科目已添加')}catch(e){message.error((e as Error).message)}finally{setBusy(false)}}
-  return <><Card title="全校科目">{tags.error&&<Alert type="error" showIcon message={tags.error}/>}<Space wrap style={{marginBottom:12}}>
+  return <><Card title="全校科目" extra={<Button onClick={tags.reload} loading={tags.loading}>刷新</Button>}>{tags.error&&<Alert type="error" showIcon message={tags.error} action={<Button onClick={tags.reload}>重试</Button>} style={{marginBottom:12}}/>}<Space wrap style={{marginBottom:12}}>
     <Button type="primary" disabled={busy} onClick={()=>edit()}>添加科目</Button>
     <Upload accept=".csv,.xlsx" showUploadList={false} disabled={busy} beforeUpload={async file=>{const body=new FormData();body.append('file',file);setBusy(true);try{const result=await request<{created:number}>('/subject-tags/import',{method:'POST',body});await tags.reload();message.success(`新增 ${result.created} 个科目`)}catch(e){message.error((e as Error).message)}finally{setBusy(false)}return false}}><Button title="Excel 或 CSV，表头为“科目”">导入科目表</Button></Upload>
     </Space><Table<Row> rowKey="id" dataSource={tags.data} loading={tags.loading} columns={[{title:'科目',dataIndex:'name'},{title:'操作',render:(_,row)=><Space><Button disabled={busy} onClick={()=>edit(row)}>编辑</Button><DeleteRecord kind="subject-tags" row={row} reload={tags.reload}/></Space>}]}/></Card>

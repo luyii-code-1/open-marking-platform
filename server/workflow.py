@@ -57,6 +57,7 @@ def overview(db,group,current):
             'scanned':sum(s.get('status')!='absent' for s in submissions),'results':counts,
             'published':bool(group.get('frozen')), 'published_at':group.get('published_at'),
             'in_review':bool(not group.get('frozen') and group.get('reopened_at') and group.get('published_at')),
+            'reopen_reason':group.get('reopen_reason'), 'reopened_at':group.get('reopened_at'),
             'template_id':group.get('template_id')}
     roster_ids={student['id'] for student in roster['students']}
     scanned_ids={submission['student_id'] for submission in submissions if submission.get('pages')}
@@ -106,7 +107,12 @@ def overview(db,group,current):
         if kind=='subjective':state[kind]['arbitration']=arbitration
     from .lifecycle import project_for
     project=get(db,project_for(db,'groups',group),'projects') or {}
-    state.update(project_id=project.get('id'), subject_id=group.get('subject_id'), grade_id=group.get('grade_id'))
+    subject=get(db,group.get('subject_id'),'subjects') or {}
+    grade=get(db,group.get('grade_id'),'grades') or {}
+    state.update(project_id=project.get('id'), project_name=project.get('name'),
+                 subject_id=group.get('subject_id'), subject_name=subject.get('name'),
+                 grade_id=group.get('grade_id'), grade_name=grade.get('name') or group.get('grade_name'),
+                 group_name=group.get('name'))
     state['scans_purged']=bool(project.get('scans_purged'))
     state['objective_reprocess_allowed']=bool(not group.get('frozen') and not state['scans_purged'] and any(q['type']!='subjective' for q in active.get('questions',[])) and any(b['recognized_pages'] for b in details))
     state['publication_actions']=publication_actions(state)

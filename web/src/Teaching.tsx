@@ -8,7 +8,8 @@ import {download,request,send,useResource,type Row} from './api'
 export function Teaching({classes,users,grades,reload}:{classes:Row[];users:Row[];grades:Row[];reload:()=>Promise<any>}) {
   const {message}=App.useApp(), [form]=Form.useForm(), [open,setOpen]=useState(false),[editing,setEditing]=useState(false)
   const [busy,setBusy]=useState(false)
-  const subjects=useResource<Row[]>('/subjects',[])
+  const subjects=useResource<Row[]>('/subjects',[]),subjectTags=useResource<Row[]>('/subject-tags',[])
+  const subjectChoices=[...new Set([...subjectTags.data.map(t=>t.name),...subjects.data.map(s=>s.name)].filter(Boolean))].map(value=>({value}))
   const label=(c:Row)=>[grades.find(g=>g.id===c.grade_id)?.name||c.grade,c.name].filter(Boolean).join(' · ')
   const rows=classes.flatMap(c=>(c.teacher_ids||[]).map((id:string)=>({id:c.id+id,class_id:c.id,teacher_id:id,teacher:users.find(u=>u.id===id)?.name,className:label(c),...c.teaching?.[id]})))
   function edit(row?:any){form.resetFields();form.setFieldsValue({subjects:[],...row,homeroom:row?.homeroom===true});setEditing(!!row);setOpen(true)}
@@ -22,7 +23,7 @@ export function Teaching({classes,users,grades,reload}:{classes:Row[];users:Row[
       <Form form={form} layout="vertical" onFinish={async v=>{setBusy(true);try{await send('/teaching/relation',v,'PUT');await reload();setOpen(false)}catch(e){message.error((e as Error).message)}finally{setBusy(false)}}}>
         <Form.Item name="teacher_id" label="教师" rules={[{required:true}]}><RecordSelect title="教师" kind="users" disabled={editing} records={users.filter(u=>u.role==='teacher')} columns={[{title:'姓名',dataIndex:'name'},{title:'账号',dataIndex:'username'}]} label={u=>u.name+' · '+u.username}/></Form.Item>
         <Form.Item name="class_id" label="行政班" rules={[{required:true}]}><RecordSelect title="行政班" kind="classes" disabled={editing} records={classes} label={label} fields={[{key:'grade',label:'年级',options:grades.map(g=>({value:g.id,label:g.name})),values:c=>[c.grade_id]}]} columns={[{title:'班级',dataIndex:'name'},{title:'年级',render:(_,c)=>grades.find(g=>g.id===c.grade_id)?.name||c.grade}]}/></Form.Item>
-        <Form.Item name="subjects" label="任教学科"><Select mode="tags" options={[...new Set(subjects.data.map(s=>s.name))].map(value=>({value}))}/></Form.Item>
+        <Form.Item name="subjects" label="任教学科"><Select mode="tags" options={subjectChoices}/></Form.Item>
         <Form.Item name="homeroom" label="担任该班班主任" valuePropName="checked"><Switch/></Form.Item>
       </Form></Modal>
 </Card>

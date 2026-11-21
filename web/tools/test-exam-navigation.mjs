@@ -4,10 +4,38 @@ import ts from 'typescript'
 
 const source = await readFile(new URL('../src/examNavigation.ts', import.meta.url), 'utf8')
 const { outputText } = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } })
-const { examPath, markingPath, readLocation, resolveExam, defaultGroup, scopedRecord, groupOptions } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`)
+const { examPath, markingPath, readLocation, resolveExam, defaultGroup, scopedRecord, groupOptions, cardScopeLabel, rememberExamContext, readExamContext, setExamContextOwner } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`)
 const projects = [{ id: 'p1', name: '期中' }, { id: 'p2', name: '期末' }]
 const subjects = [{ id: 's1', name: '数学', project_id: 'p1', group_mode: 'custom' }, { id: 's2', name: '数学', project_id: 'p2', group_mode: 'default' }]
 const groups = [{ id: 'g1', name: '一中', subject_id: 's1' }, { id: 'g2', name: 'Default', is_default: true, subject_id: 's2' }]
+
+assert.equal(cardScopeLabel(groups[0], subjects, projects), '期中 / 数学 / 待设置年级 / 一中')
+assert.equal(cardScopeLabel(groups[1], subjects, projects), '期末 / 数学 / 待设置年级 / 数学题卡')
+assert.equal(cardScopeLabel(undefined, subjects, projects), '—')
+const memoryStore = () => {
+  const map = new Map()
+  return { getItem: k => map.get(k) ?? null, setItem: (k, v) => map.set(k, String(v)), removeItem: k => map.delete(k) }
+}
+globalThis.sessionStorage = memoryStore()
+globalThis.localStorage = memoryStore()
+setExamContextOwner('u1')
+rememberExamContext({ projectId: 'p1', groupId: 'g1' })
+setExamContextOwner('u1')
+assert.deepEqual(readExamContext(), { projectId: 'p1', groupId: 'g1' })
+rememberExamContext({ projectId: 'p2' })
+assert.deepEqual(readExamContext(), { projectId: 'p2', groupId: '' })
+rememberExamContext({ groupId: 'g2' })
+assert.deepEqual(readExamContext(), { projectId: 'p2', groupId: 'g2' })
+setExamContextOwner('u2')
+assert.deepEqual(readExamContext(), { projectId: '', groupId: '' })
+const correctionScope={projectId:'p1',subjectId:'s1',groupId:'g1',section:'scans',scanTab:'correct'}
+const targetA={pageId:'page / 1',batchId:'b1'},targetB={submissionId:'other'}
+const linkA=examPath({...correctionScope,correction:targetA})
+const linkB=examPath({...correctionScope,correction:targetB})
+assert.deepEqual(readLocation(linkB).correction,targetB)
+assert.deepEqual(readLocation(linkA).correction,targetA)
+assert.deepEqual(readLocation(linkA).correction,targetA,'Reload and two tabs must identify the same record')
+assert.equal(readLocation(examPath({...correctionScope,section:'results',correction:targetA})).correction,undefined)
 
 // A copied deep link retains context and the active task after a reload/back navigation.
 for (const section of ['overview', 'template', 'roster', 'scans', 'marking', 'exceptions', 'results']) {
@@ -34,6 +62,10 @@ for (const grade of [{gradeId:'高一 / A'},{}]) {
 assert.deepEqual(readLocation('#/people/grades'), {page:'people',section:'grades'})
 assert.deepEqual(readLocation('#/people'), {page:'people'})
 assert.deepEqual(readLocation('#/people/unknown'), {page:'people'})
+assert.deepEqual(readLocation('#/settings/devices'), {page:'settings',section:'devices'})
+assert.deepEqual(readLocation('#/settings/backups'), {page:'settings',section:'backups'})
+assert.deepEqual(readLocation('#/settings'), {page:'settings'})
+assert.deepEqual(readLocation('#/settings/unknown'), {page:'settings'})
 
 // Creating/importing a child always uses the current parent, even if the input carries another ID.
 const input = { name: '数学', project_id: 'p2' }

@@ -13,7 +13,7 @@ import { Exams } from './Exams'
 import { useNavigation, confirmLeaving } from './useNavigation'
 import { Marking } from './Marking'
 import { ReviewTasks } from './ReviewTasks'
-import {markingPath, readLocation} from './examNavigation'
+import {markingPath, readLocation, setExamContextOwner} from './examNavigation'
 import type {ProjectFilter} from './reviewProjects'
 import { Account } from './Account'
 import { RealtimeStatus } from './RealtimeStatus'
@@ -28,14 +28,14 @@ export function App() {
   const [offlineAccess,setOfflineAccess]=useState(false),[authToken,setAuthToken]=useState(currentToken),[verifiedToken,setVerifiedToken]=useState('')
   const { location, navigate } = useNavigation()
   const [reviewFilter,setReviewFilter] = useState<ProjectFilter>('in_progress')
-  function endSession(){if(!clearSession(authToken)&&currentToken())return;sessionStorage.removeItem('omp-review-user');setUser(null);setOfflineAccess(false)}
-  function acceptUser(person:User,expected=authToken){if(currentToken()!==expected)return;setUser(person);setVerifiedToken(expected);setOfflineAccess(false);void rememberReviewUser(person).catch(()=>{})}
+  function endSession(){if(!clearSession(authToken)&&currentToken())return;sessionStorage.removeItem('omp-review-user');setExamContextOwner('');setUser(null);setOfflineAccess(false)}
+  function acceptUser(person:User,expected=authToken){if(currentToken()!==expected)return;setExamContextOwner(person.id);setUser(person);setVerifiedToken(expected);setOfflineAccess(false);void rememberReviewUser(person).catch(()=>{})}
   const setPage = (page: string) => navigate('#/' + page)
   useEffect(()=>watchSession(value=>setAuthToken(value?.token||'')),[])
   useEffect(()=>{
     let active=true
     setReviewFilter('in_progress')
-    if(!authToken){setUser(null);setOfflineAccess(false);setChecking(false);return}
+    if(!authToken){setExamContextOwner('');setUser(null);setOfflineAccess(false);setChecking(false);return}
     setChecking(true);setUser(null);setOfflineAccess(false)
     void (async()=>{
       try{
@@ -47,7 +47,7 @@ export function App() {
         else{
           const stored=currentSession(),id=stored?.user_id
           const cached=id&&stored?.deadline&&stored.deadline>Date.now()?await cachedReviewUser(id).catch(()=>undefined):undefined
-          if(active&&currentToken()===authToken&&cached&&cached.role!=='admin'){setUser(cached);setVerifiedToken(authToken);setOfflineAccess(true);if(readLocation(window.location.hash).page!=='marking')navigate(markingPath(),true)}
+          if(active&&currentToken()===authToken&&cached&&cached.role!=='admin'){setExamContextOwner(cached.id);setUser(cached);setVerifiedToken(authToken);setOfflineAccess(true);if(readLocation(window.location.hash).page!=='marking')navigate(markingPath(),true)}
         }
       }finally{if(active)setChecking(false)}
     })()
@@ -104,8 +104,8 @@ export function App() {
         {page === 'conversions' && management && user.role==='admin' && <Conversions/>}
         {page === 'archives' && <ArchiveManager/>}
         {page === 'people' && <DataManagement systemAdmin={user.role==='admin'} tab={location.section||'users'} onTab={key=>navigate('#/people/'+key)}/>}
-        {page === 'settings' && user.role==='admin' && <Settings />}
-        {page === 'scanner' && management && <ScannerDesk/>}
+        {page === 'settings' && user.role==='admin' && <Settings tab={location.section||'login'} onTab={key=>navigate('#/settings/'+key)} />}
+        {page === 'scanner' && management && <ScannerDesk systemAdmin={user.role==='admin'}/>}
         {page === 'account' && <Account user={user} onProfile={acceptUser} onLogout={endSession}/>}
       </Layout.Content>
     </Layout>
@@ -113,13 +113,24 @@ export function App() {
 }
 function Dashboard({ onNavigate, admin }: { onNavigate: (value: string) => void; admin: boolean }) {
   const resource = useResource<Record<string, number>>('/dashboard', {})
-  const shortcuts = admin
-    ? [['exams', '考试项目'], ['exceptions', '异常总览'], ['results', '成绩总览']]
-    : [['marking', '阅卷中心'], ['results', '成绩分析']]
+  const shortcuts: [string, string, string][] = admin
+    ? [
+        ['exams', '管理考试题卡', '名单、考场与阅卷分配'],
+        ['scanner', '打开扫描台', '设备配对、扫描记录与补扫'],
+        ['exceptions', '核查异常', '待处理记录与原卷'],
+        ['results', '查看班级成绩', '班级报表与跨科汇总'],
+      ]
+    : [
+        ['marking', '阅卷中心', '按考试领取主观题评阅与仲裁任务'],
+        ['results', '成绩分析', '查看已授权班级的发布成绩、统计分析与试卷讲评'],
+      ]
   return <Space direction="vertical" size={16} style={{ width: '100%' }}>
     {resource.error && <Alert type="error" showIcon message={resource.error} action={<Button onClick={resource.reload}>重试</Button>} />}
+    {admin && (resource.data.exceptions > 0 || resource.data.pending_tasks > 0) && <Alert type="info" showIcon
+      message={[resource.data.exceptions > 0 ? `${resource.data.exceptions} 项异常待核查` : '', resource.data.pending_tasks > 0 ? `${resource.data.pending_tasks} 份作答待评阅` : ''].filter(Boolean).join(' · ')}
+      action={<Space wrap>{resource.data.exceptions > 0 && <Button size="small" onClick={() => onNavigate('exceptions')}>前往异常总览</Button>}{resource.data.pending_tasks > 0 && <Button size="small" onClick={() => onNavigate('exams')}>打开考试项目</Button>}</Space>} />}
     <div className="stat-grid">{[['projects', '考试项目'], ['groups', '题卡'], ['students', '学生'], ['pending_tasks', '待评作答'], ['exceptions', '待处理异常']].map(([key, label]) => <Card key={key}><Statistic loading={resource.loading} title={label} value={resource.data[key] ?? '—'} /></Card>)}</div>
-    <Card title="快捷操作"><div className="workflow-grid">{shortcuts.map(([key, label]) => <button className="workflow-item" key={key} onClick={() => onNavigate(key)}><strong>{label}</strong></button>)}</div></Card>
+    <Card title="快捷操作" extra={<Button onClick={resource.reload} loading={resource.loading}>刷新</Button>}><div className="workflow-grid">{shortcuts.map(([key, label, detail]) => <button type="button" className="workflow-item" key={key} onClick={() => onNavigate(key)}><strong>{label}</strong><span className="help-text" style={{ marginTop: 0 }}>{detail}</span></button>)}</div></Card>
     {!resource.loading && !Object.keys(resource.data).length && !resource.error && <Empty description="尚无工作数据" />}
   </Space>
 }
