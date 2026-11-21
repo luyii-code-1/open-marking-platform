@@ -57,6 +57,13 @@ public sealed class RecognitionWorker : IDisposable
     }
 
     public Task<JsonElement> Recognize(BatchRow batch,PageRow page,CancellationToken cancel=default)=>Call("recognize",new{batch_id=batch.Id,capture_id=page.CaptureId,side=page.Side,source_extension=Path.GetExtension(page.Path),source_sha256=page.Sha256,config_sha256=batch.ConfigSha256,template=JsonSerializer.Deserialize<JsonElement>(batch.TemplateJson)},cancel);
-    public Task<JsonElement> PrepareUpload(PageRow page,CancellationToken cancel=default)=>Call("prepare-upload",new{capture_id=page.CaptureId,normalized_sha256=JsonSerializer.Deserialize<JsonElement>(page.RecognitionJson).GetProperty("normalized_sha256").GetString()},cancel);
+    public Task<JsonElement> PrepareUpload(PageRow page,CancellationToken cancel=default)=>Call("prepare-upload",new{capture_id=page.CaptureId,normalized_sha256=JsonSerializer.Deserialize<JsonElement>(page.RecognitionJson).GetProperty("normalized_sha256").GetString(),jpeg_quality=page.JpegQuality},cancel);
+    internal Task<JsonElement> EstimateUpload(LocalQueue.JpegSample? sample, string paper, int quality, CancellationToken cancel)
+    {
+        object args = sample is null
+            ? new { reference_paper = paper, jpeg_quality = quality }
+            : new { capture_id = sample.CaptureId, normalized_sha256 = sample.NormalizedSha256, jpeg_quality = quality };
+        return Call("estimate-upload", args, cancel);
+    }
     public void Dispose(){if(_disposed)return;_disposed=true;if(_process is {HasExited:false}){_process.Kill(entireProcessTree:true);_process.WaitForExit(5000);}_process?.Dispose();_process=null;_gate.Dispose();}
 }

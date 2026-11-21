@@ -48,6 +48,10 @@ public sealed class PageRow
     public string DisplaySide => Side == "front" ? "正面" : "背面";
     public string QualityJson { get; set; } = "{}";
     public string RecognitionJson { get; set; } = "{}";
+    public int JpegQuality { get; set; } = 80;
+    public bool LegacyJpeg { get; set; }
+    public string UploadSha256 { get; set; } = "";
+    public string UploadNormalizedSha256 { get; set; } = "";
     public string QualitySummary
     {
         get

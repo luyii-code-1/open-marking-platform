@@ -6,6 +6,56 @@ namespace OMP.Scanner;
 
 public sealed partial class LocalQueue
 {
+    internal sealed record JpegSample(string CaptureId, string NormalizedSha256, string Paper);
+
+    internal JpegSample? LatestJpegSample(string server, string project, string group, string template, string preferredBatch)
+    {
+        if (string.IsNullOrEmpty(project) || (string.IsNullOrEmpty(group) && string.IsNullOrEmpty(template))) return null;
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = """
+            SELECT p.capture_id, json_extract(p.recognition_json,'$.normalized_sha256'), b.paper
+              FROM batches b JOIN pages p ON p.batch_id=b.id
+             WHERE b.server_url=$server AND b.project_id=$project
+               AND ($group='' OR b.group_id=$group) AND ($template='' OR b.template_id=$template)
+               AND p.status IN ('pending','uploaded') AND json_extract(p.recognition_json,'$.normalized_sha256') IS NOT NULL
+             ORDER BY (b.id=$preferred) DESC, p.rowid DESC
+            """;
+        cmd.Parameters.AddWithValue("$server", server);
+        cmd.Parameters.AddWithValue("$project", project);
+        cmd.Parameters.AddWithValue("$group", group);
+        cmd.Parameters.AddWithValue("$template", template);
+        cmd.Parameters.AddWithValue("$preferred", preferredBatch);
+        using var rows = cmd.ExecuteReader();
+        while (rows.Read())
+        {
+            var id = rows.GetString(0);
+            if (Guid.TryParseExact(id, "D", out _) && File.Exists(Path.Combine(Root, "processed", id, "normalized.png")))
+                return new(id, rows.GetString(1), rows.GetString(2));
+        }
+        return null;
+    }
+
+    internal void PinUpload(PageRow page, string normalized, string jpeg)
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = """
+            UPDATE pages SET jpeg_quality=$quality, upload_normalized_sha256=$normalized, upload_sha256=$jpeg
+             WHERE capture_id=$id AND COALESCE(jpeg_quality,80)=$quality AND recognition_json=$manifest
+               AND (upload_sha256='' OR (upload_sha256=$jpeg AND upload_normalized_sha256=$normalized))
+            """;
+        cmd.Parameters.AddWithValue("$id", page.CaptureId);
+        cmd.Parameters.AddWithValue("$quality", page.JpegQuality);
+        cmd.Parameters.AddWithValue("$manifest", page.RecognitionJson);
+        cmd.Parameters.AddWithValue("$normalized", normalized);
+        cmd.Parameters.AddWithValue("$jpeg", jpeg);
+        if (cmd.ExecuteNonQuery() != 1) throw new InvalidDataException("上传页面已更改，请重新核对本地队列。");
+        page.LegacyJpeg = false;
+        page.UploadSha256 = jpeg;
+        page.UploadNormalizedSha256 = normalized;
+    }
+
     private static void LoadDesktopFields(SqliteConnection db,BatchRow batch)
     {
         using var command=db.CreateCommand();

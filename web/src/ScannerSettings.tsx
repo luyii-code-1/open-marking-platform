@@ -1,27 +1,37 @@
 import { Collapse, Form, Radio, Select, Space, Typography } from 'antd'
 import { Button } from './Button'
+import { ScannerJpegSettings } from './ScannerJpegSettings'
+import { isJpegQuality, type EstimateContext, type JpegQuality } from './scannerJpegEstimate'
 
 type Row = Record<string, any>
 type Props = {
   state: Row; locked: boolean; discovering: boolean; firstSide: string; manualSide?: string
+  active: boolean; estimateContext: EstimateContext
   onFirstSide: (value: string) => void; onManualSide: (value: string) => void
   action: (method: string, args?: Record<string, unknown>) => Promise<unknown>
 }
 
-export function ScannerSettings({ state, locked, discovering, firstSide, manualSide, onFirstSide, onManualSide, action }: Props) {
+export function ScannerSettings({ state, locked, discovering, firstSide, manualSide, onFirstSide, onManualSide, active, estimateContext, action }: Props) {
   const prefs = state.device_preferences, driver = prefs?.driver || 'Twain'
   const dpi = state.scan_settings?.dpi === 600 ? 600 : 300, color = state.scan_settings?.color || 'gray'
+  const quality = state.scan_settings?.jpeg_quality
+  function saveSettings(changes: { dpi?: number; color?: string; jpeg_quality?: JpegQuality }) {
+    return action('scanSettings', { dpi, color, ...(isJpegQuality(quality) && { jpeg_quality: quality }), ...changes })
+  }
   return <Form layout="vertical" className="scanner-settings">
     <Form.Item label="扫描清晰度">
-      <Radio.Group className="scanner-resolution" value={dpi} disabled={locked} onChange={e => action('scanSettings', { dpi: e.target.value, color })}>
+      <Radio.Group className="scanner-resolution" value={dpi} disabled={locked} onChange={e => saveSettings({ dpi: e.target.value })}>
         <Radio.Button value={300}><strong>标清</strong><span>300 DPI · 日常扫描</span></Radio.Button>
         <Radio.Button value={600}><strong>高清</strong><span>600 DPI · 扫描较慢</span></Radio.Button>
       </Radio.Group>
     </Form.Item>
     <Form.Item label="扫描颜色">
-      <Select disabled={locked} aria-label="扫描颜色" value={color} onChange={color => action('scanSettings', { dpi, color })}
+      <Select disabled={locked} aria-label="扫描颜色" value={color} onChange={color => saveSettings({ color })}
         options={[{ value: 'gray', label: '灰度（推荐）' }, { value: 'bw', label: '黑白' }, { value: 'color', label: '彩色' }]} />
     </Form.Item>
+    {isJpegQuality(quality)
+      ? <ScannerJpegSettings active={active} quality={quality} context={estimateContext} locked={locked} onChange={jpeg_quality => saveSettings({ jpeg_quality })} />
+      : <Form.Item label="上传图像质量（JPEG）"><Typography.Text type="secondary">升级扫描客户端后，可选择 JPEG 质量并估算上传大小。</Typography.Text></Form.Item>}
     <Form.Item label="当前扫描仪">
       <Space direction="vertical" style={{ width: '100%' }}>
         <Select aria-label="选择扫描仪" placeholder="选择扫描仪" disabled={locked} value={prefs?.device?.id || undefined}

@@ -156,6 +156,14 @@ html,body,#root{height:100%;margin:0}
 .scan-workflow-steps .ant-steps-item-title{font-size:14px!important}
 .scanner-settings .ant-select{width:100%}
 .scanner-settings .ant-form-item{margin-bottom:22px}
+.scanner-jpeg-quality{display:flex}
+.scanner-jpeg-quality .ant-radio-button-wrapper{flex:1;height:auto;padding-inline:6px;text-align:center;white-space:normal}
+.scanner-jpeg-count-hint{display:block;margin-top:4px}
+.scanner-jpeg-estimate{margin-top:12px;padding:12px 14px;border-radius:6px;background:#f3f6f9}
+.scanner-jpeg-sizes{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:0 0 6px}
+.scanner-jpeg-sizes dt{color:#586576;font-size:13px}
+.scanner-jpeg-sizes dd{margin:2px 0 0;font-size:18px;font-weight:600;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.scanner-jpeg-error{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .scanner-resolution{display:grid;grid-template-columns:1fr 1fr;gap:12px;width:100%}
 .scanner-resolution .ant-radio-button-wrapper{height:auto;min-height:78px;padding:12px 14px;border:1px solid #cbd5e1;border-radius:6px;line-height:1.6;white-space:normal}
 .scanner-resolution .ant-radio-button-wrapper::before{display:none}

@@ -18,18 +18,28 @@ def transport_check(host):
         requests=[{'id':'state','protocol':'omp-scanner-4','method':'state','args':{}},
                   {'id':'invalid','protocol':'invalid','method':'state','args':{}},
                   {'id':'pair','protocol':'omp-scanner-4','method':'parseActivation','args':{'uri':'omp-scanner://connect?server=https%3A%2F%2Fschool.example&code=ABCDEFGHJKLM'}},
+                  {'id':'quality','protocol':'omp-scanner-4','method':'scanSettings','args':{'jpeg_quality':90}},
                   {'id':'settings','protocol':'omp-scanner-4','method':'scanSettings','args':{'dpi':600,'color':'color'}},
                   {'id':'bad-settings','protocol':'omp-scanner-4','method':'scanSettings','args':{'dpi':72,'color':'gray'}},
+                  {'id':'bad-quality','protocol':'omp-scanner-4','method':'scanSettings','args':{'jpeg_quality':75}},
+                  {'id':'estimate-60','protocol':'omp-scanner-4','method':'jpegEstimate','args':{'quality':60,'paper':'A4'}},
+                  {'id':'estimate-90','protocol':'omp-scanner-4','method':'jpegEstimate','args':{'quality':90,'paper':'A4'}},
                   {'id':'close','protocol':'omp-scanner-4','method':'close','args':{}}]
         result=run([host,'--transport-self-test',temporary],input=''.join(json.dumps(value)+'\n' for value in requests),capture_output=True,text=True,encoding='utf-8',timeout=40)
         rows=[json.loads(line) for line in result.stdout.splitlines()];by_id={value.get('id'):value for value in rows}
         assert rows[0]['event']=='ready' and by_id['state']['result']['protocol']=='omp-scanner-4'
         assert not by_id['invalid']['ok'] and by_id['pair']['result']['server']=='https://school.example/api/v1/' and by_id['close']['ok']
-        assert by_id['settings']['result']=={'dpi':600,'color':'color'} and not by_id['bad-settings']['ok']
+        assert by_id['state']['result']['scan_settings']['jpeg_quality'] == 80
+        assert by_id['quality']['result']['jpeg_quality'] == 90
+        saved = {'dpi':600, 'color':'color', 'jpeg_quality':90}
+        assert by_id['settings']['result'] == saved and not by_id['bad-settings']['ok'] and not by_id['bad-quality']['ok']
+        low, high = (by_id[key]['result'] for key in ('estimate-60', 'estimate-90'))
+        assert (low['quality'], high['quality']) == (60, 90) and low['source'] == high['source'] == 'reference'
+        assert 0 < low['size'] < high['size']
         requests=[{'id':'read','protocol':'omp-scanner-4','method':'scanSettings','args':{}},{'id':'close','protocol':'omp-scanner-4','method':'close','args':{}}]
         result=run([host,'--transport-self-test',temporary],input=''.join(json.dumps(value)+'\n' for value in requests),capture_output=True,text=True,encoding='utf-8',timeout=40)
         by_id={value.get('id'):value for value in map(json.loads,result.stdout.splitlines())}
-        assert by_id['read']['result']=={'dpi':600,'color':'color'}
+        assert by_id['read']['result'] == saved
 
 def build(args):
     output=args.output.resolve();output.mkdir(parents=True,exist_ok=True)

@@ -162,7 +162,7 @@ function Scanner() {
   async function startScan(){
     if(!deviceReady){setDeviceOpen(true);return}
     if(state.scan_settings?.dpi!==300&&state.scan_settings?.dpi!==600){
-      const updated=await action('scanSettings',{dpi:300,color:state.scan_settings?.color||'gray'})
+      const updated=await action('scanSettings',{dpi:300,color:state.scan_settings?.color||'gray',jpeg_quality:state.scan_settings?.jpeg_quality})
       if(!updated)return
     }
     let id=batchId
@@ -290,7 +290,8 @@ function Scanner() {
       {originalError?<Alert type="error" message={originalError}/>:original?<img className="scanner-preview" src={original} alt={corrected?"自动校正图":"扫描原图"}/>:<Card loading/>}</Space>}
     </Drawer>
     <Drawer title="扫描设置" open={deviceOpen} onClose={()=>setDeviceOpen(false)} width="min(480px,94vw)" footer={<Button type="primary" block disabled={!deviceReady||busy} onClick={()=>setDeviceOpen(false)}>完成设置</Button>}>
-      <ScannerSettings state={state} locked={locked} discovering={busyKey===actionKey('devices')} firstSide={firstSide}
+      <ScannerSettings state={state} active={deviceOpen} locked={locked} discovering={busyKey===actionKey('devices')} firstSide={firstSide}
+        estimateContext={inProject && group ? { paper: group.template.paper === 'A3' ? 'A3' : 'A4', batch_id: batch?.id, group_id: group.id, template_id: group.template.id } : { paper: 'A4' }}
         manualSide={batch&&batch.capture_mode!=='duplex'&&batch.sides===2?side:undefined} onManualSide={setSide}
         onFirstSide={value=>{setFirstSide(value);localStorage.setItem('duplex-order-v2',value)}} action={action}/>
     </Drawer>

@@ -182,8 +182,11 @@ def test_single_jpeg_upload_review_archive_and_cleanup(pipeline,monkeypatch,pg_d
     client.put('/api/v1/projects/'+f['project']['id']+'/storage',headers=headers,json={'connection_id':connection['id'],'review_image_delivery':'direct'}).raise_for_status()
     contents={}
     for page in f['pages']:
-        prepared=prepare_upload(f['root'],{'capture_id':page['id'],'normalized_sha256':page['result']['normalized_sha256']})
+        quality = 60 if page['side'] == 'front' else 90
+        prepared=prepare_upload(f['root'],{'capture_id':page['id'],'normalized_sha256':page['result']['normalized_sha256'],
+                                          'jpeg_quality': quality})
         content=(f['root']/'processed'/page['id']/'sheet.jpg').read_bytes();contents[page['id']]=content
+        assert prepared['quality'] == quality and prepared['size'] == len(content)
         with Image.open(io.BytesIO(content)) as image:assert image.format=='JPEG' and image.mode=='L' and image.size==(840,1188)
         result={k:v for k,v in page['result'].items() if k not in ('cuts','local_cuts_sha256')}
         result.update(upload_format='jpeg-sheet-1',normalized_sha256=prepared['sha256'])

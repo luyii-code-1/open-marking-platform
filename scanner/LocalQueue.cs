@@ -40,6 +40,9 @@ public sealed partial class LocalQueue
         EnsureColumn(db, "batches", "local_pairs_json", "TEXT NOT NULL DEFAULT '[]'");
         EnsureColumn(db, "batches", "room_tags_json", "TEXT NOT NULL DEFAULT '[]'");
         EnsureColumn(db, "pages", "recognition_json", "TEXT NOT NULL DEFAULT '{}'");
+        EnsureColumn(db, "pages", "jpeg_quality", "INTEGER");
+        EnsureColumn(db, "pages", "upload_sha256", "TEXT NOT NULL DEFAULT ''");
+        EnsureColumn(db, "pages", "upload_normalized_sha256", "TEXT NOT NULL DEFAULT ''");
     }
 
     private static void EnsureColumn(SqliteConnection db, string table, string name, string definition)
@@ -107,16 +110,19 @@ public sealed partial class LocalQueue
     {
         using var db = Open();
         using var cmd = db.CreateCommand();
-        cmd.CommandText = "SELECT capture_id,batch_id,side,sequence,path,sha256,status,error,quality_report,recognition_json FROM pages WHERE batch_id=$batch ORDER BY CASE side WHEN 'front' THEN 0 ELSE 1 END,sequence";
+        cmd.CommandText = "SELECT capture_id,batch_id,side,sequence,path,sha256,status,error,quality_report,recognition_json,jpeg_quality,upload_sha256,upload_normalized_sha256 FROM pages WHERE batch_id=$batch ORDER BY CASE side WHEN 'front' THEN 0 ELSE 1 END,sequence";
         cmd.Parameters.AddWithValue("$batch", batchId);
         using var row = cmd.ExecuteReader();
         var list = new List<PageRow>();
-        while (row.Read()) list.Add(new PageRow { CaptureId = row.GetString(0), BatchId = row.GetString(1), Side = row.GetString(2), Sequence = row.GetInt32(3), Path = row.GetString(4), Sha256 = row.GetString(5), Status = row.GetString(6), Error = row.GetString(7), QualityJson = row.GetString(8), RecognitionJson = row.GetString(9) });
+        while (row.Read()) list.Add(new PageRow { CaptureId = row.GetString(0), BatchId = row.GetString(1), Side = row.GetString(2), Sequence = row.GetInt32(3), Path = row.GetString(4), Sha256 = row.GetString(5), Status = row.GetString(6), Error = row.GetString(7), QualityJson = row.GetString(8), RecognitionJson = row.GetString(9),
+            LegacyJpeg = row.IsDBNull(10), JpegQuality = row.IsDBNull(10) ? 80 : row.GetInt32(10),
+            UploadSha256 = row.GetString(11), UploadNormalizedSha256 = row.GetString(12) });
         return list;
     }
 
-    public PageRow AddPage(BatchRow batch, string side, System.Drawing.Image image, bool deferInspection = false)
+    public PageRow AddPage(BatchRow batch, string side, System.Drawing.Image image, bool deferInspection = false, int jpegQuality = 80)
     {
+        ScanCaptureSettings.CheckJpegQuality(jpegQuality);
         if (batch.Status != "open") throw new InvalidOperationException("当前批次已关闭或冻结，请新建批次。");
         var automatic = side == "auto";
         if ((automatic && batch.CaptureMode != "duplex") || (!automatic && batch.CaptureMode == "duplex")) throw new InvalidOperationException("采集方式与批次不一致。");
@@ -159,7 +165,7 @@ public sealed partial class LocalQueue
         cmd.Parameters.AddWithValue("$batch", batch.Id);
         cmd.Parameters.AddWithValue("$side", side);
         var sequence = slot?.Sequence ?? Convert.ToInt32(cmd.ExecuteScalar());
-        cmd.CommandText = "INSERT INTO pages(capture_id,batch_id,side,sequence,path,sha256,status,error,quality_report) VALUES($id,$batch,$side,$sequence,$path,$sha,$status,$error,$quality)";
+        cmd.CommandText = "INSERT INTO pages(capture_id,batch_id,side,sequence,path,sha256,status,error,quality_report,jpeg_quality) VALUES($id,$batch,$side,$sequence,$path,$sha,$status,$error,$quality,$jpeg)";
         cmd.Parameters.AddWithValue("$id", captureId);
         cmd.Parameters.AddWithValue("$sequence", sequence);
         cmd.Parameters.AddWithValue("$path", original);
@@ -167,6 +173,7 @@ public sealed partial class LocalQueue
         cmd.Parameters.AddWithValue("$status", report.Passed ? "pending" : "blocked");
         cmd.Parameters.AddWithValue("$error", report.Passed ? "" : report.Summary);
         cmd.Parameters.AddWithValue("$quality", quality);
+        cmd.Parameters.AddWithValue("$jpeg", jpegQuality);
         cmd.ExecuteNonQuery();
         if (automatic)
         {
@@ -179,7 +186,7 @@ public sealed partial class LocalQueue
         }
         transaction.Commit();
         if (!report.Passed) { batch.Status = "frozen"; batch.Error = report.Summary; }
-        return new PageRow { CaptureId = captureId, BatchId = batch.Id, Side = side, Sequence = sequence, Path = original, Sha256 = sha, QualityJson = quality, Status = report.Passed ? "pending" : "blocked", Error = report.Passed ? "" : report.Summary };
+        return new PageRow { CaptureId = captureId, BatchId = batch.Id, Side = side, Sequence = sequence, Path = original, Sha256 = sha, QualityJson = quality, JpegQuality = jpegQuality, Status = report.Passed ? "pending" : "blocked", Error = report.Passed ? "" : report.Summary };
     }
 
     private static void SaveDurably(string path, Action<FileStream> write)

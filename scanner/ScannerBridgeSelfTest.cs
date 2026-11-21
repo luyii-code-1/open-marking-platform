@@ -63,15 +63,24 @@ internal static class ScannerBridgeSelfTest
             var first="https://first.example/api/v1/";
             var second="https://second.example/api/v1/";
             System.IO.File.WriteAllText(System.IO.Path.Combine(settingsRoot,"desktop-settings.json"),JsonSerializer.Serialize(new{server_url=first,servers=new[]{first,second}}));
-            System.IO.File.WriteAllText(System.IO.Path.Combine(settingsRoot,"scan-capture-settings.json"),JsonSerializer.Serialize(new ScanCaptureSettings(200,"gray")));
+            System.IO.File.WriteAllText(System.IO.Path.Combine(settingsRoot,"scan-capture-settings.json"),JsonSerializer.Serialize(new { Dpi=200, Color="gray" }));
             using(var controller=new DesktopController(new LocalQueue(settingsRoot),selfTest:true))
             {
                 Check(controller.ScanSettings.Dpi==300,"Legacy resolution was not migrated to standard quality.");
+                Check(controller.ScanSettings.JpegQuality==80,"Legacy scan settings must use JPEG quality 80.");
+                await controller.Invoke("scanSettings",JsonSerializer.SerializeToElement(new{jpeg_quality=90}));
                 await controller.Invoke("setDefaultServer",JsonSerializer.SerializeToElement(new{server_url=second}));
                 var state=JsonSerializer.SerializeToElement(await controller.Invoke("state",JsonSerializer.SerializeToElement(new{})));
                 Check(state.GetProperty("default_server_url").GetString()==second,"Default server was not saved.");
                 Check(controller.Server==first&&!state.GetProperty("session_open").GetBoolean(),"Saving a default server changed the active connection.");
                 await controller.Invoke("scanSettings",JsonSerializer.SerializeToElement(new{dpi=600,color="gray"}));
+                Check(controller.ScanSettings.JpegQuality==90,"A DPI-only update reset the JPEG preference.");
+                try
+                {
+                    await controller.Invoke("scanSettings",JsonSerializer.SerializeToElement(new{jpeg_quality=70}));
+                    throw new InvalidOperationException("Unsupported JPEG quality was accepted.");
+                }
+                catch(ArgumentException) { }
                 await controller.Close();
             }
             using(var restarted=new DesktopController(new LocalQueue(settingsRoot),selfTest:true))
@@ -79,9 +88,42 @@ internal static class ScannerBridgeSelfTest
                 var state=JsonSerializer.SerializeToElement(await restarted.Invoke("state",JsonSerializer.SerializeToElement(new{})));
                 Check(state.GetProperty("default_server_url").GetString()==second,"Restart lost the default server.");
                 Check(restarted.ScanSettings.Dpi==600,"Restart lost high quality settings.");
+                Check(state.GetProperty("scan_settings").GetProperty("jpeg_quality").GetInt32()==90,"Restart lost the JPEG preference.");
                 Check(!state.GetProperty("session_open").GetBoolean(),"Restart bypassed server selection.");
                 await restarted.Close();
             }
+            var queue = new LocalQueue(settingsRoot);
+            var batch = new BatchRow { Id=Guid.NewGuid().ToString(), ServerUrl=first, ProjectId="project",
+                GroupId="group", TemplateId="template", Paper="A4", Sides=1 };
+            queue.AddBatch(batch);
+            queue.SaveDesktopBatch(batch);
+            using var bitmap = new System.Drawing.Bitmap(50,50);
+            var captured = queue.AddPage(batch,"front",bitmap,deferInspection:true,jpegQuality:60);
+            var legacy = queue.AddPage(batch,"front",bitmap,deferInspection:true);
+            using(var db = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=" + System.IO.Path.Combine(settingsRoot,"queue.sqlite3")))
+            {
+                db.Open();
+                using var cmd=db.CreateCommand();
+                cmd.CommandText="UPDATE pages SET jpeg_quality=NULL WHERE capture_id=$id";
+                cmd.Parameters.AddWithValue("$id",legacy.CaptureId);cmd.ExecuteNonQuery();
+            }
+            var page = queue.Pages(batch.Id).Single(p=>p.CaptureId==captured.CaptureId);
+            Check(page.JpegQuality==60 && !page.LegacyJpeg,"Per-page JPEG setting was not preserved.");
+            Check(queue.Pages(batch.Id).Any(p=>p.LegacyJpeg && p.JpegQuality==80),"Old queue pages must retain JPEG 80.");
+            var normalized = new string('a',64);
+            var jpeg = new string('b',64);
+            queue.PageRecognized(page.CaptureId,JsonSerializer.Serialize(new { normalized_sha256=normalized }));
+            page=queue.Pages(batch.Id).Single(p=>p.CaptureId==captured.CaptureId);
+            queue.PinUpload(page,normalized,jpeg);
+            Check(queue.Pages(batch.Id).Single(p=>p.CaptureId==page.CaptureId).UploadSha256==jpeg,"Prepared JPEG digest was not durable.");
+            bool refused=false;
+            try {queue.PinUpload(page,normalized,new string('c',64));}catch(System.IO.InvalidDataException){refused=true;}
+            Check(refused,"A second encoding changed a pinned upload digest.");
+            var folder=System.IO.Path.Combine(settingsRoot,"processed",page.CaptureId);
+            System.IO.Directory.CreateDirectory(folder);
+            bitmap.Save(System.IO.Path.Combine(folder,"normalized.png"),System.Drawing.Imaging.ImageFormat.Png);
+            Check(queue.LatestJpegSample(first,"project","group","template",batch.Id)?.CaptureId==page.CaptureId,"Current template's sample was not found.");
+            Check(queue.LatestJpegSample(second,"project","group","template",batch.Id)==null,"Another server's sample leaked across scopes.");
         }
         finally{Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();System.IO.Directory.Delete(settingsRoot,true);}
         int? count=null;

@@ -144,7 +144,7 @@ public sealed class DesktopController : IDisposable
         }
         var projects=_packages.Values.Select(p=>new{id=Text(p.GetProperty("project"),"id"),name=Text(p.GetProperty("project"),"name"),exam_status=Text(p.GetProperty("project"),"exam_status","in_progress"),downloaded_at=Text(p,"downloaded_at")}).ToArray();
         var catalogPath=Path.Combine(_queue.Root,"workspaces",Partition,"catalog.json");
-        return new{device_preferences=new{driver=_driver,plugins=_prefs.Plugins.Select(p=>new{id=p.Id,name=Path.GetFileName(p.Path),available=File.Exists(p.Path)}),plugin_id=_prefs.PluginId,device=_prefs.Device,devices=_devices},review_edit=true,room_review=true,manual_room_upload=true,device_protocol=DevicePlugin.Protocol,scan_settings=new{dpi=ScanSettings.Dpi,color=ScanSettings.Color},protocol=Protocol,server_url=_server,default_server_url=_defaultServer,storage_path=_queue.Root,servers=SavedServers,cached_servers=SavedServers.Where(HasOfflineProjects).ToArray(),session_open=_sessionOpen,online=_online,capturing=Capturing,processing=Processing,processing_remaining=Volatile.Read(ref _processingCount),syncing=_uploadGate.CurrentCount==0,message=_message,project_id=_project,
+        return new{device_preferences=new{driver=_driver,plugins=_prefs.Plugins.Select(p=>new{id=p.Id,name=Path.GetFileName(p.Path),available=File.Exists(p.Path)}),plugin_id=_prefs.PluginId,device=_prefs.Device,devices=_devices},review_edit=true,room_review=true,manual_room_upload=true,device_protocol=DevicePlugin.Protocol,scan_settings=CaptureSettingsView(),protocol=Protocol,server_url=_server,default_server_url=_defaultServer,storage_path=_queue.Root,servers=SavedServers,cached_servers=SavedServers.Where(HasOfflineProjects).ToArray(),session_open=_sessionOpen,online=_online,capturing=Capturing,processing=Processing,processing_remaining=Volatile.Read(ref _processingCount),syncing=_uploadGate.CurrentCount==0,message=_message,project_id=_project,
             projects,catalog=File.Exists(catalogPath)?Json(File.ReadAllText(catalogPath)):Json("{\"projects\":[]}"),
             package=_packages.TryGetValue(_project,out var package)?package:Json("null"),
             batches=batches.Select(b=>{
@@ -156,6 +156,23 @@ public sealed class DesktopController : IDisposable
             room_pages=roomScope,page_total=total,pages=displayed.Select(v=>new{id=v.Page.CaptureId,batch_id=v.Batch.Id,batch_status=v.Batch.Status,sheet_number=v.Number,sequence=v.Page.Sequence,side=v.Page.Side,status=v.Page.Status,error=v.Page.Error,candidate=v.Page.RecognitionJson=="{}"?"":Text(Json(v.Page.RecognitionJson),"candidate_number"),quality=v.Page.QualitySummary,recognized=v.Page.RecognitionJson!="{}",local_cut_available=File.Exists(Path.Combine(_queue.Root,"processed",v.Page.CaptureId,"cuts.zip"))})};
     }
 
+    private object CaptureSettingsView() => new { dpi = ScanSettings.Dpi, color = ScanSettings.Color, jpeg_quality = ScanSettings.JpegQuality };
+
+    private async Task<object> JpegEstimate(JsonElement args)
+    {
+        var quality = ScanCaptureSettings.CheckJpegQuality(args.GetProperty("quality").GetInt32());
+        var batchId = Text(args, "batch_id");
+        var selected = batchId.Length == 0 ? null : Batch(batchId);
+        if (selected != null && selected.ProjectId != _project) throw new ArgumentException("批次不属于当前项目。");
+        var paper = selected?.Paper ?? Text(args, "paper", "A4");
+        if (paper is not ("A3" or "A4")) throw new ArgumentException("请选择 A3 或 A4 纸型。");
+        var sample = _queue.LatestJpegSample(_server, _project, selected?.GroupId ?? Text(args, "group_id"),
+            selected?.TemplateId ?? Text(args, "template_id"), batchId);
+        var estimate = await _worker.EstimateUpload(sample, paper, quality, _lifetime.Token);
+        if (estimate.GetProperty("quality").GetInt32() != quality) throw new InvalidDataException("识读引擎返回了不同的 JPEG 质量。");
+        return new { size = estimate.GetProperty("size").GetInt64(), quality, source = sample is null ? "reference" : "scan", paper = sample?.Paper ?? paper };
+    }
+
     public async Task<object?> Invoke(string method,JsonElement args)
     {
         if(Processing&&method is "clearRoom" or "correctAnswer" or "retryPage" or "exclude" or "upload" or "sendForReview" or "downloadProject")
@@ -163,12 +180,17 @@ public sealed class DesktopController : IDisposable
         switch(method)
         {
             case "scanSettings":
-                if(args.TryGetProperty("dpi",out var dpi)){
+                var hasDpi = args.TryGetProperty("dpi", out var dpi);
+                var hasQuality = args.TryGetProperty("jpeg_quality", out var jpegQuality);
+                if(hasDpi || hasQuality || args.TryGetProperty("color", out _)){
                     if(Capturing)throw new InvalidOperationException("请先停止采集");
-                    ScanSettings=new ScanCaptureSettings(dpi.GetInt32(),Text(args,"color",ScanSettings.Color)).Validate();
-                    Save(Path.Combine(_queue.Root,"scan-capture-settings.json"),JsonSerializer.Serialize(ScanSettings));
+                    var settings = new ScanCaptureSettings(hasDpi ? dpi.GetInt32() : ScanSettings.Dpi,
+                        Text(args,"color",ScanSettings.Color), hasQuality ? jpegQuality.GetInt32() : ScanSettings.JpegQuality).Validate();
+                    Save(Path.Combine(_queue.Root,"scan-capture-settings.json"),JsonSerializer.Serialize(settings));
+                    ScanSettings = settings;
                 }
-                return new{dpi=ScanSettings.Dpi,color=ScanSettings.Color};
+                return CaptureSettingsView();
+            case "jpegEstimate": return await JpegEstimate(args);
             case "state":return State(args);
             case "clearRoom":
                 if(Capturing||_tickRunning||_uploadGate.CurrentCount==0)throw new InvalidOperationException("请先停止进纸，并等待上传完成。");
@@ -528,7 +550,7 @@ public sealed class DesktopController : IDisposable
                     session.Id=Guid.NewGuid().ToString();session.Status="open";session.Error="";session.LocalPairsJson="[]";
                     _queue.AddBatch(session);_queue.SaveDesktopBatch(session);collected=0;
                 }
-                var page=await Task.Run(()=>_queue.AddPage(session,side,image,deferInspection:true),_lifetime.Token);
+                var page=await Task.Run(()=>_queue.AddPage(session,side,image,deferInspection:true,jpegQuality:ScanSettings.JpegQuality),_lifetime.Token);
                 collected++;
                 EnqueueRecognition(session,page);
                 Notify("图像已保存在本机，后台识读中。");
@@ -633,9 +655,18 @@ public sealed class DesktopController : IDisposable
                         if(Text(registered,"status")=="paired"){_queue.BatchStatus(batch.Id,"paired");continue;}
                         var excluded=pages.Where(p=>p.Status=="excluded").ToArray();
                         foreach(var page in excluded)await _api.Post($"scanner/batches/{batch.Id}/exclude",new{page_ids=new[]{page.CaptureId},reason="操作员排除页面并保留本地原图"},_lifetime.Token);
+                        Dictionary<string,JsonElement>? previousUploads = null;
                         foreach(var page in pages.Where(p=>p.Status=="pending"&&p.RecognitionJson!="{}"))
                         {
-                            var sheet=await _worker.PrepareUpload(page,_lifetime.Token);
+                            JsonElement? legacyRemote = null;
+                            if (page.LegacyJpeg && page.UploadSha256.Length == 0 && File.Exists(SheetPath(page)))
+                            {
+                                // An older client may have lost the HTTP response after its Q80 file was accepted.
+                                previousUploads ??= (await _api.Get($"scan-batches/{batch.Id}/pages", _lifetime.Token))
+                                    .EnumerateArray().ToDictionary(row => Text(row, "id"));
+                                if (previousUploads.TryGetValue(page.CaptureId, out var remote)) legacyRemote = remote;
+                            }
+                            var sheet=await PrepareSheet(page, legacyRemote);
                             var accepted=await _api.UploadProcessed(page,_queue.Root,sheet,_lifetime.Token);ApplyRemote(page,accepted);Notify();
                         }
                         if(batch.Status=="local_paired"&&_queue.Pages(batch.Id).All(p=>p.Status is "uploaded" or "excluded"))
@@ -651,6 +682,43 @@ public sealed class DesktopController : IDisposable
         catch(OperationCanceledException)when(_lifetime.IsCancellationRequested){ }
         catch(Exception error)when(error is not OutOfMemoryException){_online=false;Notify("上传暂停，本地队列保留："+error.Message);if(requested is not null)throw;}
         finally{_tickRunning=false;Changed?.Invoke();}
+    }
+
+    private string SheetPath(PageRow page) => Path.Combine(_queue.Root, "processed", page.CaptureId, "sheet.jpg");
+
+    private async Task<JsonElement> PrepareSheet(PageRow page, JsonElement? legacyRemote)
+    {
+        var normalized = Json(page.RecognitionJson).GetProperty("normalized_sha256").GetString()
+            ?? throw new InvalidDataException("缺少本地校正图校验值。");
+        string expected = page.UploadSha256;
+        if (expected.Length > 0 && page.UploadNormalizedSha256 != normalized)
+            throw new InvalidDataException("校正图已变更，请核对已准备上传的答卷。");
+        if (legacyRemote is JsonElement remote)
+        {
+            if (Text(remote, "upload_format") != "jpeg-sheet-1" || Text(remote, "sha256") != page.Sha256 ||
+                Text(remote, "batch_id") != page.BatchId || Text(remote, "side") != page.Side ||
+                remote.GetProperty("sequence").GetInt32() != page.Sequence)
+                throw new InvalidDataException("服务器中的页面与本地记录不一致，请核查批次。");
+            expected = Text(remote, "normalized_sha256");
+            if (expected.Length != 64) throw new InvalidDataException("服务器缺少已接收 JPEG 的校验值。");
+        }
+        if (expected.Length > 0 && File.Exists(SheetPath(page)))
+        {
+            using var file = File.OpenRead(SheetPath(page));
+            var hash = Convert.ToHexString(await SHA256.HashDataAsync(file, _lifetime.Token)).ToLowerInvariant();
+            if (hash == expected)
+            {
+                if (page.UploadSha256.Length == 0) _queue.PinUpload(page, normalized, hash);
+                return JsonSerializer.SerializeToElement(new { sha256 = hash });
+            }
+        }
+        var sheet = await _worker.PrepareUpload(page, _lifetime.Token);
+        var jpeg = Text(sheet, "sha256");
+        if (sheet.GetProperty("quality").GetInt32() != page.JpegQuality || jpeg.Length != 64 ||
+            (expected.Length > 0 && jpeg != expected))
+            throw new InvalidDataException("生成的 JPEG 与本页已固定的上传设置或校验值不一致。");
+        _queue.PinUpload(page, normalized, jpeg);
+        return sheet;
     }
 
     private void ApplyRemote(PageRow page,JsonElement remote)
