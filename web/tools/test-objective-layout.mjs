@@ -57,6 +57,9 @@ assert.equal(slots[3].x,slots[0].x)
 assert.ok(slots[3].y>slots[0].y)
 assert.equal(new Set(auto.map(q=>q.choice_group)).size,1)
 
+const twenty=addObjective({...framed,print_notes:[]},{...config,numbers:'1-20',columns:3,order:'row'},uuid)
+assert.deepEqual(twenty.filter((_,i)=>i%3===0).map(q=>q.regions[0].y),[100,104.8,109.6,114.4,119.2,124,128.8])
+
 const geometrySource=await readFile(new URL('../src/sheetRegions.ts',import.meta.url),'utf8')
 const geometry=ts.transpileModule(geometrySource,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ES2022}}).outputText
 const {subjectiveRegion,uniformSubjectiveWidths}=await import('data:text/javascript;base64,'+Buffer.from(geometry).toString('base64'))

@@ -73,15 +73,17 @@ export function arrangeObjective(template: Template, ids: string[], { columns, s
   if (target.some(q => width < 12 + (q.options - 1) * 5)) throw new Error('当前题卡栏内放不下选项，请减少客观题列数')
   const occupied = [...template.questions.filter(q => !selected.has(q.id)).flatMap(q => q.regions),...(template.forbidden_regions||[]),...(template.print_notes||[])]
   const slots: Region[] = []
+  const rowsPerBlock = order === 'row' ? 1 : 5
+  const blockPitch = order === 'row' ? compactChoice.pitch : 27
+  const blockHeight = (rowsPerBlock - 1) * compactChoice.pitch + compactChoice.rowHeight
   for (let page = startPage; page <= template.sides && slots.length < target.length; page++) {
     for(let panel=0;panel<panels&&slots.length<target.length;panel++) {
       const top=page===1&&panel===0?100:35
-      for(let block=0;top+block*27+4*compactChoice.pitch+compactChoice.rowHeight<=255&&slots.length<target.length;block++)
-        for(let i=0;i<columns*5&&slots.length<target.length;i++) {
-            const row=order==='row'?Math.floor(i/columns):i%5
-            const col=order==='row'?i%columns:Math.floor(i/5)
-            const y=top+block*27+row*compactChoice.pitch
-            if(y+compactChoice.rowHeight>255)continue
+      for(let block=0;top+block*blockPitch+blockHeight<=255&&slots.length<target.length;block++)
+        for(let i=0;i<columns*rowsPerBlock&&slots.length<target.length;i++) {
+            const row=i%rowsPerBlock
+            const col=Math.floor(i/rowsPerBlock)
+            const y=top+block*blockPitch+row*compactChoice.pitch
             const slot={page,x:Math.round((12+panel*(panelWidth+8)+col*(width+gap))*1000)/1000,y:Math.round(y*1000)/1000,width,height:compactChoice.rowHeight}
             if(!occupied.some(region=>overlaps(region,slot)))slots.push(slot)
           }

@@ -87,6 +87,28 @@ def test_header_square_cells_and_manual_forbidden_regions(monkeypatch):
     assert issues({**definition,'forbidden_regions':[area,area]})
 
 
+@pytest.mark.parametrize('sixth_row,blocked,expected_frames', [
+    (124, False, 1), (127, False, 1), (127, True, 2),
+])
+def test_twenty_choices_share_one_frame_unless_obstructed(sixth_row, blocked, expected_frames):
+    from unittest.mock import Mock
+    from reportlab.lib.units import mm
+
+    questions = []
+    for i in range(20):
+        row, col = divmod(i, 3)
+        y = 100 + row * 4.8 if row < 5 else sixth_row + (row - 5) * 4.8
+        region = dict(page=1, x=12 + col * 43, y=y, width=40, height=4.6)
+        questions.append(dict(type='single', choice_group='batch', regions=[region]))
+    notes = [dict(page=1, x=40, y=124, width=12, height=2)] if blocked else []
+    drawing = Mock()
+    sheet_style.draw_choice_frames(drawing, dict(questions=questions, print_notes=notes), 1, 297, 3, 420)
+    assert drawing.rect.call_count == expected_frames
+    if not blocked:
+        bottom = sixth_row + 4.8 + 4.6
+        assert drawing.rect.call_args.args == pytest.approx(tuple(v * mm for v in (12, 297-bottom, 126, bottom-100)))
+
+
 def test_uploaded_absence_is_checked_at_current_layout_position():
     import numpy as np
     from server.scanner_pipeline import verified_absence

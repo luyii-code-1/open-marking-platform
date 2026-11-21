@@ -220,7 +220,7 @@ def pdf(template):
                     c.setFont('Helvetica',5); c.drawCentredString(x*mm,(h-y-.6)*mm,str(digit))
             if standard_notices:sheet_notices.draw(c,template)
         for question in template.get('questions',[]):
-            for region in question['regions']:
+            for region_index,region in enumerate(question['regions']):
                 if int(region['page'])!=page: continue
                 x,y,rw,rh=(region[k] for k in ('x','y','width','height'))
                 c.setFont(FONT,9)
@@ -230,7 +230,10 @@ def pdf(template):
                 bracket=question['type']!='subjective' and question.get('choice_style') in ('bracket','compact')
                 if not bracket:c.rect(x*mm,(h-y-rh)*mm,rw*mm,rh*mm)
                 if bracket:c.setFont('Helvetica',2.8*mm)
-                c.drawString((x+1)*mm,(h-y-(3.2 if tight else 3.8 if bracket else 5))*mm,str(question['number']))
+                number=str(question['number'])
+                if question['type']=='subjective' and region_index>0:
+                    number='续'+number
+                c.drawString((x+1)*mm,(h-y-(3.2 if tight else 3.8 if bracket else 5))*mm,number)
                 if question['type']!='subjective':
                     for label,bx,by in bubbles(question,region):
                         if bracket:

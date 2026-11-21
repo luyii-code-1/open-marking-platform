@@ -20,6 +20,12 @@ def header_geometry(template):
     return {'left': 15, 'right': right, 'top': 35, 'bottom': 94, 'notice_left': right + 1}
 
 
+def adjacent_choice_rows(bottom, top):
+    gap = top - bottom
+    # Older row-major layouts left a 3.2 mm gap after every fifth row.
+    return 0 <= gap < .3 or abs(gap - 3.2) < .01
+
+
 def draw_choice_frames(canvas,template,page,height,columns,width):
     from reportlab.lib.units import mm
     panel_width=(width-24-(columns-1)*8)/columns
@@ -37,6 +43,11 @@ def draw_choice_frames(canvas,template,page,height,columns,width):
     canvas.setLineWidth(.18*mm)
     obstacles=[r for q in template.get('questions',[]) for r in q.get('regions',[]) if r['page']==page]
     obstacles.extend(r for r in template.get('print_notes',[])+template.get('forbidden_regions',[]) if r['page']==page)
+
+    def occupied(left, top, right, bottom):
+        return any(r['x'] < right and r['x'] + r['width'] > left and
+                   r['y'] < bottom and r['y'] + r['height'] > top for r in obstacles)
+
     for rows in groups.values():
         blocks=[]
         for y,cells in sorted(rows.items()):
@@ -47,11 +58,12 @@ def draw_choice_frames(canvas,template,page,height,columns,width):
                     spans[-1][1]=right
                 else:spans.append([left,right,bottom])
             for left,right,bottom in spans:
-                previous=next((b for b in reversed(blocks) if b[0]==left and right<=b[1] and 0<=y-b[3]<.3),None)
-                if previous and right<previous[1] and any(
-                    r['x']+r['width']>right+.01 and r['x']<previous[1]-.01 and r['y']<bottom and r['y']+r['height']>y
-                    for r in obstacles
-                ):previous=None
+                previous=next((b for b in reversed(blocks) if b[0]==left and right<=b[1] and adjacent_choice_rows(b[3],y)),None)
+                if previous and (
+                    (previous[3] < y and occupied(left, previous[3], previous[1], y)) or
+                    (right < previous[1] and occupied(right + .01, y, previous[1] - .01, bottom))
+                ):
+                    previous=None
                 if previous:previous[3]=bottom
                 else:blocks.append([left,right,y,bottom])
         for left,right,top,bottom in blocks:

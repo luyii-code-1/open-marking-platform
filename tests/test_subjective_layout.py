@@ -82,6 +82,26 @@ def test_merged_prompts_keep_part_regions_and_real_pdf_line_coordinates(monkeypa
         assert len(ink)==part['lines']
 
 
+def test_pdf_labels_continuations_in_stitch_order_for_each_printed_question(monkeypatch):
+    value=definition()
+    first=question(21,lines=1)
+    first['regions']=[region(1,12,100),region(1,12,150),region(2,12,35)]
+    merged=question(22,points=20,parts=[{'number':number,'points':10,'lines':1} for number in (22,23)])
+    merged['regions']=[{**region(2,214,35),'part_number':22},
+                       {**region(1,214,35),'part_number':22},
+                       {**region(2,214,85),'part_number':23}]
+    value['questions']=[first,merged]
+    labels=[]
+    draw_string=paper.PaperCanvas.drawString
+    def record(canvas,x,y,text,*args,**kwargs):
+        if text in ('21','续21','22','续22','23','续23'):
+            labels.append((canvas.getPageNumber(),text))
+        return draw_string(canvas,x,y,text,*args,**kwargs)
+    monkeypatch.setattr(paper.PaperCanvas,'drawString',record)
+    paper.pdf(value)
+    assert labels==[(1,'21'),(1,'续21'),(1,'续22'),(2,'续21'),(2,'22'),(2,'23')]
+
+
 def test_layout_endpoint_preserves_published_version_and_returns_draft_geometry(tmp_path,monkeypatch):
     monkeypatch.setattr(db,'ROOT',tmp_path)
     with TestClient(app) as client:
