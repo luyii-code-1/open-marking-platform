@@ -53,7 +53,7 @@ public sealed class DesktopController : IDisposable
     private ApiClient? _api;
     private CancellationTokenSource? _captureCancel;
     private Task? _capture;
-    private string _server="",_project="",_message="";
+    private string _server="",_defaultServer="",_project="",_message="";
     private bool _online,_tickRunning,_revoked,_disposed,_connecting;
     public Action<string>? NavigateRequested {get;set;}
     public Action? Changed {get;set;}
@@ -67,6 +67,7 @@ public sealed class DesktopController : IDisposable
         if(File.Exists(path))
         {
             using var saved=JsonDocument.Parse(File.ReadAllText(path));_server=Text(saved.RootElement,"server_url");_project=Text(saved.RootElement,"project_id");
+            _defaultServer=Text(saved.RootElement,"default_server_url",_server);
             if(saved.RootElement.TryGetProperty("servers",out var servers))_servers.AddRange(servers.EnumerateArray().Select(v=>v.GetString()!).Where(v=>!string.IsNullOrEmpty(v)));
         }
         var settings=Path.Combine(_queue.Root,"scan-capture-settings.json");
@@ -92,7 +93,14 @@ public sealed class DesktopController : IDisposable
         try{using(var stream=new FileStream(temporary,FileMode.CreateNew,FileAccess.Write,FileShare.None)){var bytes=Encoding.UTF8.GetBytes(value);stream.Write(bytes);stream.Flush(true);}File.Move(temporary,path,true);}
         finally{if(File.Exists(temporary))File.Delete(temporary);}
     }
-    private void SaveSettings()=>Save(Path.Combine(_queue.Root,"desktop-settings.json"),JsonSerializer.Serialize(new{server_url=_server,project_id=_project,servers=_servers.Append(_server).Where(v=>v.Length>0).Distinct().ToArray()}));
+    private string[] SavedServers=>_servers.Append(_server).Append(_defaultServer).Where(v=>v.Length>0).Distinct().ToArray();
+    private bool HasOfflineProjects(string server)
+    {
+        var partition=Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(server))).ToLowerInvariant();
+        var folder=Path.Combine(_queue.Root,"workspaces",partition);
+        return Directory.Exists(folder)&&Directory.EnumerateFiles(folder,"package.json",SearchOption.AllDirectories).Any();
+    }
+    private void SaveSettings()=>Save(Path.Combine(_queue.Root,"desktop-settings.json"),JsonSerializer.Serialize(new{server_url=_server,default_server_url=_defaultServer,project_id=_project,servers=SavedServers}));
     private void LoadPackages()
     {
         _packages.Clear();var directory=Path.Combine(_queue.Root,"workspaces",Partition);
@@ -136,7 +144,7 @@ public sealed class DesktopController : IDisposable
         }
         var projects=_packages.Values.Select(p=>new{id=Text(p.GetProperty("project"),"id"),name=Text(p.GetProperty("project"),"name"),exam_status=Text(p.GetProperty("project"),"exam_status","in_progress"),downloaded_at=Text(p,"downloaded_at")}).ToArray();
         var catalogPath=Path.Combine(_queue.Root,"workspaces",Partition,"catalog.json");
-        return new{device_preferences=new{driver=_driver,plugins=_prefs.Plugins.Select(p=>new{id=p.Id,name=Path.GetFileName(p.Path),available=File.Exists(p.Path)}),plugin_id=_prefs.PluginId,device=_prefs.Device,devices=_devices},review_edit=true,room_review=true,manual_room_upload=true,device_protocol=DevicePlugin.Protocol,scan_settings=new{dpi=ScanSettings.Dpi,color=ScanSettings.Color},protocol=Protocol,server_url=_server,storage_path=_queue.Root,servers=_servers.Append(_server).Where(v=>v.Length>0).Distinct().ToArray(),session_open=_sessionOpen,online=_online,capturing=Capturing,processing=Processing,processing_remaining=Volatile.Read(ref _processingCount),syncing=_uploadGate.CurrentCount==0,message=_message,project_id=_project,
+        return new{device_preferences=new{driver=_driver,plugins=_prefs.Plugins.Select(p=>new{id=p.Id,name=Path.GetFileName(p.Path),available=File.Exists(p.Path)}),plugin_id=_prefs.PluginId,device=_prefs.Device,devices=_devices},review_edit=true,room_review=true,manual_room_upload=true,device_protocol=DevicePlugin.Protocol,scan_settings=new{dpi=ScanSettings.Dpi,color=ScanSettings.Color},protocol=Protocol,server_url=_server,default_server_url=_defaultServer,storage_path=_queue.Root,servers=SavedServers,cached_servers=SavedServers.Where(HasOfflineProjects).ToArray(),session_open=_sessionOpen,online=_online,capturing=Capturing,processing=Processing,processing_remaining=Volatile.Read(ref _processingCount),syncing=_uploadGate.CurrentCount==0,message=_message,project_id=_project,
             projects,catalog=File.Exists(catalogPath)?Json(File.ReadAllText(catalogPath)):Json("{\"projects\":[]}"),
             package=_packages.TryGetValue(_project,out var package)?package:Json("null"),
             batches=batches.Select(b=>{
@@ -176,7 +184,20 @@ public sealed class DesktopController : IDisposable
                 Notify(filesRemoved?"本地旧扫描记录及图片已清理，可以开始新扫描。":"本地扫描记录已清理，部分占用文件将在下次清理时重试。");
                 return new{cleared=true,files_removed=filesRemoved};
 
+            case "setDefaultServer":
+                using(var savedServer=new ApiClient(Text(args,"server_url")))
+                {
+                    _defaultServer=savedServer.ServerUrl;
+                    SaveSettings();
+                }
+                return State(args);
             case "enterOffline":
+                if(Text(args,"server_url").Length>0&&Text(args,"server_url")!=_server)
+                {
+                    if(Capturing||Processing||_tickRunning||_uploadGate.CurrentCount==0)throw new InvalidOperationException("请等待当前扫描和上传结束后再切换服务器。");
+                    using var offlineServer=new ApiClient(Text(args,"server_url"));
+                    _server=offlineServer.ServerUrl;_online=false;_api?.Dispose();_api=null;LoadPackages();SaveSettings();
+                }
                 if(_packages.IsEmpty)throw new InvalidOperationException("请先连接服务器并下载项目。");
                 _sessionOpen=true;ResumeRecognition();return State(args);
             case "connect":
@@ -198,6 +219,8 @@ public sealed class DesktopController : IDisposable
                     else await _api.ConnectDevice(timeout.Token);
                     var catalog=await _api.Get("scanner/catalog",timeout.Token);Save(Path.Combine(_queue.Root,"workspaces",Partition,"catalog.json"),catalog.GetRawText());
                 }
+                if(_defaultServer.Length==0||args.TryGetProperty("set_default",out var defaultServer)&&defaultServer.ValueKind==JsonValueKind.True)_defaultServer=_server;
+                SaveSettings();
                 _online=true;_sessionOpen=true;ResumeRecognition();Notify("设备已连接。选择考试项目并下载配置。");return new{page_url=PageUrl()};
                 }
                 finally{_connecting=false;}

@@ -16,6 +16,7 @@ test('Only the configured scanner page receives native access', () => {
 test('Renderer requests cannot invoke host lifecycle methods', () => {
   const request = {id:'1',protocol,method:'state',args:{}}
   assert.equal(validateRequest(request),request)
+  assert.equal(validateRequest({...request,method:'setDefaultServer',args:{server_url:'https://school.example'}}).method,'setDefaultServer')
   for(const method of ['close','parseActivation','exec','readFile']) assert.throws(()=>validateRequest({...request,method}))
   assert.throws(()=>validateRequest({...request,protocol:'old'}))
   assert.throws(()=>validateRequest({...request,args:[]}))
