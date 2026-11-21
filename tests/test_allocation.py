@@ -29,6 +29,62 @@ def seed(count, mode='single'):
     return {'template_id':template['id'],'question_id':question['id']}
 
 
+def test_personal_review_projects_and_scoped_progress(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, 'ROOT', tmp_path)
+    with TestClient(app) as client:
+        admin, teachers = setup(client, 4)
+        reviewer, second, arbiter, unassigned = teachers
+
+        def add_project(ordinary, arbitration, papers=0):
+            scope = seed(papers, 'double')
+            with db.connect() as conn:
+                project = db.put(conn, 'projects', {'name': '期中考试'})
+                subject = db.put(conn, 'subjects', {'name': '数学', 'project_id': project['id']})
+                group = db.get(conn, db.get(conn, scope['template_id'])['group_id'])
+                db.put(conn, 'groups', {**group, 'subject_id': subject['id']})
+            client.post('/api/v1/assignments', headers=admin, json={
+                **scope, 'user_ids': [t[0] for t in ordinary], 'arbitrator_ids': [arbitration[0]],
+                'arbitration_mode': 'designated_random',
+            }).raise_for_status()
+            return project['id'], group['id'], scope
+
+        first, group_id, first_scope = add_project([reviewer, second], arbiter, papers=2)
+        other, _, other_scope = add_project([second, arbiter], reviewer)
+        def catalog(headers):
+            response = client.get('/api/v1/review-projects', headers=headers)
+            response.raise_for_status()
+            return {p['id']: p for p in response.json()}
+
+        mine = catalog(reviewer[1])
+        assert set(mine) == {first, other}
+        assert mine[first]['question_count'] == mine[other]['question_count'] == 1
+        assert mine[first]['template_ids'] == [first_scope['template_id']]
+        assert not catalog(admin)
+        assert not catalog(unassigned[1])
+        for project, scope, can_arbitrate in [(first, first_scope, False), (other, other_scope, True)]:
+            response = client.get('/api/v1/review-task-progress', headers=reviewer[1], params={'project_id':project})
+            response.raise_for_status()
+            row, = response.json()
+            assert (row['project_id'], row['template_id'], row['question_id']) == (project, scope['template_id'], scope['question_id'])
+            assert row['subject_name'] == '数学' and row['question_label'] == '1'
+            assert row['can_arbitrate'] == can_arbitrate
+        assert client.get('/api/v1/review-task-progress', headers=unassigned[1], params={'project_id':first}).json() == []
+
+        with db.connect() as conn:
+            db.put(conn, 'groups', {**db.get(conn, group_id), 'frozen': True})
+            hidden_subject = db.put(conn, 'subjects', {'name':'语文', 'project_id':first})
+        # The teacher's own card is published, but a subject outside their pool is still open.
+        assert catalog(reviewer[1])[first]['exam_status'] == 'in_progress'
+        with db.connect() as conn:
+            db.put(conn, 'groups', {'subject_id':hidden_subject['id'], 'frozen':True})
+        assert catalog(reviewer[1])[first]['exam_status'] == 'completed'
+        for mode, expected in [('in_progress','in_progress'), ('auto','completed')]:
+            client.put(f'/api/v1/projects/{first}/exam-status', headers=admin, json={'mode':mode}).raise_for_status()
+            assert catalog(reviewer[1])[first]['exam_status'] == expected
+        client.put(f'/api/v1/projects/{other}/exam-status', headers=admin, json={'mode':'completed'}).raise_for_status()
+        assert catalog(reviewer[1])[other]['exam_status'] == 'completed'
+
+
 def test_hot_progress_reads_and_equal_size_roster_change(tmp_path, monkeypatch):
     from server.request_log import Journal
     # Suppress the independent log writer and background recovery in this SQL trace.

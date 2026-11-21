@@ -1,49 +1,98 @@
 import {useEffect} from 'react'
-import {questionLabel} from './mergeQuestions'
-import { Alert, Card, Progress, Space, Tag, Typography } from 'antd'
-import { Table } from './DataTable'
-import { Button } from './Button'
-import { ErrorNotice } from './Management'
-import { useResource, watchChanges, type Row, type Template, type Question } from './api'
-import { useReviewWorkspace } from './ReviewWorkspace'
+import {Alert, Card, Progress, Segmented, Space, Tag, Typography} from 'antd'
+import {ArrowLeftOutlined} from '@ant-design/icons'
+import {Table} from './DataTable'
+import {Button} from './Button'
+import {ErrorNotice} from './Management'
+import {useResource, watchChanges} from './api'
+import {rowNavigation} from './rowNavigation'
+import {useReviewWorkspace} from './ReviewWorkspace'
+import {localProjectId, projectQuestions, questionKey, withCachedProjects,
+  type AssignedQuestion, type ProjectFilter, type ReviewProject} from './reviewProjects'
 
-type ReviewTask = { key: string; template: Template; question: Question; exam: string; subject: string }
-
-function TaskProgress({ progress }: { progress?: Row }) {
-  if (!progress) return <Typography.Text type="secondary">加载进度…</Typography.Text>
-  const total=(progress.ordinary_total||0)+(progress.arbitration_total||0),done=(progress.ordinary_completed||0)+(progress.arbitration_completed||0)
-  return <div className="review-task-progress"><span>阅卷 {progress.ordinary_completed||0} / {progress.ordinary_total||0} · 仲裁 {progress.arbitration_completed||0} / {progress.arbitration_total||0}</span><Progress percent={total?Math.round(done/total*100):0} size="small" showInfo={false}/>{progress.arbitration_pending>0?<Tag color="orange">待仲裁 {progress.arbitration_pending} 份</Tag>:progress.ordinary_pending>0?<Tag>待阅卷 {progress.ordinary_pending} 份</Tag>:<Typography.Text type="secondary">已完成{progress.can_arbitrate?' · 持续检查新仲裁':''}</Typography.Text>}</div>
+const catalogChanges = ['projects','subjects','groups','templates','assignments','results']
+const progressChanges = [...catalogChanges,'tasks','review-results','submissions']
+function useReviewList<T>(path:string|null, changes:string[], interval:number) {
+  const resource = useResource<T[]>(path,[],{live:false})
+  const {reload} = resource
+  useEffect(()=>{
+    if (!path) return
+    const refresh = ()=>{ if (!document.hidden && navigator.onLine) void reload() }
+    const timer = window.setInterval(refresh,interval)
+    const unwatch = watchChanges(roots=>{ if (!roots || roots.some(root=>changes.includes(root))) refresh() })
+    window.addEventListener('focus',refresh)
+    return ()=>{ clearInterval(timer); unwatch(); window.removeEventListener('focus',refresh) }
+  },[path,reload,changes,interval])
+  return resource
 }
 
-export function ReviewTasks({ onOpen }: { onOpen: (templateId: string, questionId: string) => void }) {
-  const workspace = useReviewWorkspace()
-  const progress=useResource<Row[]>('/review-task-progress',[])
-  useEffect(()=>{const refresh=()=>{if(!document.hidden&&navigator.onLine)void progress.reload()},timer=setInterval(refresh,15000),unwatch=watchChanges(roots=>{if(!roots||roots.some(root=>['tasks','assignments','review-results'].includes(root)))refresh()});window.addEventListener('focus',refresh);return()=>{clearInterval(timer);unwatch();window.removeEventListener('focus',refresh)}},[progress.reload])
-  const templates = useResource<Template[]>('/templates', []), assignments = useResource<Row[]>('/assignments', [])
-  const groups = useResource<Row[]>('/groups', []), subjects = useResource<Row[]>('/subjects', []), projects = useResource<Row[]>('/projects', [])
-  const rows: ReviewTask[] = []
-  for (const template of templates.data) {
-    const group = groups.data.find(g => g.id === template.group_id), subject = subjects.data.find(s => s.id === group?.subject_id)
-    for (const question of template.questions) {
-      if (question.type !== 'subjective' || !assignments.data.some(a => a.template_id === template.id && a.question_id === question.id && [...(a.user_ids || []), ...(a.arbitrator_ids || [])].includes(workspace.user.id))) continue
-      rows.push({ key: `${template.id}:${question.id}`, template, question, exam: projects.data.find(p => p.id === subject?.project_id)?.name || template.name, subject: subject?.name || '' })
-    }
-  }
-  for (const record of workspace.records) {
-    if (record.status === 'confirmed' || rows.some(r => r.template.id === record.template.id && r.question.id === record.question.id)) continue
-    rows.push({ key: `${record.template.id}:${record.question.id}`, template: { ...record.template, questions: [record.question] } as Template, question: record.question, exam: record.template.name, subject: '' })
-  }
-  const status=(row:ReviewTask)=>progress.data.find(p=>p.template_id===row.template.id&&p.question_id===row.question.id)
-  rows.sort((a,b)=>(status(b)?.arbitration_pending||0)-(status(a)?.arbitration_pending||0))
-  const pendingArbitrations=progress.data.reduce((sum,p)=>sum+(p.arbitration_pending||0),0)
-  return <Card title="我的阅卷任务" extra={<Button onClick={() => { void templates.reload(); void assignments.reload();void progress.reload() }}>刷新任务</Button>}>
-    <ErrorNotice error={templates.error || assignments.error || progress.error} />
-    {pendingArbitrations>0&&<Alert type="warning" showIcon message={`有 ${pendingArbitrations} 份答卷待仲裁，进入题目后优先处理仲裁。`} style={{marginBottom:16}}/>}
-    <Table<ReviewTask> rowKey="key" dataSource={rows} loading={templates.loading || assignments.loading} pagination={{ defaultPageSize:50, hideOnSinglePage: true }} scroll={{ x: 700 }} locale={{ emptyText: '暂无分配给你的阅卷任务，请联系管理员分配题目。' }} columns={[
-      { title: '考试 / 科目', render: (_, row) => <Space direction="vertical" size={2}><Typography.Text strong>{row.exam}</Typography.Text><Typography.Text type="secondary">{[row.subject, row.template.name].filter(Boolean).join(' · ')}</Typography.Text></Space> },
-      { title: '评阅题目', width: 170, render: (_, row) => <Space direction="vertical" size={4}><Typography.Text>第 {questionLabel(row.question)} 题 · {row.question.points} 分</Typography.Text><Tag>{row.question.review_mode === 'double' ? '双评' : '单评'}</Tag></Space> },
-      { title: '我的进度', width: 190, render: (_, row) => <TaskProgress progress={status(row)} /> },
-      { title: '操作', width: 150, render: (_, row) => <Button type="primary" onClick={() => onOpen(row.template.id, row.question.id)}>{(status(row)?.arbitration_pending||0)>0?'进入仲裁':workspace.records.some(r => r.template.id === row.template.id && r.question.id === row.question.id && r.status !== 'confirmed')?'继续阅卷':status(row)&&!status(row)?.ordinary_pending?status(row)?.can_arbitrate?'检查仲裁':'查看任务':'进入阅卷'}</Button> },
-    ]} />
+function Status({value}:{value:string}) {
+  if (value==='cached') return <Tag>本机缓存</Tag>
+  return value==='completed'?<Tag>已结束</Tag>:<Tag color="processing">进行中</Tag>
+}
+
+function TaskProgress({row}:{row:AssignedQuestion}) {
+  if (row.ordinary_total===undefined) return <Typography.Text type="secondary">已缓存</Typography.Text>
+  const total=row.ordinary_total+(row.arbitration_total||0)
+  const done=(row.ordinary_completed||0)+(row.arbitration_completed||0)
+  return <div className="review-task-progress">
+    <span>阅卷 {row.ordinary_completed||0} / {row.ordinary_total} · 仲裁 {row.arbitration_completed||0} / {row.arbitration_total||0}</span>
+    <Progress percent={total?Math.round(done/total*100):0} size="small" showInfo={false}/>
+    {!!row.arbitration_pending && <Tag color="orange">待仲裁 {row.arbitration_pending} 份</Tag>}
+  </div>
+}
+
+type Props = {
+  projectId?:string; filter:ProjectFilter; onFilter:(filter:ProjectFilter)=>void
+  onProject:(id?:string)=>void; onOpen:(templateId:string,questionId:string)=>void
+}
+export function ReviewTasks({projectId,filter,onFilter,onProject,onOpen}:Props) {
+  const workspace=useReviewWorkspace()
+  const catalog=useReviewList<ReviewProject>(workspace.offline?null:'/review-projects',catalogChanges,60000)
+  const {projects,cached}=withCachedProjects(catalog.data,workspace.records)
+  const project=projects.find(p=>p.id===projectId)
+  if (projectId) return <ProjectTasks key={projectId} projectId={projectId} project={project} cached={cached.get(projectId)}
+    catalogPending={!workspace.offline&&!catalog.loaded} catalogError={catalog.error} onBack={()=>onProject()} onOpen={onOpen}/>
+
+  const visible=projects.filter(p=>filter==='all'||p.exam_status===filter||(filter==='in_progress'&&p.exam_status==='cached'))
+  return <Card title="我的阅卷考试" extra={!workspace.offline&&<Button onClick={catalog.reload} loading={catalog.loading}>刷新</Button>}>
+    <ErrorNotice error={catalog.error}/>
+    <Segmented<ProjectFilter> aria-label="考试状态" value={filter} onChange={onFilter} style={{marginBottom:12}} options={[
+      {value:'in_progress',label:'进行中'},{value:'completed',label:'已结束'},{value:'all',label:'全部'},
+    ]}/>
+    <Table<ReviewProject> rowKey="id" dataSource={visible} loading={!catalog.loaded&&catalog.loading}
+      onRow={p=>rowNavigation(()=>onProject(p.id),p.name)} locale={{emptyText:projects.length?'此状态下暂无考试':'暂无分配给你的阅卷考试'}}
+      columns={[
+        {title:'考试项目',dataIndex:'name',render:(name,p)=><Button type="link" onClick={()=>onProject(p.id)}>{name}</Button>},
+        {title:'我的科目',render:(_,p)=>p.subjects.join('、')||'—'},
+        {title:'分配题数',dataIndex:'question_count',width:100},
+        {title:'考试状态',width:110,render:(_,p)=><Status value={p.exam_status}/>},
+      ]}/>
+  </Card>
+}
+
+function ProjectTasks({projectId,project,cached,catalogPending,catalogError,onBack,onOpen}:{
+  projectId:string; project?:ReviewProject; cached?:Map<string,AssignedQuestion>; catalogPending:boolean
+  catalogError:string; onBack:()=>void; onOpen:Props['onOpen']
+}) {
+  const workspace=useReviewWorkspace()
+  const path=workspace.offline||projectId===localProjectId?null:'/review-task-progress?project_id='+encodeURIComponent(projectId)
+  const progress=useReviewList<AssignedQuestion>(path,progressChanges,15000)
+  const rows=projectQuestions(progress.data,cached)
+  const pending=rows.reduce((sum,row)=>sum+(row.arbitration_pending||0),0)
+  return <Card title={<Space><Button type="text" aria-label="返回考试列表" icon={<ArrowLeftOutlined/>} onClick={onBack}/>
+    {project?.name||'考试阅卷任务'}{project&&<Status value={project.exam_status}/>}</Space>}
+    extra={path&&<Button onClick={progress.reload} loading={progress.loading}>刷新进度</Button>}>
+    <ErrorNotice error={progress.error||catalogError}/>
+    {pending>0&&<Alert type="warning" showIcon message={`本场有 ${pending} 份答卷待你仲裁`} style={{marginBottom:12}}/>}
+    <Table<AssignedQuestion> rowKey={questionKey} dataSource={rows} loading={catalogPending||(!progress.loaded&&progress.loading)}
+      locale={{emptyText:'本场暂无分配给你的阅卷任务'}} columns={[
+        {title:'科目 / 题卡',render:(_,r)=><Space direction="vertical" size={0}><strong>{r.subject_name||r.template_name}</strong>
+          <Typography.Text type="secondary">{[r.grade_name,r.card_name&&r.card_name!=='Default'?r.card_name:r.template_name].filter(Boolean).join(' · ')}</Typography.Text></Space>},
+        {title:'评阅题目',render:(_,r)=><Space wrap>第 {r.question_label} 题 · {r.points} 分<Tag>{r.review_mode==='double'?'双评':'单评'}</Tag></Space>},
+        {title:'我的进度',render:(_,r)=><TaskProgress row={r}/>},
+        {title:'操作',width:120,render:(_,r)=><Button type={r.published?'default':'primary'} onClick={()=>onOpen(r.template_id,r.question_id)}>
+          {r.published?'评分记录':r.arbitration_pending?'进入仲裁':r.cached?'继续阅卷':r.ordinary_pending?'进入阅卷':'查看任务'}</Button>},
+      ]}/>
   </Card>
 }

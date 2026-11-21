@@ -4,7 +4,7 @@ import ts from 'typescript'
 
 const source = await readFile(new URL('../src/examNavigation.ts', import.meta.url), 'utf8')
 const { outputText } = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } })
-const { examPath, readLocation, resolveExam, defaultGroup, scopedRecord, groupOptions } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`)
+const { examPath, markingPath, readLocation, resolveExam, defaultGroup, scopedRecord, groupOptions } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`)
 const projects = [{ id: 'p1', name: '期中' }, { id: 'p2', name: '期末' }]
 const subjects = [{ id: 's1', name: '数学', project_id: 'p1', group_mode: 'custom' }, { id: 's2', name: '数学', project_id: 'p2', group_mode: 'default' }]
 const groups = [{ id: 'g1', name: '一中', subject_id: 's1' }, { id: 'g2', name: 'Default', is_default: true, subject_id: 's2' }]
@@ -37,6 +37,9 @@ assert.deepEqual(readLocation('#/login/marking'), {page:'login',section:'marking
 assert.deepEqual(readLocation('#/login/unknown'), {page:'login',section:undefined})
 assert.deepEqual(readLocation('#/marking/review/template-a/question-b'), {page:'marking',templateId:'template-a',questionId:'question-b'})
 assert.deepEqual(readLocation('#/marking'), {page:'marking'})
+assert.deepEqual(readLocation(markingPath('期中 / A')), {page:'marking',projectId:'期中 / A'})
+assert.deepEqual(readLocation(markingPath('期中 / A','卷 #1','作文')), {page:'marking',projectId:'期中 / A',templateId:'卷 #1',questionId:'作文'})
+assert.deepEqual(readLocation(markingPath(undefined,'卷 #1','作文')), {page:'marking',templateId:'卷 #1',questionId:'作文'})
 assert.deepEqual(readLocation('#/marking/review/template-a'), {page:'marking'})
 assert.equal(options[0].children[0].children[0].value, 'unassigned')
 assert.equal(options[0].children[0].children[0].children[0].value, 'g1')

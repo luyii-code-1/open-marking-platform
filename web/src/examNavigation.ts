@@ -14,6 +14,12 @@ export function subjectGrades(subject:Row,groups:Row[],grades:Row[]=[]):Row[]{
   return ids.map(id=>({id,name:id===unassignedGrade?'待设置年级':grades.find(g=>g.id===id)?.name||children.find(g=>g.grade_id===id)?.grade_name||'年级',count:children.filter(g=>(g.grade_id||unassignedGrade)===id).length}))
 }
 export type Location = ExamLocation & { page: string; templateId?: string; questionId?: string }
+export function markingPath(projectId?: string, templateId?: string, questionId?: string) {
+  let path = '#/marking'
+  if (projectId) path += '/projects/' + encodeURIComponent(projectId)
+  if (templateId && questionId) path += '/review/' + encodeURIComponent(templateId) + '/' + encodeURIComponent(questionId)
+  return path
+}
 const pages = new Set(['dashboard', 'scanner', 'subject-catalog', 'electives', 'exams', 'marking', 'exceptions', 'results', 'people', 'conversions', 'settings', 'account', 'login', 'archives'])
 
 export function examPath(location: ExamLocation = {}) {
@@ -35,6 +41,11 @@ export function readLocation(hash: string): Location {
     if (!pages.has(page)) return { page: 'dashboard' }
     if (page === 'login') return { page, section: ['admin', 'marking'].includes(parts[1]) ? parts[1] : undefined }
     if (page === 'marking' && parts[1] === 'review' && parts[2] && parts[3]) return { page, templateId: parts[2], questionId: parts[3] }
+    if (page === 'marking' && parts[1] === 'projects' && parts[2]) {
+      const project = { page, projectId: parts[2] }
+      return parts[3] === 'review' && parts[4] && parts[5]
+        ? { ...project, templateId: parts[4], questionId: parts[5] } : project
+    }
     if (page !== 'exams') return { page }
     if (!parts[1]) return { page }
     const location: Location = { page, projectId: parts[1] }

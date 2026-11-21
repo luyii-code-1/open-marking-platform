@@ -14,6 +14,7 @@ from . import db as database
 from .dependencies import user,admin,require
 from .scoring import cents,final_score,objective_score
 from .allocation import participants,ensure,allocate_arbitration,progress as allocation_progress,pools
+from .exam_status import project_views
 
 from .review_writes import submit as submit_write
 
@@ -158,19 +159,80 @@ def allocation_summary(template_id:str,current=Depends(admin)):
     return read_progress(read)
 
 
+_PERSONAL_PROJECT_ASSIGNMENTS = """
+    FROM objects a
+    JOIN objects t ON t.id=json_extract(a.body,'$.template_id') AND t.kind='templates' AND t.deleted=0
+    JOIN objects g ON g.id=json_extract(t.body,'$.group_id') AND g.kind='groups' AND g.deleted=0
+    JOIN objects s ON s.id=json_extract(g.body,'$.subject_id') AND s.kind='subjects' AND s.deleted=0
+    JOIN objects p ON p.id=json_extract(s.body,'$.project_id') AND p.kind='projects' AND p.deleted=0
+    WHERE a.kind='assignments' AND a.deleted=0
+      AND (jsonb_exists(a.body::jsonb->'user_ids', ?) OR jsonb_exists(a.body::jsonb->'arbitrator_ids', ?))
+"""
+
+
+@router.get('/review-projects')
+def review_projects(current=Depends(user)):
+    with connect() as db:
+        db.execute('BEGIN')
+        rows = db.execute("""
+            SELECT p.id, json_extract(p.body,'$.name'), json_extract(p.body,'$.exam_status_mode'),
+                   json_extract(s.body,'$.name'), t.id, count(*)
+        """ + _PERSONAL_PROJECT_ASSIGNMENTS + ' GROUP BY p.id,p.body,s.id,s.body,t.id ORDER BY max(p.rowid) DESC,s.id,t.id',
+            (current['id'], current['id']))
+        projects = {}
+        for project_id, name, mode, subject, template_id, count in rows:
+            project = projects.setdefault(project_id, {
+                'id': project_id, 'name': name, 'exam_status_mode': mode or 'auto',
+                'subjects': [], 'template_ids': [], 'question_count': 0,
+            })
+            if subject not in project['subjects']:
+                project['subjects'].append(subject)
+            project['template_ids'].append(template_id)
+            project['question_count'] += count
+        if not projects:
+            return []
+        subjects = [dict(row) for row in db.execute("""
+            SELECT id, json_extract(body,'$.project_id') AS project_id
+            FROM objects WHERE kind='subjects' AND deleted=0 AND json_extract(body,'$.project_id')=ANY(?::text[])
+        """, (list(projects),))]
+        cards = [dict(row) for row in db.execute("""
+            SELECT json_extract(body,'$.subject_id') AS subject_id, json_extract(body,'$.frozen') AS frozen
+            FROM objects WHERE kind='groups' AND deleted=0 AND json_extract(body,'$.subject_id')=ANY(?::text[])
+        """, ([s['id'] for s in subjects],))]
+        return project_views(db, projects.values(), subjects, cards)
+
+
 @router.get('/review-task-progress')
-def task_summary(current=Depends(user)):
+def task_summary(project_id: str | None = None, current=Depends(user)):
     from .allocation import read_progress
     def read(db, prepare):
         rows=[]
-        for assignment in objects(db,'assignments'):
-            if current['id'] not in participants(assignment):continue
-            template=get(db,assignment['template_id'],'templates')
+        if project_id is None:
+            scoped = ((a, {}) for a in objects(db, 'assignments') if current['id'] in participants(a))
+        else:
+            matches = db.execute("""
+                SELECT a.body, json_extract(s.body,'$.name'),
+                       (SELECT json_extract(gr.body,'$.name') FROM objects gr
+                        WHERE gr.id=json_extract(g.body,'$.grade_id') AND gr.kind='grades' AND gr.deleted=0),
+                       json_extract(g.body,'$.name'), json_extract(g.body,'$.frozen')
+            """ + _PERSONAL_PROJECT_ASSIGNMENTS + ' AND p.id=? ORDER BY s.rowid,g.rowid,a.rowid',
+                (current['id'], current['id'], project_id))
+            scoped = ((json.loads(body), {'project_id': project_id, 'subject_name': subject, 'grade_name': grade,
+                       'card_name': card, 'published': bool(frozen)}) for body, subject, grade, card, frozen in matches)
+        templates = {}
+        for assignment, context in scoped:
+            tid = assignment['template_id']
+            if tid not in templates:
+                templates[tid] = get(db, tid, 'templates')
+            template = templates[tid]
             question=next((q for q in (template or {}).get('questions',[]) if q['id']==assignment['question_id']),None)
             if not question:continue
             prepare(db,template,question,assignment)
             personal=allocation_progress(db,template['id'],question['id'],assignment,user_id=current['id'])[0]
-            rows.append({**personal,'template_id':template['id'],'question_id':question['id'],'can_arbitrate':current['id'] in pools(assignment)[1]})
+            if context:
+                context.update(template_name=template.get('name') or context['card_name'] or '题卡', question_label=question_label(question),
+                               points=question['points'], review_mode=question.get('review_mode', 'single'))
+            rows.append({**context,**personal,'template_id':template['id'],'question_id':question['id'],'can_arbitrate':current['id'] in pools(assignment)[1]})
         return rows
     return read_progress(read)
 

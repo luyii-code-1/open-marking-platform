@@ -15,7 +15,7 @@ import { useUnsavedChanges } from './useNavigation'
 import { ApiError, request, send, useResource, watchChanges, type Row, type Template } from './api'
 import { ErrorNotice } from './Management'
 
-export function Marking({ admin, groupId, initialTemplateId, initialQuestionId, onExit }: { admin: boolean; groupId?: string; initialTemplateId?: string; initialQuestionId?: string; onExit?: () => void }) {
+export function Marking({ admin, groupId, initialProjectId, initialTemplateId, initialQuestionId, onExit }: { admin: boolean; groupId?: string; initialProjectId?:string; initialTemplateId?: string; initialQuestionId?: string; onExit?: (projectId?:string) => void }) {
   const workspace=useReviewWorkspace()
   const action=useAction(),busy=action.busy
   const templateResource = useResource<Template[]>('/templates', []), templates = {...templateResource, data: [...new Map([...workspace.records.map(r=>({...r.template,questions:[r.question]} as Template)),...templateResource.data].map(t=>[t.id,t])).values()].filter(t => !groupId || t.group_id === groupId)}, groups=useResource<Row[]>('/groups',[]), subjects=useResource<Row[]>('/subjects',[]), projects=useResource<Row[]>('/projects',[]), assignments = useResource<Row[]>('/assignments', [])
@@ -29,10 +29,13 @@ export function Marking({ admin, groupId, initialTemplateId, initialQuestionId, 
   useEffect(() => { if(groupId && !templateId) { const published=templates.data.find(t=>t.id===groups.data.find(g=>g.id===groupId)?.template_id); if(published)setTemplateId(published.id) } },[groupId,templateId,templateResource.data,groups.data])
   const record=workspace.records.find(r=>r.task.id===task?.id)
   const template = templates.data.find(t => t.id === templateId), question = record?.question||template?.questions.find(q => q.id === questionId)
+  const group=groups.data.find(g=>g.id===template?.group_id),subject=subjects.data.find(s=>s.id===group?.subject_id),project=projects.data.find(p=>p.id===subject?.project_id)
+  const published=!!group?.frozen
+  function leave(){onExit?.(subject?.project_id||record?.template.project_id||initialProjectId)}
   const [saveState,setSaveState]=useState(''),saveVersion=useRef(0),restored=useRef(false),submitted=useRef<string|null>(null)
   const ahead=useRef<{from:string;work:Promise<ReviewRecord|null>}|null>(null)
   const locked=busy||workspace.updateLocked||!!workspace.storageError
-  const editable=record?.status==='draft'&&!locked
+  const editable=record?.status==='draft'&&!locked&&!published
   const pageRef=useRef<HTMLDivElement>(null),scoreRef=useRef<HTMLDivElement>(null)
   const [historyOpen,setHistoryOpen]=useState(false),[settingsOpen,setSettingsOpen]=useState(false),[progressOpen,setProgressOpen]=useState(false)
   const overlayOpen=historyOpen||settingsOpen||progressOpen
@@ -63,7 +66,8 @@ export function Marking({ admin, groupId, initialTemplateId, initialQuestionId, 
     const selected=template.questions.find(q=>q.id===row.question_id)
     if(!selected)throw new Error('题目配置不可用')
     const sheet=await loadReviewSheet(row.id)
-    return cacheReview(workspace.user.id,row,{id:template.id,name:template.name,group_id:template.group_id,revision:template.revision},selected,new Blob([]),sheet)
+    return cacheReview(workspace.user.id,row,{id:template.id,name:template.name,group_id:template.group_id,revision:template.revision,
+      project_id:subject?.project_id||initialProjectId,project_name:project?.name,subject_name:subject?.name,exam_status:project?.exam_status},selected,new Blob([]),sheet)
   }
   async function openTask(row:Row){showRecord(await cacheTask(row))}
   async function availableTask(from?:string):Promise<ReviewRecord|null>{
@@ -82,7 +86,7 @@ export function Marking({ admin, groupId, initialTemplateId, initialQuestionId, 
     return saved.status==='draft'?saved:null
   }
   useEffect(()=>{
-    if(!task||!record||record.status!=='draft'||!automatic||workspace.offline||workspace.updateLocked||
+    if(published||!task||!record||record.status!=='draft'||!automatic||workspace.offline||workspace.updateLocked||
       (task.status!=='claimed'&&!task.regrading))return
     const from=task.id
     // A cancelled or failed preload is retried through the ordinary claim action.
@@ -92,7 +96,7 @@ export function Marking({ admin, groupId, initialTemplateId, initialQuestionId, 
       void work.catch(()=>{if(ahead.current?.work===work)ahead.current=null})
     },0)
     return()=>clearTimeout(timer)
-  },[task?.id,record?.status,automatic,workspace.offline,workspace.updateLocked])
+  },[task?.id,record?.status,automatic,workspace.offline,workspace.updateLocked,published])
   async function advance(from?:string,afterSkip=false){
     const prepared=from&&ahead.current?.from===from?ahead.current.work:null
     ahead.current=null
@@ -106,7 +110,7 @@ export function Marking({ admin, groupId, initialTemplateId, initialQuestionId, 
     if(saved)showRecord(saved);else clearTask()
   }
   async function next() {
-    if(!templateId||!questionId||workspace.updateLocked)return
+    if(!templateId||!questionId||workspace.updateLocked||published)return
     await action.run('claim',async()=>{setError('')
       try{await advance(task?.id)}catch(e){setError((e as Error).message)}
     })
@@ -117,10 +121,10 @@ export function Marking({ admin, groupId, initialTemplateId, initialQuestionId, 
     const drafts=workspace.records.filter(r=>r.template.id===initialTemplateId&&r.question.id===initialQuestionId&&r.status==='draft')
     const cached=drafts.find(hasUnsentReview)||drafts.at(-1)
     if(cached&&(workspace.offline||!navigator.onLine||hasUnsentReview(cached))){entered.current=true;showRecord(cached);return}
-    if(!template||!question||workspace.offline||workspace.updateLocked||workspace.storageError)return
+    if(!template||!question||workspace.offline||workspace.updateLocked||workspace.storageError||!groups.loaded)return
     entered.current=true
-    void next()
-  },[initialTemplateId,initialQuestionId,template?.id,question?.id,workspace.ready,workspace.offline,workspace.updateLocked,workspace.storageError,workspace.records])
+    if(published)openHistory();else void next()
+  },[initialTemplateId,initialQuestionId,template?.id,question?.id,workspace.ready,workspace.offline,workspace.updateLocked,workspace.storageError,workspace.records,groups.loaded,published])
   function editScore(text:string) {
     if(!task||!editable)return
     const raw=text.trim(),score=raw&&Number.isFinite(Number(raw))?Number(raw):null
@@ -130,7 +134,7 @@ export function Marking({ admin, groupId, initialTemplateId, initialQuestionId, 
     void saveReviewDraft(workspace.user.id,task.id,score,text).then(()=>{if(version===saveVersion.current)setSaveState('本地草稿已保存')}).catch(e=>{if(version===saveVersion.current){setSaveState('本地保存失败');setError((e as Error).message)}})
   }
   async function submit() {
-    if(!task||locked||record?.status!=='draft'||submitted.current===task.id)return
+    if(!task||!editable||submitted.current===task.id)return
     if(!question)return
     const issue=scoreInputError(scoreText,question.points,question.step)
     if(issue||value===null){setScoreError(issue);refocusScore();return}
@@ -164,7 +168,6 @@ export function Marking({ admin, groupId, initialTemplateId, initialQuestionId, 
   }
   useEffect(()=>watchChanges(roots=>{if(templateId&&questionId&&historyOpen&&(!roots||roots.includes('tasks')))void loadHistory()}),[templateId,questionId,historyOpen])
   async function loadHistory() { const context=historyContext.current,version=++historyVersion.current;try { const rows=(await request<Row[]>(`/tasks/history?template_id=${templateId}&question_id=${questionId}`)).reverse();if(context===historyContext.current&&version===historyVersion.current){setHistory(rows);return rows} } catch (e) { if(context===historyContext.current&&version===historyVersion.current)setError((e as Error).message) } }
-  const group=groups.data.find(g=>g.id===template?.group_id),subject=subjects.data.find(s=>s.id===group?.subject_id),project=projects.data.find(p=>p.id===subject?.project_id)
   const origin=[project?.name,subject?.name,group?.grade_name,group?.name,template?.name].filter(Boolean).join(' / ')
   const myCompleted=progress.data.my_completed??0,myTotal=progress.data.my_total??0
   function openHistory(){setHistoryOpen(true);void loadHistory()}
@@ -188,7 +191,7 @@ export function Marking({ admin, groupId, initialTemplateId, initialQuestionId, 
         <Button type="primary" disabled={!question||workspace.updateLocked||!workspace.ready||busy||record?.status==='draft'} loading={action.pending==='claim'} onClick={next}>{task?'领取下一份':'进入阅卷'}</Button>
       </div>
       <Space size={4} wrap>
-        {onExit&&<Button onClick={onExit}>退出阅卷</Button>}<Button icon={<HistoryOutlined/>} disabled={!question||workspace.offline||locked} onClick={openHistory}>历史</Button>
+        {onExit&&<Button onClick={leave}>退出阅卷</Button>}<Button icon={<HistoryOutlined/>} disabled={!question||workspace.offline||locked} onClick={openHistory}>历史</Button>
         <Button icon={<BarChartOutlined/>} disabled={!question} onClick={()=>setProgressOpen(true)}>进度</Button>
         <Button icon={<SettingOutlined/>} onClick={()=>setSettingsOpen(true)}>设置</Button>
       </Space>
@@ -226,12 +229,12 @@ export function Marking({ admin, groupId, initialTemplateId, initialQuestionId, 
           <Button className="marking-submit" block type="primary" size="large" disabled={!editable} loading={action.pending==='score'} onClick={submit}>评分 / Enter</Button>
           <div className="marking-page-actions">
             <Button icon={<ArrowLeftOutlined/>} disabled={locked||workspace.offline||record?.status==='queued'||record?.status==='conflict'} loading={action.pending==='previous'} onClick={previous}>上一份</Button>
-            <Button icon={<ArrowRightOutlined/>} disabled={locked||(workspace.offline&&editable)} loading={action.pending==='skip'} onClick={()=>record?.status==='draft'?skip():next()}>下一份</Button>
+            <Button icon={<ArrowRightOutlined/>} disabled={published||locked||(workspace.offline&&editable)} loading={action.pending==='skip'} onClick={()=>record?.status==='draft'?skip():next()}>下一份</Button>
           </div>
 
         </div>
       </aside>
-    </main>:<div className="marking-empty"><Empty description={onExit?(busy||templateResource.loading?"正在加载作答":"当前没有可领取的作答"):"选择题目，进入阅卷"}>{onExit&&<Space><Button disabled={!question||locked||workspace.offline} onClick={next}>重新领取</Button><Button onClick={onExit}>返回任务列表</Button></Space>}</Empty></div>}
+    </main>:<div className="marking-empty"><Empty description={published?'题卡成绩已发布':onExit?(busy||templateResource.loading?"正在加载作答":"当前没有可领取的作答"):"选择题目，进入阅卷"}>{onExit&&<Space>{published?<Button onClick={openHistory}>评分记录</Button>:<Button disabled={!question||locked||workspace.offline} onClick={next}>重新领取</Button>}<Button onClick={leave}>返回任务列表</Button></Space>}</Empty></div>}
     {osd&&<div className="score-osd" role="status">{osd.text}</div>}
     <footer className="marking-progress-footer">
       <div className="marking-progress-summary"><strong>我的进度 <b>{myCompleted}</b> / {myTotal} 份</strong><span>{Number(progress.data.my_progress||0).toFixed(0)}%</span></div>
@@ -240,7 +243,7 @@ export function Marking({ admin, groupId, initialTemplateId, initialQuestionId, 
       <div ref={workspace.setQueueTarget} className="marking-queue-slot"/>
     </footer>
     <Drawer title="我的历史与回评" width={840} open={historyOpen} onClose={()=>setHistoryOpen(false)}>
-      <ErrorNotice error={error}/><Table rowKey="id" dataSource={history} pagination={{defaultPageSize:50}} scroll={{x:700}} locale={{emptyText:'暂无历史评分'}} columns={[{title:'作答',dataIndex:'id',ellipsis:true},{title:'我的给分',dataIndex:'score'},{title:'实际给分',dataIndex:'final_score',render:v=>v??'待汇总'},{title:'评分时间',dataIndex:'created_at',render:v=>new Date(v*1000).toLocaleString()},{title:'操作',render:(_,row)=><Space><Button disabled={workspace.offline||locked||record?.status==='queued'||record?.status==='conflict'} loading={action.pending===`history:${row.id}`} onClick={()=>reviewHistory(row)}>回评</Button><Button disabled={workspace.offline||locked} onClick={()=>regradeFrom(row)}>从此处重阅</Button></Space>}]}/>
+      <ErrorNotice error={error}/><Table rowKey="id" dataSource={history} pagination={{defaultPageSize:50}} scroll={{x:700}} locale={{emptyText:'暂无历史评分'}} columns={[{title:'作答',dataIndex:'id',ellipsis:true},{title:'我的给分',dataIndex:'score'},{title:'实际给分',dataIndex:'final_score',render:v=>v??'待汇总'},{title:'评分时间',dataIndex:'created_at',render:v=>new Date(v*1000).toLocaleString()},{title:'操作',render:(_,row)=><Space><Button disabled={published||workspace.offline||locked||record?.status==='queued'||record?.status==='conflict'} loading={action.pending===`history:${row.id}`} onClick={()=>reviewHistory(row)}>回评</Button><Button disabled={published||workspace.offline||locked} onClick={()=>regradeFrom(row)}>从此处重阅</Button></Space>}]}/>
     </Drawer>
     <Drawer title="评阅进度" width={400} open={progressOpen} onClose={()=>setProgressOpen(false)}>
       <ErrorNotice error={progress.error}/><p>我的任务 {myCompleted} / {myTotal} 份</p><p>正在评阅 {progress.data.my_in_progress||0} · 待重阅 {progress.data.my_regrade_pending||0} · 本题作答 {progress.data.total_submissions||0}</p>

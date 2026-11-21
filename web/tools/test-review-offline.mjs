@@ -17,6 +17,22 @@ const storeUrl=await sourceUrl('reviewStore.ts',{"'./reviewInteraction'":JSON.st
 const {syncReviewRecords}=await import(await sourceUrl('reviewSync.ts',{"'./reviewStore'":JSON.stringify(storeUrl)}))
 const owner='teacher-1',question={id:'q1',number:1,type:'subjective',points:10,step:.5},template={id:'t1',name:'题卡',group_id:'g1',revision:1}
 const task=id=>({id,question_id:'q1',status:'claimed',score_revision:0})
+const projectsModule=await sourceUrl('reviewProjects.ts',{"'./mergeQuestions'":JSON.stringify(await sourceUrl('mergeQuestions.ts'))})
+const {withCachedProjects,projectQuestions,localProjectId}=await import(projectsModule)
+const legacy={template,question,status:'draft'}
+const archived={template:{...template,id:'t2',project_id:'p2',project_name:'期中',exam_status:'completed'},question,status:'draft'}
+const catalog=[{id:'p1',name:'期中',exam_status:'in_progress',subjects:['历史'],template_ids:['t1'],question_count:1}]
+const grouped=withCachedProjects(catalog,[legacy,legacy,archived,{...legacy,template:{...template,id:'deleted'},status:'confirmed'}])
+assert.deepEqual(grouped.projects.map(p=>[p.id,p.exam_status,p.question_count]),[['p1','in_progress',1],['p2','completed',1]])
+const oldCache=withCachedProjects([], [legacy,legacy])
+assert.equal(oldCache.projects[0].id,localProjectId)
+assert.equal(oldCache.projects[0].question_count,1)
+const [onlineRow]=grouped.cached.get('p1').values()
+const questions=projectQuestions([{...onlineRow,arbitration_pending:1,ordinary_total:2}],grouped.cached.get('p1'))
+assert.equal(questions.length,1)
+assert.equal(questions[0].cached,true)
+assert.equal(questions[0].ordinary_total,2)
+assert.equal(projectQuestions([],grouped.cached.get('p2'))[0].template_id,'t2')
 const image=new Blob(['answer-image'],{type:'image/png'})
 let offline=false,login=false,mismatch=false,protocol=true,responseLost=false,conflict='',calls=0
 const receipts=new Map()

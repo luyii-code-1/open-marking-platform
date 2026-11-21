@@ -3,7 +3,7 @@ import {scoreInputError} from './reviewInteraction'
 import type { Question, Row, User } from './api'
 
 export type ReviewRecord = {
-  key:string; owner:string; task:Row; template:{id:string;name:string;group_id:string;revision:number}; question:Question
+  key:string; owner:string; task:Row; template:{id:string;name:string;group_id:string;revision:number;project_id?:string;project_name?:string;subject_name?:string;exam_status?:string}; question:Question
   image:Blob; sheet?:ReviewSheet; draft:number|null; draftText?:string; status:'draft'|'queued'|'failed'|'conflict'|'confirmed'; updatedAt:number
   failures?:number; retryAt?:number
   operation?:{id:string;score:number;revision:number;protocol:1}; error?:string

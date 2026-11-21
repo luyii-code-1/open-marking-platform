@@ -13,6 +13,8 @@ import { Exams } from './Exams'
 import { useNavigation, confirmLeaving } from './useNavigation'
 import { Marking } from './Marking'
 import { ReviewTasks } from './ReviewTasks'
+import {markingPath, readLocation} from './examNavigation'
+import type {ProjectFilter} from './reviewProjects'
 import { Account } from './Account'
 import { RealtimeStatus } from './RealtimeStatus'
 import { Login, type Portal } from './Login'
@@ -25,12 +27,14 @@ export function App() {
   const [user, setUser] = useState<User | null>(null), [checking, setChecking] = useState(true), [collapsed, setCollapsed] = useState(false), [portal,setPortal] = useState<Portal>(()=>sessionStorage.getItem('omp-portal')==='marking'?'marking':'admin')
   const [offlineAccess,setOfflineAccess]=useState(false),[authToken,setAuthToken]=useState(currentToken),[verifiedToken,setVerifiedToken]=useState('')
   const { location, navigate } = useNavigation()
+  const [reviewFilter,setReviewFilter] = useState<ProjectFilter>('in_progress')
   function endSession(){if(!clearSession(authToken)&&currentToken())return;sessionStorage.removeItem('omp-review-user');setUser(null);setOfflineAccess(false)}
   function acceptUser(person:User,expected=authToken){if(currentToken()!==expected)return;setUser(person);setVerifiedToken(expected);setOfflineAccess(false);void rememberReviewUser(person).catch(()=>{})}
   const setPage = (page: string) => navigate('#/' + page)
   useEffect(()=>watchSession(value=>setAuthToken(value?.token||'')),[])
   useEffect(()=>{
     let active=true
+    setReviewFilter('in_progress')
     if(!authToken){setUser(null);setOfflineAccess(false);setChecking(false);return}
     setChecking(true);setUser(null);setOfflineAccess(false)
     void (async()=>{
@@ -43,7 +47,7 @@ export function App() {
         else{
           const stored=currentSession(),id=stored?.user_id
           const cached=id&&stored?.deadline&&stored.deadline>Date.now()?await cachedReviewUser(id).catch(()=>undefined):undefined
-          if(active&&currentToken()===authToken&&cached&&cached.role!=='admin'){setUser(cached);setVerifiedToken(authToken);setOfflineAccess(true);navigate('#/marking',true)}
+          if(active&&currentToken()===authToken&&cached&&cached.role!=='admin'){setUser(cached);setVerifiedToken(authToken);setOfflineAccess(true);if(readLocation(window.location.hash).page!=='marking')navigate(markingPath(),true)}
         }
       }finally{if(active)setChecking(false)}
     })()
@@ -81,7 +85,7 @@ export function App() {
     { key: 'account', icon: <SettingOutlined />, label: '个人账号' },
   ]
   const title = items.flatMap(i => 'children' in i ? i.children || [] : [i]).find(i => i.key === page)?.label || '工作概览'
-  return <><SessionActivity token={authToken}/><RealtimeStatus key={authToken} user={user} onProfile={acceptUser} onExpired={endSession}/><ReviewWorkspace key={`${user.id}:${authToken}`} user={user} offline={offlineAccess} onVerified={acceptUser} onLoginRequired={endSession}>{page === 'marking' && location.templateId && location.questionId ? <main className="review-fullscreen"><Marking key={`${location.templateId}:${location.questionId}`} admin={false} initialTemplateId={location.templateId} initialQuestionId={location.questionId} onExit={() => navigate('#/marking')} /></main> : page==='exams'&&location.groupId&&location.section==='template' ? <main className="template-fullscreen"><Exams location={location} navigate={navigate}/></main> : <Layout className="app-shell">
+  return <><SessionActivity token={authToken}/><RealtimeStatus key={authToken} user={user} onProfile={acceptUser} onExpired={endSession}/><ReviewWorkspace key={`${user.id}:${authToken}`} user={user} offline={offlineAccess} onVerified={acceptUser} onLoginRequired={endSession}>{page === 'marking' && location.templateId && location.questionId ? <main className="review-fullscreen"><Marking key={`${location.templateId}:${location.questionId}`} admin={false} initialProjectId={location.projectId} initialTemplateId={location.templateId} initialQuestionId={location.questionId} onExit={id => navigate(markingPath(id||location.projectId))} /></main> : page==='exams'&&location.groupId&&location.section==='template' ? <main className="template-fullscreen"><Exams location={location} navigate={navigate}/></main> : <Layout className="app-shell">
     <Layout.Sider width={200} collapsedWidth={64} collapsed={collapsed} className="sidebar" breakpoint="lg" onBreakpoint={broken => setCollapsed(broken)}>
       <Brand compact={collapsed} />
       <Menu theme="light" mode="inline" items={items} selectedKeys={[page]} onClick={({ key }) => setPage(key)} />
@@ -93,7 +97,8 @@ export function App() {
         {page === 'subject-catalog'&&management&&<SubjectCatalog/>}
         {page === 'electives'&&management&&<ElectiveManagement/>}
         {page === 'exams' && <Exams location={location} navigate={navigate} />}
-        {page === 'marking' && <ReviewTasks onOpen={(templateId, questionId) => navigate(`#/marking/review/${encodeURIComponent(templateId)}/${encodeURIComponent(questionId)}`)} />}
+        {page === 'marking' && <ReviewTasks projectId={location.projectId} filter={reviewFilter} onFilter={setReviewFilter}
+          onProject={id=>navigate(markingPath(id))} onOpen={(tid,qid)=>navigate(markingPath(location.projectId,tid,qid))}/>}
         {page === 'exceptions' && <Exceptions />}
         {page === 'results' && <Results admin={management} />}
         {page === 'conversions' && management && user.role==='admin' && <Conversions/>}
