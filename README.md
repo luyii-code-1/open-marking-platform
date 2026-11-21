@@ -1,12 +1,142 @@
-# Open Marking Platform
+<!--markdownlint-disable MD001 MD033 MD041-->
 
-开源全流程阅卷系统。需求记录见 [概要设计完整整理](docs/概要设计完整整理.md)，接口契约见 [API](docs/API.md)。
+<div align="center">
 
-后台角色、扫描客户端下载与配对、考场标签说明见[管理教师与扫描台](docs/管理教师与扫描台.md)。
+# <img src="web/public/branding/omp-mark.svg" height="28" width="28"/> Open Marking Platform
 
-## 开发
+[![Stars](https://img.shields.io/github/stars/luyii-code-1/open-marking-platform?label=Stars)](https://github.com/luyii-code-1/open-marking-platform)
+[![Release](https://img.shields.io/github/v/release/luyii-code-1/open-marking-platform?include_prereleases&style=flat-square&color=%233fb950&label=版本)](https://github.com/luyii-code-1/open-marking-platform/releases)
+[![License](https://img.shields.io/badge/License-GPL--3.0--only-blue?style=flat-square)](LICENSE)<br/>
+![Python](https://img.shields.io/badge/Python-3.13-3776ab?style=flat-square&logo=python&logoColor=white)
+![React](https://img.shields.io/badge/React-19-61dafb?style=flat-square&logo=react&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169e1?style=flat-square&logo=postgresql&logoColor=white)
+![.NET](https://img.shields.io/badge/.NET-10-512bd4?style=flat-square)
 
-服务端使用 PostgreSQL 16。直接运行 Python 服务时，先创建 UTF-8 数据库，给应用角色授予该库内建表和创建函数的权限，然后把连接串放入环境变量 `OMP_DATABASE_URL`。例如本机开发库连接串的形式为 `postgresql://omp:<password>@127.0.0.1:5432/omp`。
+Open Marking Platform（OMP）是一套开源的全流程网上阅卷系统，<br/>
+从制作答题卡、扫描识读，到老师在线评卷、成绩统计与赋分，一套系统全部完成。
+
+#### [🚀 下载](https://github.com/luyii-code-1/open-marking-platform/releases) | [🐞 反馈问题](https://github.com/luyii-code-1/open-marking-platform/issues) | [🛠 开发与部署](#开发与部署)
+
+</div>
+
+## 功能
+
+> [!TIP]
+>
+> OMP 由三部分组成：浏览器中使用的 **管理后台 / 阅卷台**、安装在扫描电脑上的 **扫描客户端**，以及部署在学校服务器上的 **服务端**。
+
+### 考务管理
+
+- [x] 管理考试项目、科目、选科组合与考场
+- [x] 从 Excel 模板导入学生名册与任教安排，按班级与学科自动划定阅卷和成绩查看范围
+- [x] 系统管理员、管理教师、阅卷教师分级权限，支持 Passkey 通行密钥登录
+- [x] 完整的操作日志，谁在什么时候改了什么一目了然
+- [x] 考试层级删除前列出完整影响范围，避免误删数据
+
+### 答题卡制作
+
+- [x] 可视化答题卡编辑器，支持 A3 双面分栏、紧凑选择题与主观题区域排版
+- [x] 题卡库复用、打印预览与审查发布
+- [x] 内置开源排版字体，打印效果在不同电脑上保持一致
+- [x] 收到第一份扫描答卷后自动锁定正式题卡，防止误改
+
+### 扫描与识读
+
+- [x] Windows 扫描客户端，扫描后在本地完成识读、切题与双面配页
+- [x] 支持 TWAIN 扫描仪，可通过设备插件适配更多型号
+- [x] 自动校准双面顺序，检查图像质量、定位点与考号条码
+- [x] 断网时继续扫描，答卷在本地持久排队，联网后自动上传
+- [x] 扫描页面配对：在后台生成配对链接，扫描电脑一键接入
+
+### 在线阅卷
+
+- [x] 按题分配阅卷任务，老师领题、打分、提交一气呵成
+- [x] 支持双评，两位老师评分未能确定最终分时自动进入第三轮仲裁
+- [x] 实时同步阅卷进度，任务分配与完成情况随时可见
+- [x] 异常卷汇总与人工处理，问题答卷集中解决
+- [x] 支持安装为 PWA 应用，网络波动时评分不丢失
+- [x] 经过 1,000 名教师同时阅卷的峰值压测，交分 P95 不超过 2 秒
+
+### 成绩分析
+
+- [x] 客观题自动判分，修改答案后可重新判分并试算
+- [x] 班级、学科多维度成绩汇总与排名
+- [x] 赋分方案：自定义分段，或导入外部对照表
+- [x] 分数修改留痕，成绩报表导出与归档
+
+### HTTP 防护工作台
+
+- [x] 站点访问概览：页面浏览量（PV）、独立浏览器与活跃账号三种口径，配合请求趋势图
+- [x] 访问日志按 IP、账号、处理结果、命中规则和状态码筛选
+- [x] 跨页勾选日志，批量预览后按精确 IP 封禁（默认 24 小时）或放行
+- [x] SQL 注入、XSS 检测与敏感路径防护，可选观察或拦截模式
+- [x] 单 IP 频率限制与 IP 归属地策略
+- [x] 接口性能统计：平均耗时、P95 与 5xx 错误一览
+
+### 运维与数据安全
+
+- [x] 后台一键创建、下载数据库备份，可开启每日自动备份
+- [x] 扫描文件可存放在本地、S3 兼容对象存储、WebDAV 或 SFTP
+- [x] 提供 Docker Compose 一键部署，自带 HTTPS 反向代理
+- [x] 支持从旧版 SQLite 数据库迁移
+- [ ] ……
+
+## 开始使用
+
+**首先，请确保您的设备满足以下需求：**
+
+| 用途 | 推荐环境 |
+| --- | --- |
+| 服务端 | Linux 服务器，安装 Docker 与 Docker Compose |
+| 扫描电脑 | Windows 10 版本 2004（build 19041）或更高版本，x64 |
+| 管理与阅卷 | 最新版 Chrome、Edge、Firefox 或 Safari 浏览器 |
+
+> [!IMPORTANT]
+>
+> 扫描客户端通过 HTTPS 连接服务端，服务端证书需要被扫描电脑上的 Windows 信任。
+
+**1. 部署服务端**
+
+```sh
+git clone https://github.com/luyii-code-1/open-marking-platform.git
+cd open-marking-platform
+cp .env.example .env
+# 编辑 .env：设置 OMP_DOMAIN 和随机生成的 OMP_POSTGRES_PASSWORD
+docker compose up -d --build
+```
+
+**2. 创建管理员**
+
+在浏览器中打开 `https://你的域名/`，按提示创建第一个系统管理员账号。
+
+**3. 连接扫描电脑**
+
+在扫描电脑上安装扫描客户端（可在 [Releases](https://github.com/luyii-code-1/open-marking-platform/releases) 下载），然后在管理后台的扫描台生成配对链接，或在客户端中输入服务器地址与配对码。
+
+## 获取帮助
+
+如果您遇到了问题、发现了 Bug，或者想提出新的功能，欢迎 [提交 Issue](https://github.com/luyii-code-1/open-marking-platform/issues/new)。
+
+[![GitHub Issues](https://img.shields.io/github/issues-search/luyii-code-1/open-marking-platform?query=is%3Aopen&style=flat-square&logo=github&label=Issues&color=%233fb950)](https://github.com/luyii-code-1/open-marking-platform/issues)
+
+## 开发与部署
+
+### 项目结构
+
+| 目录 | 说明 |
+| --- | --- |
+| [`server/`](server) | 服务端：FastAPI、PostgreSQL 16、Celery + Redis |
+| [`web/`](web) | 管理后台与阅卷台：React、TypeScript、Ant Design、Vite |
+| [`scanner/`](scanner) | Windows 扫描客户端：.NET 10、WebView2 |
+| [`scanner-electron/`](scanner-electron) | Electron 版扫描客户端外壳 |
+| [`scanner_engine/`](scanner_engine) | 答题卡识读引擎：OpenCV、ZXing-C++ |
+| [`scanner-plugins/`](scanner-plugins) | 扫描仪设备插件 |
+| [`deploy/`](deploy) | Compose 生产配置、Caddy 反向代理与备份脚本 |
+| [`tools/`](tools) | 压测、冒烟测试与打包脚本 |
+
+### 本地运行
+
+服务端需要一个 UTF-8 编码的 PostgreSQL 16 数据库，连接串通过环境变量 `OMP_DATABASE_URL` 传入。
 
 ```powershell
 python -m venv .venv
@@ -14,103 +144,44 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m uvicorn server.main:app --host 127.0.0.1 --port 8000 --no-proxy-headers --no-access-log
 ```
 
-首次启动通过 `/api/v1/auth/bootstrap` 创建管理员。账号、会话、成绩、任务和审计记录保存在 PostgreSQL。扫描文件、归档和备份文件保存在 `OMP_DATA`，默认目录为 `data/`。
-
-考试组接收首笔扫描页或答卷后锁定正式题卡。系统管理员可在“系统设置 → 数据库备份”创建、下载和删除指定备份，或启用每日北京时间 03:00 的自动备份。自动备份初始关闭。整库恢复需同时保管对应的扫描文件快照、归档和存储密钥。
-
-## 验证
-
-将 `OMP_TEST_DATABASE_URL` 指向独立的 PostgreSQL 测试库，并赋予测试角色创建 schema 的权限。测试和压测按运行创建临时 schema。
-
-```powershell
-.\.venv\Scripts\python.exe -m pytest -q
-```
-
-在 Linux 上可用独立临时数据库验证阅卷峰值。下例建立 1,000 个教师会话、10,800 份单面答卷和 1,000 条实时连接，经过本机 HTTPS 反代同时领题、同时评分，再重发原评分。运行前将文件描述符软上限设为至少 16,384。
-
-```sh
-ulimit -n 16384
-python -m tools.benchmark_burst --users 1000 --papers 10800 --workers 2 --target 2 --realtime --caddy /usr/bin/caddy
-```
-
-输出包含各阶段的客户端 P95、连接状态和服务停止后的成绩核对结果。成功条件包括交分 P95 不超过 2 秒、每位教师各领一份答卷、幂等重放后分数与最终结果各有 1,000 笔。省略 `--caddy` 可单独测量 API。图片传输、扫描识别和公网链路应按现场数据另行计量。
-
-领题和交分在 API 内按批提交，每个请求独立校验并使用 PostgreSQL 保存点，成功回执在事务提交后返回。Redis 复用同一题卡和题目的共享进度计数，成绩、领取租约和评分幂等键由 PostgreSQL 持久化。生产部署应同时更新 API、Worker、调度器镜像以及 Compose 中 API 和反代的资源设置。
-
-Web 和 Windows 扫描客户端分别位于 `web/`、`scanner/`。设备兼容及完整业务验收状态记录在开发进度中。
-
-前端构建及PWA校验：
+前端：
 
 ```powershell
 Set-Location web
 npm ci
+npm run dev
+```
+
+### 测试
+
+```powershell
+# 服务端（OMP_TEST_DATABASE_URL 指向独立测试库）
+.\.venv\Scripts\python.exe -m pytest -q
+
+# 前端构建与校验
+Set-Location web
 npm run build
-npm run test:pwa
+npm run test:http-guard
 ```
 
-构建后由FastAPI提供前端文件。PWA安装、更新与后台长任务说明见 [PWA与后台任务](docs/PWA与后台任务.md)。正文功能与实际验收差距见 [需求验收清单](docs/需求验收清单.md)。
+更多说明：
 
-Windows客户端采用.NET 10 + WebView2，在线加载服务端扫描页面，离线使用随包页面和Python/OpenCV引擎；按考试、科目、组及批次办理，本地识读、切题与配页后持久排队上传。详见[扫描端工作区架构](docs/扫描端工作区架构.md)与[设备及双面扫描说明](docs/扫描端.md)。
+- [扫描设备插件开发](scanner/DEVICE-PLUGIN.md)
+- [Electron 扫描客户端构建](scanner-electron/README.md)
+- [HTTP 检测引擎（libinjection）构建](third_party/libinjection/README.md)
 
-Default组、题卡库、打印预览与审查发布见 [制卡工作流](docs/制卡工作流.md)。
+欢迎提交 [Pull Request](https://github.com/luyii-code-1/open-marking-platform/pulls) 参与改进。
 
-## 部署
+## 致谢
 
-Compose 在项目私有网络中运行 PostgreSQL，使用命名卷 `postgres-data` 保存数据库。在 `.env` 中设置随机的 URL 安全密码 `OMP_POSTGRES_PASSWORD`，可用 `python -c "import secrets; print(secrets.token_hex(32))"` 生成。生产环境可用 `OMP_POSTGRES_IMAGE` 指定已校验的数据库镜像。API、Worker 和调度器使用同一数据库和业务文件目录。
+本项目使用的第三方组件及其许可证见 [NOTICE](NOTICE.md)。IP 归属地数据来自 [Loyalsoldier/geoip](https://github.com/Loyalsoldier/geoip)。
 
-**从旧版 SQLite 迁移**。先停止旧 API、Worker 和调度器，保留原数据库、扫描文件与旧发布版本。使用 SQLite 在线备份接口生成一致快照，或在完全停写后复制完整数据库。准备一个空的 PostgreSQL 数据库，让 `OMP_DATABASE_URL` 指向目标。先运行演练，再正式导入。
+## 许可证
 
-```sh
-python -m server.database_transfer /path/to/omp.sqlite3 --check-only
-python -m server.database_transfer /path/to/omp.sqlite3
-```
+本项目基于 [GNU General Public License v3.0 only](LICENSE) 获得许可。
 
-核对迁移输出中的记录数，再启动新版服务。首次导入会保留审计顺序、会话及已退役的业务编号。切换后产生的新写入只保存在 PostgreSQL，回到旧快照前需要先处理这些差异。
+<div align="center">
 
-自动和手动备份生成 `.ompdb`。恢复演练时，设置 `OMP_RESTORE_DATABASE_URL` 指向另一空库，并使用新的文件目录。例如 `python -m server.recovery backup.ompdb --target /restore/omp --files-from /snapshots/omp-data`。旧版 `.sqlite3` 备份也可导入。
+如果这个项目对您有帮助，请点亮 Star ⭐
 
-Linux容器部署、持久队列与外部存储配置见 [部署与存储](docs/部署与存储.md)。
-
-常规代码和界面发布跳过数据库快照。涉及数据库结构或批量数据变更时，为该发布创建一份校验通过的 PostgreSQL 恢复点；同一次发布重试时复用它。变更也会改写扫描文件时，另行保管对应的文件快照。发布通过健康检查和业务核验后，清理已被取代的发布备份。
-
-生产 Compose 项目使用以下两个命令。`RELEASE_SHA` 取待发布版本的完整 Git 提交哈希。先在数据变更前运行 `prepare`，验收成功后再运行 `complete`。从发布宿主机操作时，脚本路径为 `/opt/openmarkingplatform/tools/database_backup.py`。
-
-```sh
-docker exec -i omp-production-api-1 python - prepare "$RELEASE_SHA" < deploy/database_backup.py
-# 发布并完成健康检查和业务核验后执行
-docker exec -i omp-production-api-1 python - complete "$RELEASE_SHA" < deploy/database_backup.py
-```
-
-系统管理员在“系统设置 → 数据库备份”中独立控制每日自动备份。发布清理只针对部署工具生成的备份，管理员手动创建的备份、每日自动备份和迁移基线均由后台单独管理。
-
-管理员日志检索和任教成绩范围见 [操作日志](docs/操作日志.md)。
-
-系统管理员从侧栏「HTTP 防护」进入独立工作台。访问日志可以按账号、来源 IP、处理结果和命中规则筛选。勾选日志后可预览来源地址、批量放行或封禁。精确 IP 策略默认保留 24 小时，可以调整时长或在策略页撤销。策略变更记录包含管理员账号、时间和影响范围。
-
-概览中的 PV 按主站网页打开及页面切换计数，独立浏览器使用同源随机标识去重，活跃账号按时段内有认证请求的人员账号去重。接口性能按方法和路由模板汇总请求数、5xx 次数、平均处理时间、P95 估计上界和最大耗时。页面与账号指标从启用新版采集时起累计。
-
-全局模式可设为关闭、观察或拦截。SQL 注入和 XSS 检测使用 libinjection，并可分别选用观察或拦截。Docker 镜像包含已编译的引擎，本地源码运行可按[原生库构建说明](third_party/libinjection/README.md)安装。观察模式记录命中并放行。启用拦截后，请求命中来源或内容拦截条件时返回 403，命中每个 API 进程的单 IP 频率上限时返回 429。日志默认保留 60 天，可调整为 1 至 365 天。
-
-防护日志和策略存于 `OMP_DATA/http-guard/traffic.sqlite3`，使用本机磁盘上的 SQLite WAL。API 通过有界队列批量写入，后台显示当前进程的丢弃计数。GeoIP 从管理页面下载并校验，按 IP 在本地查询国家或地区。[GeoIP 数据源](https://github.com/Loyalsoldier/geoip)
-
-独立运行 Uvicorn 时使用 `--no-proxy-headers` 保留 TCP 对端地址。Compose 默认信任 Caddy 服务 `proxy`。其他部署可在 API 环境变量 `OMP_HTTP_TRUSTED_PROXIES` 中列出专用反代的 IP、网段或服务名，以逗号分隔。直连部署将此变量留空。
-
-赋分分段、外部对照表导入及修订发布见 [赋分方案](docs/赋分方案.md)。
-
-源码部署包、Windows扫描端预览包的构建与安装更新见 [安装与交付](docs/安装与交付.md)。
-
-真实Redis/Celery调度恢复及跨平台验证见 [Linux原生联调](docs/Linux原生联调.md)。
-
-Python 3.13镜像构建与四容器业务验证见 [Docker镜像联调](docs/Docker镜像联调.md)。
-
-原Compose网络、Caddy证书验证与WSS链路见 [Compose与HTTPS联调](docs/Compose与HTTPS联调.md)。
-
-后续业务决定与现场验收所需信息汇总在 [待确认事项](docs/待确认事项.md)。
-
-内网部署的地址配置、账号读取方式、资源限制及100人实测结果见 [内网测试部署](docs/内网测试部署.md)，文档连接信息为匿名示例。
-
-题卡A3双面分栏、紧凑选择题、人工选卡、自动双面校准及逐题判分试算见[题卡分栏与判分](docs/题卡分栏与判分.md)。
-
-本项目采用 [GPL-3.0-only](LICENSE)，第三方组件声明见 [NOTICE](NOTICE.md)。Windows扫描端采用 .NET 10；制卡与登录流程见 [界面导航与操作层级](docs/界面导航与操作层级.md)。
-
-考试层级删除、数据保留与完整影响清单见 [删除与数据保留](docs/删除与数据保留.md)。
+</div>
