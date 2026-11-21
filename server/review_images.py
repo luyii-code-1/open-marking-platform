@@ -5,6 +5,7 @@ from .db import connect,get,find
 from .dependencies import require
 from .storage import expected_hash,for_reference,materialize
 from .scan_files import normalized_relative
+from .review_layout import display_sources, pixel_box
 
 
 def sources(identifier,current):
@@ -27,7 +28,7 @@ def answer_sources(db,submission,template,question,answer):
     rows=[]
     if asset:rows=[{'relative':'assets/'+asset+'.png','rect':None}]
     else:
-        regions=answer['sources'] if answer else [{'region':r} for r in override.get('regions',question['regions'])]
+        regions=display_sources(submission,template,question,answer)
         width,height=dimensions(template)
         for source in regions:
             region=source['region'];index=int(region['page'])-1
@@ -35,8 +36,8 @@ def answer_sources(db,submission,template,question,answer):
             page_id=source.get('page_id',submission['pages'][index]);page=require(db,page_id,'pages')
             expected=source.get('normalized_sha256')
             if expected and page.get('normalized_sha256')!=expected:raise HTTPException(409,'答卷图片已更新，请重新领取任务')
-            x,y,w,h=(region[k]*4 for k in ('x','y','width','height'))
-            rows.append({'relative':normalized_relative(page),'rect':[int(x),int(y),int(x+w)-int(x),int(y+h)-int(y)],'width':width*4,'height':height*4})
+            x,y,right,bottom=pixel_box(region)
+            rows.append({'relative':normalized_relative(page),'rect':[x,y,right-x,bottom-y],'width':width*4,'height':height*4,'masks':source.get('masks',[])})
     if not rows:raise HTTPException(409,'题目没有答题区')
     for row in rows:row['sha256']=expected_hash(db,row['relative'])
     return mode,rows
@@ -65,7 +66,9 @@ def manifest_for(mode,rows,base):
                         if url:item.update(direct_url=url,expires_in=120);break
                     except Exception:continue
             pages.append(item)
-        regions.append({'page':indexes[key],'rect':row['rect']})
+        region={'page':indexes[key],'rect':row['rect']}
+        if row.get('masks'):region['masks']=row['masks']
+        regions.append(region)
     return {'delivery':mode,'pages':pages,'regions':regions}
 
 

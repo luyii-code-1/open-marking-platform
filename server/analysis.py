@@ -407,8 +407,8 @@ def detail_image_context(group_id,submission_id,question_id,current):
 @router.get('/analysis/groups/{group_id}/answers/{submission_id}/{question_id}/image')
 def detail_image(group_id:str,submission_id:str,question_id:str,current=Depends(user)):
     from .review import render_answer_image
-    sub,_,q,answer=detail_image_context(group_id,submission_id,question_id,current)
-    return render_answer_image(sub,q,answer)
+    sub,template,q,answer=detail_image_context(group_id,submission_id,question_id,current)
+    return render_answer_image(sub,template,q,answer)
 
 
 @router.get('/analysis/groups/{group_id}/answers/{submission_id}/{question_id}/image-manifest')

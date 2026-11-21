@@ -60,3 +60,59 @@ def test_multiple_regions_reuse_page_and_asset_override(configured):
     manifest=client.get(url,headers=headers).json()
     assert manifest['regions']==[{'page':0,'rect':None}]
     assert client.get('/api/v1'+manifest['pages'][0]['proxy_url'],headers=headers).content==content
+
+
+def test_three_column_essay_and_manual_back_frame(configured):
+    from uuid import uuid4
+    from server.template_checks import issues
+
+    client,headers,project,front,task,template,*_=configured
+    question=template['questions'][0]
+    def area(page,x,y,w,h):
+        return dict(page=page,x=x,y=y,width=w,height=h)
+    columns=[area(2,12+i*134,42,120,190) for i in range(3)]
+    front_answer=area(1,12,120,120,24)
+    question.update(review_layout='paper',regions=[front_answer,*columns])
+    template.update(paper='A3',sides=2)
+    # The other item sits between the first and second columns.
+    template['questions'].append(dict(id=str(uuid4()),number=2,type='subjective',points=5,regions=[area(2,134,80,8,20)]))
+    with db.connect() as c:
+        db.put(c,'templates',template)
+        back=db.put(c,'pages',{**front,'id':str(uuid4()),'side':'back'})
+        sub=db.get(c,task['submission_id'])
+        db.put(c,'submissions',{**sub,'pages':[front['id'],back['id']]})
+    back_image=Image.new('RGB',(1680,1188),'white')
+    for column in columns:
+        left=column['x']*4
+        back_image.paste('black',(left+10,200,left+30,220))
+    back_image.paste('black',(536,320,568,400))
+    back_image.save(db.ROOT/'pages'/(back['id']+'.png'))
+    path=f"/api/v1/tasks/{task['id']}/image-manifest"
+    def manifest():
+        response=client.get(path,headers=headers)
+        assert response.status_code==200,response.text
+        return response.json()['regions']
+    auto=manifest()
+    assert auto==[{'page':0,'rect':[48,480,480,96]},
+                  {'page':1,'rect':[48,168,1552,760],'masks':[[536,320,32,80]]}]
+    response=client.get(path.replace('/image-manifest','/image'),headers=headers)
+    assert response.status_code==200
+    with Image.open(io.BytesIO(response.content)) as rendered:
+        assert rendered.size==(1552,96+12+760)
+        for column in columns:
+            assert max(rendered.getpixel((column['x']*4+20-48,108+210-168)))<16
+        assert min(rendered.getpixel((552-48,108+360-168)))>240
+    full=area(2,0,0,420,297)
+    question['review_frames']=[full]
+    with db.connect() as c:db.put(c,'templates',template)
+    assert manifest()==[auto[0],{'page':1,'rect':[0,0,1680,1188],'masks':[[536,320,32,80]]}]
+    # A corrected scan uses its individual region on that face.
+    corrected=area(2,10,45,100,64)
+    with db.connect() as c:
+        sub=db.get(c,task['submission_id']);sub['region_overrides']={question['id']:{'regions':[front_answer,corrected]}}
+        db.put(c,'submissions',sub)
+    assert manifest()==[auto[0],{'page':1,'rect':[40,180,400,256]}]
+    question['review_frames']=[area(2,15,0,420,297)]
+    assert any('显示框' in issue for issue in issues(template))
+    question['review_frames']=[full,full]
+    assert any('显示框' in issue for issue in issues(template))

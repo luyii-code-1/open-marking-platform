@@ -76,7 +76,8 @@ export function TemplateEditor({ groupId }: { groupId?: string }) {
     try{
       const result=await request<{value:Template}>('/templates/subjective-layout',{method:'POST',body:JSON.stringify(source),signal})
       if(signal?.aborted||sequence!==layoutSequence.current||saver.value.id!==source.id||subjectiveLayoutKey(saver.value)!==key)return saver.value
-      const next={...saver.value,questions:result.value.questions}
+      const arranged=new Map(result.value.questions.map(q=>[q.id,q.regions]))
+      const next={...saver.value,questions:saver.value.questions.map(q=>({...q,regions:arranged.get(q.id)??q.regions}))}
       lastLayout.current=subjectiveLayoutKey(next);setLayoutError('')
       if(JSON.stringify(next.questions)!==JSON.stringify(saver.value.questions))saver.edit(next)
       const target=editingRef.current
@@ -234,6 +235,6 @@ export function TemplateEditor({ groupId }: { groupId?: string }) {
         {!readOnly && !editing && pane!=='notes' && <Text type="secondary" className="preview-selection">{forbiddenMode?'禁答区保存到当前题卡，与打印稿一致。':answerMode?'点选图卡选项，或按1–5/A–E设答案；单选自动下一题，多选按Enter继续。':question?`当前选择第 ${question.number} 题 · 在预览上拖动可${draw?'添加答题区':'移动已有区域'}`:''}</Text>}
       </Card>
     </div>
-    <QuestionSettings onText={()=>{if(!question?.regions.length)return;const index=Math.max(0,question.regions.findIndex(r=>r.page===page));setPage(question.regions[index].page);editText({kind:'question',id:question.id,index})}} onSplit={()=>{if(!question?.parts)return;change({questions:value.questions.flatMap(q=>q.id===question.id?splitQuestions(q):[q])});setSettingsOpen(false);setMergeIds([])}} question={question} open={settingsOpen} readOnly={readOnly || saving} onClose={() => setSettingsOpen(false)} onChange={patchQuestion} onDraw={() => { setForbiddenMode(false); setDraw(true); setAnswerMode(false); setSettingsOpen(false) }} onDelete={() => { if (!question) return; change({ questions: value.questions.filter(q => q.id !== question.id) }); setQuestionId(''); setSettingsOpen(false) }} />
+    <QuestionSettings template={value} onText={()=>{if(!question?.regions.length)return;const index=Math.max(0,question.regions.findIndex(r=>r.page===page));setPage(question.regions[index].page);editText({kind:'question',id:question.id,index})}} onSplit={()=>{if(!question?.parts)return;change({questions:value.questions.flatMap(q=>q.id===question.id?splitQuestions(q):[q])});setSettingsOpen(false);setMergeIds([])}} question={question} open={settingsOpen} readOnly={readOnly || saving} onClose={() => setSettingsOpen(false)} onChange={patchQuestion} onDraw={() => { setForbiddenMode(false); setDraw(true); setAnswerMode(false); setSettingsOpen(false) }} onDelete={() => { if (!question) return; change({ questions: value.questions.filter(q => q.id !== question.id) }); setQuestionId(''); setSettingsOpen(false) }} />
   </div>
 }

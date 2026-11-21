@@ -22,4 +22,6 @@ assert.equal(grown.y+grown.height,270)
 assert.equal(subjectiveRegion(template,1,{x:100,y:180},{x:100,y:119},area,true).height,8)
 assert.equal(subjectiveLayoutKey(template),subjectiveLayoutKey({...template,id:'other',draft_version:9,draft_signature:'saved',status:'draft'}))
 assert.notEqual(subjectiveLayoutKey(template),subjectiveLayoutKey({...template,font_size:16}))
+assert.equal(subjectiveLayoutKey({...template,questions:[{regions:[area]}]}),
+  subjectiveLayoutKey({...template,questions:[{regions:[area],review_layout:'paper',review_frames:[area]}]}))
 console.log('Subjective layout: resize minimum, column/footer boundaries and autosave-independent request keys passed')

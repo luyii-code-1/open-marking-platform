@@ -2,12 +2,14 @@ import { useState } from 'react'
 import { Alert, App, Collapse, Drawer, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Typography, Upload } from 'antd'
 import { Button } from './Button'
 import { DeleteOutlined } from '@ant-design/icons'
-import { request, type Question, type Row } from './api'
+import { request, type Question, type Row, type Template } from './api'
+import { ReviewFrameEditor } from './ReviewFrameEditor'
 import { questionLabel } from './mergeQuestions'
 import { answerLetters, parseAnswer } from './objectiveLayout'
 
-export function QuestionSettings({ question: q, open, readOnly, onClose, onChange, onDelete, onDraw, onSplit, onText }: { question?: Question; open: boolean; readOnly: boolean; onClose: () => void; onChange: (patch: Partial<Question>) => void; onDelete: () => void; onDraw: () => void; onSplit:()=>void;onText:()=>void }) {
+export function QuestionSettings({ template, question: q, open, readOnly, onClose, onChange, onDelete, onDraw, onSplit, onText }: { template: Template; question?: Question; open: boolean; readOnly: boolean; onClose: () => void; onChange: (patch: Partial<Question>) => void; onDelete: () => void; onDraw: () => void; onSplit:()=>void;onText:()=>void }) {
   const [ruleOpen, setRuleOpen] = useState(false), [ruleText, setRuleText] = useState(''), [trial,setTrial]=useState(''), [trialResult,setTrialResult]=useState(''), [trialBusy,setTrialBusy]=useState(false), { message } = App.useApp()
+  const [frameOpen,setFrameOpen] = useState(false)
   if (!q) return null
   const rule = q.rule || { mode: 'exact' }, mode = String(rule.mode || 'exact')
   const patchRule = (patch: Record<string, unknown>) => onChange({ rule: { ...rule, ...patch } })
@@ -26,6 +28,11 @@ export function QuestionSettings({ question: q, open, readOnly, onClose, onChang
         <Button type="link" className="table-name-link" onClick={() => { setRuleText(JSON.stringify(rule, null, 2)); setRuleOpen(true) }}>高级给分规则</Button>
         <Collapse items={[{key:q.id,label:'判分试算',children:<Space direction="vertical" size={12} style={{width:'100%'}}><Typography.Text type="secondary">试算第{q.number}题，得分限制在0至满分。修改规则或答案后请重新试算。</Typography.Text><Input aria-label="试算作答" placeholder="填写作答选项，如 AC；留空表示未作答" value={trial} onChange={e=>{setTrial(e.target.value);setTrialResult('')}}/><Button loading={trialBusy} onClick={async()=>{setTrialBusy(true);try{const selected=parseAnswer(q,trial);const result=await request<{score:number;maximum:number}>('/templates/objective-preview',{method:'POST',body:JSON.stringify({question:q,selected})});setTrialResult(`第${q.number}题：${selected.join('')||'未作答'}；得分 ${result.score} / ${result.maximum} 分`)}catch(e){setTrialResult('');message.error((e as Error).message)}finally{setTrialBusy(false)}}}>按当前规则试算</Button>{trialResult&&<Alert type="info" message={trialResult}/>}</Space>}]} />
       </> : <>
+        <Form.Item label="阅卷画面"><Select value={q.review_layout ?? 'stack'} options={[{label:'上下拼接',value:'stack'},{label:'保留原卷排版',value:'paper'}]}
+          onChange={review_layout => onChange({review_layout})}/></Form.Item>
+        {q.review_layout==='paper' && <Form.Item extra={q.regions.length?'同一面的答题区按纸面位置一起显示。':'先在打印预览中框选本题答题区。'}>
+          <Button disabled={readOnly||!q.regions.length} onClick={()=>setFrameOpen(true)}>调整显示范围</Button>
+        </Form.Item>}
         <Form.Item label="评阅方式"><Select value={q.review_mode} options={[{ label: '单评', value: 'single' }, { label: '双评盲评', value: 'double' }]} onChange={review_mode => onChange({ review_mode,...review_mode==='double'?{threshold_inclusive:false,threshold:q.threshold>0?Math.min(q.threshold,q.points):Math.min(2,q.points)}:{} })} /></Form.Item>
         {q.review_mode === 'double' && <Form.Item label={q.threshold_inclusive===false?'最大分差（不含）':'允许分差（含边界）'} extra={q.threshold_inclusive===false?`分差小于 ${q.threshold} 分时取平均；达到或超过此值进入仲裁。`:'当前题卡沿用含边界规则；修改分差后采用不含边界的最大分差。'}><InputNumber aria-label="最大分差" min={0.01} max={q.points} precision={2} value={q.threshold} onChange={threshold => threshold!==null&&onChange({ threshold,threshold_inclusive:false })} /></Form.Item>}
         {!q.parts&&<><Form.Item label="答题区样式"><Select value={q.style || 'line'} options={[{ label: '横线', value: 'line' }, { label: '作文格', value: 'grid' }, { label: '富文本', value: 'rich' }, { label: '底图或空白', value: 'none' }]} onChange={style => onChange({ style })} /></Form.Item>
@@ -34,6 +41,8 @@ export function QuestionSettings({ question: q, open, readOnly, onClose, onChang
         </>}
       </>}
     </Form>
+    {open && frameOpen && q.type==='subjective' && q.review_layout==='paper' && !!q.regions.length && <ReviewFrameEditor key={q.id} template={template} question={q}
+      onClose={()=>setFrameOpen(false)} onSave={review_frames=>{onChange({review_frames});setFrameOpen(false)}}/>}
     <div className="question-region-section"><Typography.Title level={5}>答题区域</Typography.Title><Typography.Paragraph type="secondary">可在打印预览中框选、移动，或在移动模式拖动底边调整高度。</Typography.Paragraph><Button disabled={readOnly||!!q.parts} onClick={onDraw}>{q.regions.length ? '继续框选区域' : '在预览中框选'}</Button></div>
     {!!q.regions.length && <Collapse items={[{ key: 'regions', label: `坐标与顺序 · ${q.regions.length} 个区域`, children: q.regions.map((region, index) => <div className="region-editor" key={index}><Space><Typography.Text>{region.page === 1 ? '正面' : '背面'} · 区域 {index + 1}</Typography.Text><Button disabled={readOnly||!!q.parts} type="text" danger icon={<DeleteOutlined />} aria-label={`删除区域${index + 1}`} onClick={() => onChange({ regions: q.regions.filter((_, i) => i !== index) })} /></Space><div className="region-grid">{(['x', 'y', 'width', 'height'] as const).map(key => <label key={key}>{({ x: 'X', y: 'Y', width: '宽', height: '高' })[key]}<InputNumber disabled={readOnly||q.type==='subjective'&&(key==='x'||key==='width')} min={0} step={0.5} value={region[key]} onChange={value => onChange({ regions: q.regions.map((r, i) => i === index ? { ...r, [key]: value ?? 0,...(q.type==='subjective'?{min_height:key==='height'?value??0:r.min_height??r.height,anchor_page:r.page,anchor_x:r.x,anchor_y:key==='y'?value??0:r.y}:{}) } : r) })} /></label>)}</div></div>) }]} />}
     <Popconfirm title={`删除第 ${q.number} 题及其答题区域？`} onConfirm={onDelete}><Button className="question-delete" disabled={readOnly} danger icon={<DeleteOutlined />}>删除本题</Button></Popconfirm>

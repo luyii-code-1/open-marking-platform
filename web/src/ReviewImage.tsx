@@ -9,6 +9,9 @@ export function ReviewImage({sheet,image,style,className}:{sheet?:ReviewSheet;im
   let top=0
   return <svg className={`review-sheet ${className||''}`} style={style} viewBox={`0 0 ${width} ${height}`} role="img" aria-label="当前题目作答区域"><rect width={width} height={height} fill="white"/>{sheet.regions.map((region,index)=>{
     const page=sheet.pages[region.page],rect=rects[index],y=top;top+=rect[3]+12
-    return <svg key={index} x={0} y={y} width={rect[2]} height={rect[3]} viewBox={rect.join(' ')} overflow="hidden"><image href={urls[region.page]} width={page.width} height={page.height}/></svg>
+    return <svg key={index} x={0} y={y} width={rect[2]} height={rect[3]} viewBox={rect.join(' ')} overflow="hidden">
+      <image href={urls[region.page]} width={page.width} height={page.height}/>
+      {region.masks?.map(([x,top,w,h],i)=><rect key={i} x={x} y={top} width={w} height={h} fill="white"/>)}
+    </svg>
   })}</svg>
 }

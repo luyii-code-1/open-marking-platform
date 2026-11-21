@@ -1,5 +1,5 @@
 import {request,requestBlob} from './api'
-export type ReviewSheet={pages:{blob:Blob;width:number;height:number;key:string}[];regions:{page:number;rect:number[]|null}[]}
+export type ReviewSheet={pages:{blob:Blob;width:number;height:number;key:string}[];regions:{page:number;rect:number[]|null;masks?:number[][]}[]}
 type Source={key:string;sha256?:string;direct_url?:string;proxy_url:string;width?:number;height?:number}
 export type ImageManifest={pages:Source[];regions:ReviewSheet['regions']}
 export async function validatePage(blob:Blob,source:Source){

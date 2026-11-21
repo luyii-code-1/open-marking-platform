@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
+from math import ceil
 from PIL import Image
 from .db import connect, get, objects, put,find
 from . import db as database
@@ -401,12 +402,13 @@ def image(identifier:str,current=Depends(user)):
     with connect() as db:
         task=own_task(db,identifier,current)
         submission=require(db,task['submission_id'],'submissions')
-        _,question=question_for(db,task['template_id'],task['question_id'])
+        template,question=question_for(db,task['template_id'],task['question_id'])
         answer=get(db,task.get('answer_slice_id'),'answer-slices')
-    return render_answer_image(submission,question,answer)
+    return render_answer_image(submission,template,question,answer)
 
 
-def render_answer_image(submission,question,answer):
+def render_answer_image(submission,template,question,answer):
+    from .review_layout import display_sources,pixel_box
     override=submission.get('region_overrides',{}).get(question['id'],{})
     if answer:override={'asset_id':answer.get('asset_id')}
     if override.get('asset_id'):
@@ -414,7 +416,7 @@ def render_answer_image(submission,question,answer):
         from .storage import materialize
         return FileResponse(materialize('assets/'+override['asset_id']+'.png'),headers={'Cache-Control':'private, no-store'})
     pieces=[]
-    sources=answer['sources'] if answer else [{'region':r} for r in override.get('regions',question['regions'])]
+    sources=display_sources(submission,template,question,answer)
     for source in sources:
         region=source['region']
         page=int(region['page'])-1
@@ -442,7 +444,15 @@ def render_answer_image(submission,question,answer):
     if not pieces: raise HTTPException(409,'题目没有答题区')
     merged=Image.new('RGB',(max(p.width for p in pieces),sum(p.height for p in pieces)+12*(len(pieces)-1)),'white')
     top=0
-    for piece in pieces: merged.paste(piece,(0,top)); top+=piece.height+12
+    for piece,source in zip(pieces,sources):
+        if source.get('masks'):
+            left,upper,right,bottom=pixel_box(source['region'])
+            sx,sy=piece.width/(right-left),piece.height/(bottom-upper)
+            for x,y,w,h in source['masks']:
+                piece.paste('white',(int((x-left)*sx),int((y-upper)*sy),
+                                     ceil((x+w-left)*sx),ceil((y+h-upper)*sy)))
+        merged.paste(piece,(0,top))
+        top+=piece.height+12
     buffer=io.BytesIO(); merged.save(buffer,format='JPEG',quality=90)
     return Response(buffer.getvalue(),media_type='image/jpeg',headers={'Cache-Control':'private, no-store'})
 

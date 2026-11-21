@@ -3,6 +3,7 @@ from decimal import InvalidOperation
 import math
 from . import paper
 from .scoring import cents
+from .review_layout import frame_errors
 
 
 def issues(template,complete=False,*,require_answers=True):
@@ -39,6 +40,8 @@ def issues(template,complete=False,*,require_answers=True):
             if points<0 or (complete and points==0):raise ValueError()
         except (ValueError,TypeError,InvalidOperation,OverflowError):errors.append(label+'分值应为有限正数');points=None
         if q.get('type')=='subjective':
+            if template.get('paper') in ('A3','A4'):
+                errors.extend(label+error for error in frame_errors(template,q))
             if q.get('review_mode','single') not in ('single','double'):errors.append(label+'评阅方式无效')
             if q.get('review_mode')=='double':
                 try:
