@@ -293,11 +293,13 @@ function TrafficOverview({ hours, setHours, inspectIp }: TimeProps & { inspectIp
                 ]}
               />
             </Card>
-            <Card title="IP 归属国家 / 地区">
+            <Card title="IP 归属国家 / 地区" className="guard-country-ranking">
               <div className="guard-card-body-stack">
                 <Table<CountryCount>
                   rowKey="country"
                   dataSource={data.countries}
+                  tableLayout="fixed"
+                  scroll={{ x: undefined, y: undefined }}
                   pagination={false}
                   query=""
                   columnChooser={false}

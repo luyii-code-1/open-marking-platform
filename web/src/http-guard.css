@@ -13,6 +13,7 @@
 
 .guard-card-body-stack {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
 }
 
@@ -130,6 +131,10 @@
 
 .http-guard-rankings {
   grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+}
+
+.guard-country-ranking {
+  align-self: start;
 }
 
 .guard-rank-cell {
