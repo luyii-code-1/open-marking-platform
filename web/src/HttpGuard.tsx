@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react'
+import { lazy, Suspense, useMemo, useState } from 'react'
 import { Alert, App, Card, Segmented, Select, Space, Spin, Tag, Typography } from 'antd'
-import { ApartmentOutlined, ArrowLeftOutlined, AuditOutlined, FileSearchOutlined, ReadOutlined, SettingOutlined } from '@ant-design/icons'
+import { ApartmentOutlined, ArrowLeftOutlined, AuditOutlined, BarChartOutlined, FileSearchOutlined, ReadOutlined, SettingOutlined } from '@ant-design/icons'
 import { Button } from './Button'
 import { Table } from './DataTable'
 import { ErrorNotice } from './EntityTable'
@@ -25,6 +25,7 @@ import {
   type Status,
 } from './httpGuardData'
 import './http-guard.css'
+const HttpGuardTraffic = lazy(() => import('./HttpGuardTraffic'))
 
 type Bucket = { ts: number; requests: number; observed: number; blocked: number }
 type IpCount = { ip: string; country: string; requests: number; blocked: number }
@@ -37,6 +38,7 @@ type PerfFilter = 'all' | 'slow' | 'errors'
 
 const views = [
   { key: 'overview', name: '防护概览', icon: <ApartmentOutlined /> },
+  { key: 'traffic', name: '访问统计', icon: <BarChartOutlined /> },
   { key: 'events', name: '访问日志', icon: <FileSearchOutlined /> },
   { key: 'policies', name: '防护策略', icon: <SettingOutlined /> },
   { key: 'performance', name: '接口性能', icon: <ReadOutlined /> },
@@ -481,6 +483,7 @@ export default function HttpGuard({ view, onView, onExit, account }: { view: Gua
         <section className="http-guard-stack">
           <ErrorNotice error={policy.error || status.error} retry={() => { void policy.reload(); void status.reload() }} />
           {view === 'overview' && <TrafficOverview hours={hours} setHours={setHours} inspectIp={ip => { setInitialIp(ip); onView('events') }} />}
+          {view === 'traffic' && <Suspense fallback={<Spin aria-label="加载访问统计" />}><HttpGuardTraffic /></Suspense>}
           {view === 'events' && (
             <HttpGuardLog
               hours={hours}

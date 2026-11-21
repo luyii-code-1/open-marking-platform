@@ -3,6 +3,7 @@ from collections import defaultdict
 from bisect import bisect_left
 from contextlib import closing, contextmanager
 import json
+from math import ceil
 from pathlib import Path
 import sqlite3
 import threading
@@ -48,6 +49,12 @@ CREATE TABLE IF NOT EXISTS web_seen (id TEXT PRIMARY KEY, ts REAL NOT NULL) WITH
 CREATE INDEX IF NOT EXISTS web_seen_time ON web_seen(ts);
 CREATE TABLE IF NOT EXISTS web_visitor (id BLOB PRIMARY KEY, ts REAL NOT NULL) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS web_visitor_time ON web_visitor(ts);
+CREATE TABLE IF NOT EXISTS web_uv_collection (
+    id INTEGER PRIMARY KEY CHECK (id=1), started INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS web_visitor_minute (
+    ts INTEGER NOT NULL, visitor BLOB NOT NULL, PRIMARY KEY(ts,visitor)
+) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS web_account (id TEXT PRIMARY KEY, ts REAL NOT NULL) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS web_account_time ON web_account(ts);
 CREATE TABLE IF NOT EXISTS web_page (
@@ -88,9 +95,11 @@ class GuardStore:
                                 setup.execute(f"ALTER TABLE event ADD COLUMN {name} TEXT NOT NULL DEFAULT ''")
                         for name in ('actor', 'actor_label', 'reason'):
                             setup.execute(f"CREATE INDEX IF NOT EXISTS event_{name}_lookup ON event({name},id) WHERE {name}<>''")
+                        setup.execute("CREATE INDEX IF NOT EXISTS event_user_time ON event(ts,actor) WHERE actor_kind='user' AND actor<>''")
                         setup.execute('INSERT OR IGNORE INTO policy VALUES (1, 1, ?)',
                                       (json.dumps(DEFAULT_SETTINGS),))
                         setup.execute('INSERT OR IGNORE INTO web_collection VALUES (1, ?)', (time.time(),))
+                        setup.execute('INSERT OR IGNORE INTO web_uv_collection VALUES (1, ?)', (ceil(time.time() / 60) * 60,))
                     self._ready = True
         with closing(sqlite3.connect(self.path, timeout=4)) as db, db:
             db.row_factory = sqlite3.Row
@@ -170,6 +179,7 @@ class GuardStore:
                 ts = view['ts']
                 inserted = db.execute('INSERT OR IGNORE INTO web_seen VALUES (?,?)', (view['id'], ts))
                 if inserted.rowcount:
+                    db.execute('INSERT OR IGNORE INTO web_visitor_minute VALUES (?,?)', (int(ts) // 60 * 60, view['visitor']))
                     db.execute("""INSERT INTO web_visitor VALUES (?,?) ON CONFLICT(id)
                                DO UPDATE SET ts=max(ts,excluded.ts)""", (view['visitor'], ts))
                     db.execute("""INSERT INTO web_page VALUES (?,?,1) ON CONFLICT(ts,page)
@@ -180,6 +190,7 @@ class GuardStore:
         # Release the write lock between batches so a retention change can run alongside ingestion.
         tables = (('event', 'id', 1), ('minute', 'ts', 60), ('source_hour', '(ts,ip,country)', 3600),
                   ('web_seen', 'id', 1), ('web_visitor', 'id', 1), ('web_account', 'id', 1),
+                  ('web_visitor_minute', '(ts,visitor)', 60),
                   ('web_page', '(ts,page)', 60), ('web_route', '(ts,route,method,bin)', 60))
         for table, keys, width in tables:
             limit = cutoff - cutoff % width
@@ -235,9 +246,12 @@ class GuardStore:
                 'pages': [dict(page) for page in pages],
                 'routes': sorted(routes.values(), key=lambda item: (-item['requests'], item['route'], item['method']))}
 
-    def events(self, hours, ip, decision, before, limit, actor='', reason='', status_group=0):
+    def events(self, hours, ip, decision, before, limit, actor='', reason='', status_group=0, start=None, end=None):
         clauses = ['ts>=?']
         args = []
+        if end is not None:
+            clauses.append('ts<?')
+            args.append(end)
         for condition, value in (('ip=?', ip), ('decision=?', decision), ('id<?', before),
                                  ("reason<>'' AND reason=?", reason)):
             if value is not None and value != '':
@@ -251,7 +265,9 @@ class GuardStore:
             args.extend((status_group * 100, (status_group + 1) * 100))
         with self.connection() as db:
             retention = json.loads(db.execute('SELECT body FROM policy WHERE id=1').fetchone()[0])['retention_days'] * 24
-            start = time.time() - min(hours or retention, retention) * 3600
+            now = time.time()
+            start = (now - min(hours or retention, retention) * 3600 if start is None
+                     else max(start, now - retention * 3600))
             rows = db.execute('SELECT * FROM event WHERE ' + ' AND '.join(clauses)
                               + ' ORDER BY id DESC LIMIT ?', [start, *args, limit + 1]).fetchall()
         items = [dict(row) for row in rows[:limit]]

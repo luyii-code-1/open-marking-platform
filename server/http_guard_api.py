@@ -132,11 +132,16 @@ def events(guard: Service, hours: int = Depends(window), ip: str = Query('', max
            decision: Literal['', 'pass', 'observed', 'blocked'] = '',
            actor: str = Query('', max_length=160), reason: str = Query('', max_length=40),
            status_group: int | None = Query(None, ge=2, le=5),
-           before: int | None = Query(None, ge=1, le=2**63 - 1), limit: int = Query(50, ge=1, le=200)):
+           before: int | None = Query(None, ge=1, le=2**63 - 1), limit: int = Query(50, ge=1, le=200),
+           start: int | None = Query(None, ge=0, le=2**63 - 1), end: int | None = Query(None, ge=0, le=2**63 - 1)):
+    if start is not None or end is not None:
+        if start is None or end is None or start >= end or start % 60 or end % 60:
+            raise HTTPException(422, '请选择完整的起止时间，精确到分钟，结束时间须晚于开始时间')
     if ip:
         try:
             address = ip_address(ip.strip())
             ip = str(address.ipv4_mapped or address) if isinstance(address, IPv6Address) else str(address)
         except ValueError as error:
             raise HTTPException(422, '请输入完整的 IPv4 或 IPv6 地址') from error
-    return storage_call(guard.store.events, hours, ip, decision, before, limit, actor.strip(), reason, status_group)
+    return storage_call(guard.store.events, hours, ip, decision, before, limit, actor.strip(), reason, status_group,
+                        start, end)

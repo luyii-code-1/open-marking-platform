@@ -74,9 +74,13 @@ export function App() {
   const displayed = !user ? (loginPortal ? 'login/' + loginPortal : 'login')
     : guardPage ? (user.role === 'admin' && !offlineAccess ? 'http-guard/' + guardView(location.section) : null)
     : page === 'login' ? null : page
-  usePageViews(waiting ? null : displayed, window.location.hash)
+  usePageViews(waiting ? null : displayed, guardPage ? guardView(location.section) : window.location.hash)
   if (waiting) return <div className="screen-center"><Spin size="large" /></div>
-  if (!user) return <Login portal={loginPortal} onPortal={value=>navigate(value?'#/login/'+value:'#/')} onLogin={(person,selected)=>{const next:Portal=person.role==='admin'?'admin':selected;setPortal(next);sessionStorage.setItem('omp-portal',next);acceptUser(person,currentToken());navigate(guardPage?'#/http-guard/'+guardView(location.section):next==='admin'?'#/scanner':'#/marking',true)}} />
+  if (!user) return <Login portal={loginPortal} onPortal={value=>navigate(value?'#/login/'+value:'#/')} onLogin={(person,selected)=>{
+    const next:Portal=person.role==='admin'?'admin':selected
+    setPortal(next);sessionStorage.setItem('omp-portal',next);acceptUser(person,currentToken())
+    navigate(guardPage ? window.location.hash : next==='admin'?'#/scanner':'#/marking',true)
+  }} />
   if (guardPage) {
     if (user.role !== 'admin' || offlineAccess) return <main className="screen-center"><Alert type="warning" showIcon message="仅系统管理员可访问 HTTP 防护工作台" action={<Button onClick={() => setPage(management ? 'scanner' : 'marking')}>返回工作台</Button>} /></main>
     return <><SessionActivity token={authToken}/><RealtimeStatus key={authToken} user={user} onProfile={acceptUser} onExpired={endSession}/>

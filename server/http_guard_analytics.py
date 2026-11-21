@@ -3,13 +3,15 @@ import hashlib
 import json
 import os
 import time
+from typing import Annotated, Literal
 from urllib.parse import urlsplit
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
 from .dependencies import system_admin
 from .http_guard_api import Service, storage_call, window
+from .http_guard_timeline import timeline
 
 
 router = APIRouter(prefix='/api/v1')
@@ -17,7 +19,7 @@ PAGES = {
     'dashboard', 'scanner', 'subject-catalog', 'electives', 'exams', 'marking', 'exceptions',
     'results', 'people', 'conversions', 'settings', 'account', 'archives', 'login',
     'login/admin', 'login/marking',
-    'http-guard/overview', 'http-guard/events', 'http-guard/policies', 'http-guard/performance',
+    'http-guard/overview', 'http-guard/events', 'http-guard/policies', 'http-guard/performance', 'http-guard/traffic',
 }
 
 
@@ -77,3 +79,10 @@ async def collect_page_view(request: Request):
 @router.get('/system/http-guard/analytics', dependencies=[Depends(system_admin)])
 def analytics(guard: Service, hours: int = Depends(window)):
     return storage_call(guard.store.analytics, hours)
+
+
+@router.get('/system/http-guard/timeline', dependencies=[Depends(system_admin)])
+def traffic_timeline(guard: Service, start: Annotated[int, Query(ge=0, le=253402300799)],
+                     end: Annotated[int, Query(ge=0, le=253402300799)],
+                     interval: Literal['auto', 'minute', 'hour', 'day'] = 'auto'):
+    return storage_call(timeline, guard.store, start, end, interval)

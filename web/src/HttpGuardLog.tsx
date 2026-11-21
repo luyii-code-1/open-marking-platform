@@ -60,7 +60,29 @@ type Props = {
   reloadPolicy: () => Promise<void>
 }
 
-export function HttpGuardLog({ hours, setHours, initialIp, clientIp, policy, onSaved, reloadPolicy }: Props) {
+type LogRange = { start: number; end: number }
+const logTime = new Intl.DateTimeFormat('zh-CN', {
+  timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
+  hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+})
+
+export function HttpGuardLog(props: Props) {
+  const query = new URLSearchParams(window.location.hash.split('?')[1])
+  let range: LogRange | undefined
+  if (query.has('start') || query.has('end')) {
+    const start = Number(query.get('start'))
+    const end = Number(query.get('end'))
+    const validTime = (key: string, seconds: number) => /^\d+$/.test(query.get(key) || '')
+      && Number.isSafeInteger(seconds) && seconds % 60 === 0 && Number.isFinite(new Date(seconds * 1000).getTime())
+    if (!validTime('start', start) || !validTime('end', end) || end <= start) {
+      return <Alert type="error" message="链接中的日志时段无效" action={<a href="#/http-guard/events">查看最近日志</a>} />
+    }
+    range = { start, end }
+  }
+  return <LogRecords key={range ? range.start + '-' + range.end : 'recent'} {...props} range={range} />
+}
+
+function LogRecords({ hours, setHours, initialIp, clientIp, policy, onSaved, reloadPolicy, range }: Props & {range?: LogRange}) {
   const { message } = App.useApp()
   const [ip, setIp] = useState(initialIp)
   const [input, setInput] = useState(initialIp)
@@ -78,7 +100,13 @@ export function HttpGuardLog({ hours, setHours, initialIp, clientIp, policy, onS
   const [error, setError] = useState('')
   const [conflict, setConflict] = useState(false)
 
-  const query = new URLSearchParams({ hours: String(hours), limit: '50' })
+  const query = new URLSearchParams({ limit: '50' })
+  if (range) {
+    query.set('start', String(range.start))
+    query.set('end', String(range.end))
+  } else {
+    query.set('hours', String(hours))
+  }
   if (ip) query.set('ip', ip)
   if (decision) query.set('decision', decision)
   if (actor) query.set('actor', actor)
@@ -173,15 +201,23 @@ export function HttpGuardLog({ hours, setHours, initialIp, clientIp, policy, onS
   return (
     <Card title="请求记录" extra={<Button onClick={events.reload} loading={events.loading}>刷新</Button>}>
       <div className="http-guard-stack">
+        {range && (
+          <div>
+            <Typography.Text strong>统计时段</Typography.Text>
+            {'　'}{logTime.format(range.start * 1000)} 至 {logTime.format(range.end * 1000)}（北京时间）
+          </div>
+        )}
         <div className="guard-log-filters">
           <Select
             aria-label="日志时段"
-            value={hours}
+            value={range ? 'range' : hours}
             onChange={value => {
+              if (typeof value !== 'number') return
               resetPagination()
               setHours(value)
+              if (range) window.location.hash = '#/http-guard/events'
             }}
-            options={periods}
+            options={range ? [{ value: 'range', label: '所选统计时段' }, ...periods] : periods}
           />
           <Input.Search
             aria-label="按来源 IP 精确查询"
@@ -317,7 +353,7 @@ export function HttpGuardLog({ hours, setHours, initialIp, clientIp, policy, onS
             onChange: keys => setSelection(previous => checkedLogRows(previous, events.data.items, keys)),
           }}
           columns={[
-            { title: '时间', dataIndex: 'ts', render: (value: number) => <span className="guard-mono">{dateTime(value)}</span> },
+            { title: '时间', dataIndex: 'ts', render: (value: number) => <span className="guard-mono">{range ? logTime.format(value * 1000) : dateTime(value)}</span> },
             {
               title: '来源 IP',
               dataIndex: 'ip',

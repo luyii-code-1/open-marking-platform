@@ -37,6 +37,11 @@ def test_store_rollups_match_details_and_retention(tmp_path, monkeypatch):
     assert len(page['items']) == 2 and page['next_before']
     older = store.events(0, '192.0.2.1', '', page['next_before'], 2)
     assert len(older['items']) == 2 and not older['next_before']
+    # A chart bucket may end well before the default rolling log window.
+    bucket = (now - 86280) // 60 * 60
+    historical = store.events(1, '', '', None, 10, start=bucket, end=bucket + 60)
+    assert [row['ts'] for row in historical['items']] == [now - 86280]
+    assert not store.events(1, '', '', None, 10, start=bucket - 60, end=bucket)['items']
     revision = policy.pop('revision')
     store.save_settings({**policy, 'retention_days': 1}, revision)
     with pytest.raises(RevisionConflict):
@@ -90,3 +95,5 @@ def test_admin_policy_access_conflict_and_own_ip(tmp_path, monkeypatch):
         assert save({'mode': 'enforce'}).status_code == 409
         assert client.get(root + '/overview?hours=0', headers=headers).status_code == 200
         assert client.get(root + '/events?decision=blocked&hours=0', headers=headers).status_code == 200
+        assert client.get(root + '/events?start=60', headers=headers).status_code == 422
+        assert client.get(root + '/events?start=120&end=60', headers=headers).status_code == 422
