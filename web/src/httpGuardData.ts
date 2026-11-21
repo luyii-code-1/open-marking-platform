@@ -48,3 +48,31 @@ export function checkedLogRows<T extends Pick<AccessEvent, 'id' | 'ip'>>(previou
   const records = new Map([...previous, ...page].map(row => [row.id, row]))
   return [...records.values()].filter(row => selected.has(row.id) && row.ip)
 }
+export function removeSelectedIp<T extends Pick<AccessEvent, 'id' | 'ip'>>(rows: T[], ip: string) {
+  return rows.filter(row => row.ip !== ip)
+}
+export function formatRate(part: number, total: number) {
+  if (!total || part <= 0) return '0%'
+  const pct = (part / total) * 100
+  return pct < 0.1 ? '< 0.1%' : numberFormat.format(pct) + '%'
+}
+export function formatExpiry(expires: number, nowSeconds = Math.floor(Date.now() / 1000)) {
+  if (!expires) return { label: '长期有效', expired: false }
+  const diff = expires - nowSeconds
+  if (diff <= 0) return { label: '已过期 · ' + dateTime(expires, true), expired: true }
+  const hours = Math.ceil(diff / 3600)
+  if (hours < 24) return { label: `剩余 ${hours} 小时 · ${dateTime(expires, true)}`, expired: false }
+  const days = Math.ceil(diff / 86400)
+  return { label: `剩余 ${days} 天 · ${dateTime(expires, true)}`, expired: false }
+}
+export function summarizePerformance(routes: Analytics['routes']) {
+  let totalRequests = 0
+  let totalErrors = 0
+  let slowest: Analytics['routes'][number] | null = null
+  for (const row of routes) {
+    totalRequests += row.requests
+    totalErrors += row.errors
+    if (!slowest || row.p95_ms > slowest.p95_ms) slowest = row
+  }
+  return { routeCount: routes.length, totalRequests, totalErrors, slowest }
+}
