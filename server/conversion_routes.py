@@ -32,13 +32,15 @@ def edit_conversion(identifier:str,body:dict,current=Depends(system_admin)):
         db.execute('BEGIN IMMEDIATE')
         old=require(db,identifier,'score-conversions')
         if body.get('base_revision')!=old.get('revision',1):raise HTTPException(409,'方案已变化，请重新载入再编辑')
-        groups=[g for g in objects(db,'groups') if g.get('conversion_id')==identifier]
+        from .conversion_bindings import resolve
+        groups=[g for g in objects(db,'groups') if resolve(db,g).get('conversion_id')==identifier]
         if any(g.get('frozen') for g in groups):raise HTTPException(409,'请将赋分方案另存为副本。' + RESULTS_REVIEW_GUIDE + '复核开启后可绑定副本。')
-        value={k:deepcopy(v) for k,v in body.items() if k in ('name','mode','table','segments','precision','boundary')}
+        value={k:deepcopy(v) for k,v in body.items() if k in ('name','mode','table','segments','precision','boundary','rounding','step','table_match','project_id')}
         if not isinstance(value.get('name'),str) or not 1<=len(value['name'].strip())<=100:raise HTTPException(422,'请填写100字以内方案名称')
         try:validate_conversion(value)
         except ValueError as error:raise HTTPException(422,str(error))
         for group in groups:validate_existing(db,group,value,current)
+        value.setdefault('project_id',old.get('project_id'))
         value.update(id=identifier,revision=old.get('revision',1)+1,change_reason=reason.strip())
         saved=put(db,'score-conversions',value,current['id'])
         for group in groups:

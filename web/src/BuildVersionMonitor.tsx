@@ -1,14 +1,15 @@
-import {useEffect} from 'react'
+import {useEffect,useState} from 'react'
 import {serverBuild,workerBuild} from './buildVersion'
 import {canPreparePwaUpdate} from './pwaCoordinator'
 import {settleReviewWrites} from './reviewStore'
 
 export function BuildVersionMonitor(){
+  const [updating,setUpdating]=useState(false)
   useEffect(()=>{
     if(!import.meta.env.PROD)return
-    let stopped=false,checking=false,checkedAt=0
+    let stopped=false,checking=false,checkedAt=0,pending=false
     async function check(){
-      if(checking||!navigator.onLine||document.visibilityState!=='visible'||Date.now()-checkedAt<10000)return
+      if(checking||!navigator.onLine||document.visibilityState!=='visible'||Date.now()-checkedAt<(pending?10000:60000))return
       checking=true
       try{
         const remote=await serverBuild(),current=document.querySelector('meta[name="omp-build"]')?.getAttribute('content')
@@ -17,22 +18,28 @@ export function BuildVersionMonitor(){
         if(stopped)return
         checkedAt=Date.now()
         const matches=remote.shell_version===current&&(!controller||controlled===current)
+        pending=!matches
+        if(matches||!navigator.onLine)setUpdating(false)
         if(!matches){
+          if(canPreparePwaUpdate())setUpdating(true)
           const registration=await navigator.serviceWorker?.getRegistration()
           await registration?.update()
-          if(controlled===remote.shell_version&&current!==controlled&&canPreparePwaUpdate()){
+          const reloadKey='omp-refreshed-build:'+remote.shell_version
+          if((controlled===remote.shell_version||!controller)&&current!==remote.shell_version&&canPreparePwaUpdate()&&!sessionStorage.getItem(reloadKey)){
             await settleReviewWrites()
-            if(!stopped&&canPreparePwaUpdate())window.location.reload()
+            if(!stopped&&canPreparePwaUpdate()){sessionStorage.setItem(reloadKey,'1');window.location.reload()}
           }
         }
-      }catch{/* Retry the version check after connectivity recovers. */}
+      }catch{setUpdating(false) /* Retry after connectivity recovers. */}
       finally{checking=false}
     }
-    // A first, uncontrolled visit already loaded the current HTML from the server.
-    if(navigator.serviceWorker?.controller)void check()
-    const timer=setInterval(check,60000)
+    // Every application launch verifies the server build, including uncontrolled tabs.
+    void check()
+    const timer=setInterval(check,5000)
+    const offline=()=>setUpdating(false)
+    window.addEventListener('offline',offline)
     window.addEventListener('online',check);document.addEventListener('visibilitychange',check)
-    return()=>{stopped=true;clearInterval(timer);window.removeEventListener('online',check);document.removeEventListener('visibilitychange',check)}
+    return()=>{stopped=true;clearInterval(timer);window.removeEventListener('offline',offline);window.removeEventListener('online',check);document.removeEventListener('visibilitychange',check)}
   },[])
-  return null
+  return updating?<div role="status" style={{position:'fixed',inset:0,zIndex:10000,background:'rgba(255,255,255,.96)',display:'grid',placeItems:'center'}}>正在更新客户端，请稍候…</div>:null
 }

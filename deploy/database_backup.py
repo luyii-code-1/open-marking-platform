@@ -63,7 +63,7 @@ def rotation_transaction():
 
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
-        yield
+        yield db
 
 
 def export(path):
@@ -126,37 +126,39 @@ def deployment_backup(root, action, release):
             raise ValueError('该版本尚无已验证的部署备份')
         live_identity = verify(snapshot, info['sha256'])
 
-        # Persist the new recovery point before any unlink. Unfinished removals
-        # can be retried after a crash, including on the next completed release.
-        retiring = state['retire']
-        if current != release and current is not None:
-            retiring.append(current)
+        # A completed deployment keeps exactly its verified database recovery point.
+        # Preview every candidate, reject links, and fence paths to this backup root.
         obsolete = {}
-        for old in retiring:
-            if release_id(old) == release or old not in records:
-                raise ValueError('待清理记录无效')
-            old_snapshot = backups / f'pre-deploy-{old}.ompdb'
-            if old_snapshot.exists() or old_snapshot.is_symlink():
-                obsolete[old_snapshot] = verify(old_snapshot, records[old]['sha256'])
-        with rotation_transaction():
+        for path in backups.rglob('*'):
+            if directory in path.parents or path == snapshot or path.is_dir():
+                continue
+            if path.is_symlink() or not path.resolve().is_relative_to(backups.resolve()):
+                raise ValueError('备份清理路径超出备份目录')
+            if path.suffix.lower() in ('.ompdb','.sqlite3','.sqlite','.db','.dump','.sql','.bak','.zip','.gz'):
+                obsolete[path] = identity(path.stat(follow_symlinks=False))
+        if os.environ.get('OMP_DATABASE_URL','').startswith(('postgresql:','postgres:')):
+            for name in ('omp.sqlite3','omp.sqlite3-wal','omp.sqlite3-shm'):
+                path=root/name
+                if path.is_symlink():raise ValueError('旧数据库路径是符号链接')
+                if path.is_file() and path.resolve().parent==root.resolve():obsolete[path]=identity(path.stat(follow_symlinks=False))
+        with rotation_transaction() as db:
             if identity(snapshot.stat(follow_symlinks=False)) != live_identity:
                 raise ValueError('当前发布恢复点已变化，请重新校验')
             removed = []
             for path, old_identity in obsolete.items():
-                try:
-                    if identity(path.stat(follow_symlinks=False)) != old_identity:
-                        raise ValueError(f'备份文件已变化：{path.name}')
-                except FileNotFoundError:
-                    continue
+                if identity(path.stat(follow_symlinks=False)) != old_identity:
+                    raise ValueError(f'备份文件已变化：{path.name}')
                 removed.append(path)
-            state['current'] = release
+            state.update(current=release, records={release: info}, retire=[])
             write_json(state_path, state)
             for path in removed:
                 path.unlink()
-            if retiring:
-                sync_directory(backups)
-                state['retire'] = []
-                write_json(state_path, state)
+            from server.db import objects,put
+            removed_names={path.name for path in removed}
+            for record in objects(db,'database-backups'):
+                if record.get('filename') in removed_names:
+                    record['status']='deleted';put(db,'database-backups',record)
+            sync_directory(backups)
         return {'backup': str(snapshot), 'removed': [path.name for path in removed]}
 
 

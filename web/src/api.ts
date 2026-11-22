@@ -1,3 +1,4 @@
+import {resilientFetch} from './networkPolicy'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { beginMutation, hasPendingMutations, watchMutations } from './updatePolicy'
 import { ResourceReads } from './resourceReads'
@@ -36,7 +37,7 @@ export async function request<T = any>(path: string, init: RequestInit = {}): Pr
     const token=currentToken()
     if (token&&!headers.has('Authorization')) headers.set('Authorization', `Bearer ${token}`)
     if (init.body && !(init.body instanceof FormData)) headers.set('Content-Type', 'application/json')
-    const response = await fetch(`/api/v1${path}`, { ...init, headers })
+    const response = await resilientFetch(`/api/v1${path}`, { ...init, headers })
     expired(response,path,headers.get('Authorization'))
     if (!response.ok) {
       const data = await response.json().catch(() => ({ detail: `请求失败（${response.status}）` }))
@@ -55,7 +56,7 @@ export async function requestBlob(path:string,init:RequestInit={}):Promise<Blob>
     const token=currentToken()
     if(token&&!headers.has('Authorization'))headers.set('Authorization',`Bearer ${token}`)
     if(init.body&&!(init.body instanceof FormData))headers.set('Content-Type','application/json')
-    const response=await fetch(`/api/v1${path}`,{...init,headers,cache:'no-store'})
+    const response=await resilientFetch(`/api/v1${path}`,{...init,headers,cache:'no-store'})
     expired(response,path,headers.get('Authorization'))
     if(!response.ok){const data=await response.json().catch(()=>({}));throw new ApiError(typeof data.detail==='string'?data.detail:`请求失败（${response.status}）`,response.status)}
     return await response.blob()
@@ -63,7 +64,7 @@ export async function requestBlob(path:string,init:RequestInit={}):Promise<Blob>
 }
 export async function download(path: string, filename: string) {
   const token=currentToken()
-  const response = await fetch(`/api/v1${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+  const response = await resilientFetch(`/api/v1${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
   expired(response,path,token?'Bearer '+token:null)
   if (!response.ok) { const data = await response.json().catch(() => ({})); throw new Error(data.detail || `下载失败（${response.status}）`) }
   const url = URL.createObjectURL(await response.blob()); const anchor = document.createElement('a'); anchor.href = url; anchor.download = filename; anchor.click(); setTimeout(() => URL.revokeObjectURL(url), 1000)

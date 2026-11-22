@@ -51,6 +51,7 @@ def bind_conversion(identifier:str,body:dict,current=Depends(admin)):
             group['conversion_revision']=config.get('revision',1)
         else:group.pop('conversion_revision',None)
         group.pop('conversion_snapshot',None)
+        group['conversion_mode']='override' if conversion_id else 'none'
         group['conversion_id']=conversion_id
         return put(db,'groups',group,current['id'])
 

@@ -14,23 +14,23 @@ router=APIRouter(prefix='/api/v1')
 logger=logging.getLogger(__name__)
 POLL_SECONDS=1
 ADMIN_ROOTS={
-    'grades':{'grades','classes','students','groups','room-tags','tasks','results','analysis'},
-    'classes':{'classes','students','groups','results','analysis','room-tags'},
-    'students':{'students','groups','results','analysis','room-tags'},
-    'room-tags':{'room-tags','groups','scan-batches','submissions','exceptions','tasks','results','analysis'},
-    'tasks':{'tasks','review-progress','dashboard','results','analysis'},
+    'grades':{'grades','classes','students','groups','room-tags','tasks','results','analysis','gradebook','comparison','workspace','conversion-bindings'},
+    'classes':{'classes','students','groups','results','analysis','gradebook','comparison','workspace','conversion-bindings','room-tags'},
+    'students':{'students','groups','results','analysis','gradebook','comparison','workspace','conversion-bindings','room-tags'},
+    'room-tags':{'room-tags','groups','scan-batches','submissions','exceptions','tasks','results','analysis','gradebook','comparison','workspace','conversion-bindings'},
+    'tasks':{'tasks','review-progress','dashboard','results','analysis','gradebook','comparison','workspace','conversion-bindings'},
     'assignments':{'assignments','templates','groups','subjects','projects','review-progress','dashboard'},
-    'groups':{'groups','projects','exam-catalog','results','analysis','review-progress','dashboard'},
-    'subjects':{'subjects','projects','exam-catalog'},
-    'projects':{'projects','exam-catalog'},
-    'pages':{'scan-batches','submissions','exceptions','review-progress','results','analysis','dashboard'},
+    'groups':{'groups','projects','exam-catalog','results','analysis','gradebook','comparison','workspace','conversion-bindings','review-progress','dashboard'},
+    'subjects':{'subjects','projects','exam-catalog','gradebook','comparison','conversion-bindings'},
+    'projects':{'projects','exam-catalog','gradebook','comparison','workspace','conversion-bindings'},
+    'pages':{'scan-batches','submissions','exceptions','review-progress','results','analysis','gradebook','comparison','workspace','conversion-bindings','dashboard'},
     'scan-batches':{'scan-batches','dashboard'},
-    'submissions':{'submissions','scan-batches','exceptions','review-progress','results','analysis','dashboard'},
+    'submissions':{'submissions','scan-batches','exceptions','review-progress','results','analysis','gradebook','comparison','workspace','conversion-bindings','dashboard'},
     'exceptions':{'exceptions','dashboard'},
-    'jobs':{'jobs','archives','release-plans','projects'},
+    'jobs':{'jobs','archives','release-plans','projects','workspace'},
     'account-events':{'users','auth'},
     'templates':{'templates','groups','review-progress'},
-    'score-conversions':{'score-conversions','groups','analysis','results'},
+    'score-conversions':{'score-conversions','groups','analysis','gradebook','comparison','workspace','conversion-bindings','results'},
 }
 
 
@@ -57,7 +57,7 @@ def task_topics(person, scope, previous, templates, owners):
     assigned = not templates.isdisjoint(scope['templates']) or not templates.isdisjoint(previous['templates'])
     if not (own or assigned):
         return set()
-    roots = {'review-progress', 'dashboard', 'results', 'analysis'}
+    roots = {'review-progress', 'dashboard', 'results', 'analysis','gradebook','comparison','workspace','conversion-bindings'}
     if own:
         roots.add('tasks')
     return roots
@@ -74,12 +74,12 @@ def topics(person,scope,previous,kind,body):
     if kind=='account-events' and own:return {'auth'}
     if kind=='assignments' and (assigned or uid in body.get('user_ids',[])+body.get('arbitrator_ids',[])):
         return ADMIN_ROOTS['assignments']
-    if kind in ('submissions','templates') and assigned:return {'templates','review-progress','dashboard','results','analysis'}
-    if kind=='groups' and (body.get('id') in merged['groups'] or scope['classes']):return {'groups','subjects','projects','review-progress','results','analysis'}
+    if kind in ('submissions','templates') and assigned:return {'templates','review-progress','dashboard','results','analysis','gradebook','comparison','workspace','conversion-bindings'}
+    if kind=='groups' and (body.get('id') in merged['groups'] or scope['classes']):return {'groups','subjects','projects','review-progress','results','analysis','gradebook','comparison','workspace','conversion-bindings'}
     if kind in ('subjects','projects') and body.get('id') in merged[kind]:return {kind}
-    if kind=='classes' and (body.get('id') in merged['classes'] or uid in body.get('teacher_ids',[])):return {'classes','groups','subjects','projects','results','analysis'}
-    if kind in ('students','grades','room-tags') and (scope['classes'] or scope['templates']):return {'groups','subjects','projects','tasks','results','analysis','room-tags'}
-    if kind=='score-conversions' and scope['classes']:return {'results','analysis'}
+    if kind=='classes' and (body.get('id') in merged['classes'] or uid in body.get('teacher_ids',[])):return {'classes','groups','subjects','projects','results','analysis','gradebook','comparison','workspace','conversion-bindings'}
+    if kind in ('students','grades','room-tags') and (scope['classes'] or scope['templates']):return {'groups','subjects','projects','tasks','results','analysis','gradebook','comparison','workspace','conversion-bindings','room-tags'}
+    if kind=='score-conversions' and scope['classes']:return {'results','analysis','gradebook','comparison','workspace','conversion-bindings'}
     return set()
 
 

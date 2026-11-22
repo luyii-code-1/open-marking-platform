@@ -44,7 +44,10 @@ def location():
 class Storage:
     def __init__(self,project_id=None,connection_id=None,settings=None):
         if project_id and not connection_id:
-            with connect() as db:connection_id=(get(db,project_id,'projects') or {}).get('storage_connection_id')
+            with connect() as db:
+                project=get(db,project_id,'projects') or {}
+                connection_id=project.get('storage_connection_id')
+                if project.get('storage_mode')=='local' and settings is None:settings={'kind':'local'}
         if connection_id and settings is None:
             from .storage_connections import config
             settings=config(connection_id)
@@ -271,4 +274,4 @@ def mirror(relative,project_id=None):
     provider.upload(source,key)
     with connect() as db:
         old=next((r for r in find(db,'storage-assets',relative=relative) if r.get('connection_id')==provider.connection_id and r.get('location')==provider.location()),{})
-        put(db,'storage-assets',{**old,'relative':relative,'key':key,'project_id':project_id,'connection_id':provider.connection_id,'backend':provider.kind,'location':provider.location(),'sha256':digest,'status':'stored'})
+        put(db,'storage-assets',{**old,'relative':relative,'key':key,'project_id':project_id,'connection_id':provider.connection_id,'backend':provider.kind,'location':provider.location(),'size':source.stat().st_size,'sha256':digest,'status':'stored'})

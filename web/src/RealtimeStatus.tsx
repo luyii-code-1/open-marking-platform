@@ -12,7 +12,7 @@ export function RealtimeStatus({user,onExpired,onProfile}:{user:User;onExpired:(
     let stopped=false,socket:WebSocket|null=null,retryTimer:ReturnType<typeof setTimeout>|undefined,flushTimer:ReturnType<typeof setTimeout>|undefined,attempt=0,all=false
     const pending=new Set<string>()
     function flush(){flushTimer=undefined;if(stopped)return;announceChanges(all?undefined:[...pending]);pending.clear();all=false}
-    function changed(roots?:string[]){if(!roots)all=true;else roots.forEach(root=>pending.add(root));if(!flushTimer)flushTimer=setTimeout(flush,250)}
+    function changed(roots?:string[]){if(!roots)all=true;else roots.forEach(root=>pending.add(root));if(!flushTimer)flushTimer=setTimeout(flush,1000)}
     function connect(){
       if(stopped||!currentToken()||socket)return
       if(!navigator.onLine){return}
@@ -37,7 +37,7 @@ export function RealtimeStatus({user,onExpired,onProfile}:{user:User;onExpired:(
           }).catch(error=>{if(stopped||currentToken()&&currentToken()!==signedToken)return;if(error instanceof ApiError&&error.status===401){stopped=true;callbacks.current.onExpired()}else retryTimer=setTimeout(connect,5000)})
           return
         }
-        const delay=Math.min(30000,1000*2**Math.min(attempt++,5))+Math.random()*500
+        const delay=Math.min(60000,1000*2**Math.min(attempt++,5))+Math.random()*500
         retryTimer=setTimeout(connect,delay)
       }
     }

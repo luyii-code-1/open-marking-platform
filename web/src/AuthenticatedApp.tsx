@@ -1,3 +1,4 @@
+import {useWorkspaceNotifications} from './WorkspaceNotifications'
 import { useState } from 'react'
 import { Alert, App as AntApp, Avatar, ConfigProvider, Layout, Menu, Space, Tag, Typography } from 'antd'
 import zhCN from 'antd/locale/zh_CN'
@@ -44,6 +45,7 @@ export default function AuthenticatedApp(props: Props) {
 }
 
 function Workspace({ user, authToken, offlineAccess, management, page, location, navigate, setPortal, acceptUser, endSession }: Props) {
+  const notifications=useWorkspaceNotifications(management)
   const [collapsed, setCollapsed] = useState(false)
   const [reviewFilter, setReviewFilter] = useState<ProjectFilter>('in_progress')
   const setPage = (page: string) => navigate('#/' + page)
@@ -59,12 +61,12 @@ function Workspace({ user, authToken, offlineAccess, management, page, location,
       ...(management ? [{key:'scanner',icon:<ScanOutlined/>,label:'扫描台'},{ key: 'exams', icon: <BookOutlined />, label: '考试项目' },{key:'subject-catalog',icon:<BookOutlined/>,label:'科目管理'},{key:'electives',icon:<TeamOutlined/>,label:'选科管理'}] : []),
       ...(!management ? [{ key: 'marking', icon: <AuditOutlined />, label: '阅卷中心' }] : []),
       ...(management ? [{ key: 'exceptions', icon: <FileSearchOutlined />, label: '异常总览' }] : []),
-      { key: 'results', icon: <ReadOutlined />, label: management?'成绩总览':'成绩分析' },
+      { key: 'results', icon: <ReadOutlined />, label: '成绩总览' },
       ...(management && user.role==='admin' ? [{key:'conversions',icon:<ReadOutlined/>,label:'赋分方案'}] : []),
     ] },
     ...(management ? [{ type: 'group' as const, key: 'management', label: '基础管理', children: [
       { key: 'people', icon: <TeamOutlined />, label: '人员与班级' },
-      { key: 'archives', icon: <BookOutlined />, label: '归档文件' },
+      { key: 'archives', icon: <BookOutlined />, label: '文件管理' },
       ...(user.role==='admin'?[{ key: 'http-guard', icon: <AuditOutlined />, label: 'HTTP 防护' },{ key: 'settings', icon: <SettingOutlined />, label: '系统设置' }]:[]),
     ] }] : []),
     { key: 'account', icon: <SettingOutlined />, label: '个人账号' },
@@ -76,7 +78,7 @@ function Workspace({ user, authToken, offlineAccess, management, page, location,
       <Menu theme="light" mode="inline" items={items} selectedKeys={[page]} onClick={({ key }) => setPage(key)} />
     </Layout.Sider>
     <Layout>
-      <Layout.Header className="topbar"><Space className="topbar-left"><Button type="text" aria-label={collapsed?'展开导航':'收起导航'} icon={collapsed?<MenuUnfoldOutlined />:<MenuFoldOutlined />} onClick={() => setCollapsed(!collapsed)} /><span className="breadcrumb">{management ? '管理后台' : '阅卷台'} <span>/</span> {title}</span></Space><Space size={8} className="topbar-actions">{user.role==='manager' && <Button type="text" onClick={()=>{if(!confirmLeaving())return;const next:Portal=management?'marking':'admin';setPortal(next);sessionStorage.setItem('omp-portal',next);navigate(next==='admin'?'#/scanner':'#/marking')}}>{management?'进入阅卷台':'进入管理后台'}</Button>}<Avatar size="small">{user.name.slice(0, 1)}</Avatar><Text className="account-name" ellipsis>{user.name}</Text><Button type="text" icon={<LogoutOutlined />} onClick={async () => { if(!confirmLeaving())return; const signedToken=authToken;await settleReviewWrites();await request('/auth/logout',{method:'POST',headers:{Authorization:'Bearer '+signedToken}}).catch(()=>{});endSession() }}>退出</Button></Space></Layout.Header>
+      <Layout.Header className="topbar"><Space className="topbar-left"><Button type="text" aria-label={collapsed?'展开导航':'收起导航'} icon={collapsed?<MenuUnfoldOutlined />:<MenuFoldOutlined />} onClick={() => setCollapsed(!collapsed)} /><span className="breadcrumb">{management ? '管理后台' : '阅卷台'} <span>/</span> {title}</span></Space><Space size={8} className="topbar-actions">{notifications}{user.role==='manager' && <Button type="text" onClick={()=>{if(!confirmLeaving())return;const next:Portal=management?'marking':'admin';setPortal(next);sessionStorage.setItem('omp-portal',next);navigate(next==='admin'?'#/scanner':'#/marking')}}>{management?'进入阅卷台':'进入管理后台'}</Button>}<Avatar size="small">{user.name.slice(0, 1)}</Avatar><Text className="account-name" ellipsis>{user.name}</Text><Button type="text" icon={<LogoutOutlined />} onClick={async () => { if(!confirmLeaving())return; const signedToken=authToken;await settleReviewWrites();await request('/auth/logout',{method:'POST',headers:{Authorization:'Bearer '+signedToken}}).catch(()=>{});endSession() }}>退出</Button></Space></Layout.Header>
       <Layout.Content className={page==='marking'?'page-content marking-content':'page-content'}><div className="page-heading" hidden={page==='marking'||(page === 'exams' && !!location.projectId)}><div><Title level={2}>{title}</Title></div><Tag className="account-tag">{user.role==='admin'?'系统管理员':user.role==='manager'?'管理教师':'阅卷教师'} · {user.username}</Tag></div>
         {page === 'dashboard' && <Dashboard onNavigate={setPage} admin={management} />}
         {page === 'subject-catalog'&&management&&<SubjectCatalog/>}

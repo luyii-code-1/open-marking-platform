@@ -25,12 +25,14 @@ const TemplateEditor = loadPage(() => import('./TemplateEditor').then(module => 
 const Scans = loadPage(() => import('./Management').then(module => ({ default: module.Scans })))
 const ReviewAllocation = loadPage(() => import('./ReviewAllocation').then(module => ({ default: module.ReviewAllocation })))
 const Exceptions = loadPage(() => import('./Exceptions').then(module => ({ default: module.Exceptions })))
+const ConversionWorkspace = loadPage(() => import('./ConversionWorkspace').then(module => ({ default: module.ConversionWorkspace })))
 const Results = loadPage(() => import('./Results').then(module => ({ default: module.Results })))
 const ProjectStorage = loadPage(() => import('./StorageConnections').then(module => ({ default: module.ProjectStorage })))
 
 const { Title,Text }=Typography
 export function Exams({location,navigate}:{location:ExamLocation;navigate:(path:string,replace?:boolean)=>void}){
   const projects=useResource<Row[]>('/projects',[]),subjects=useResource<Row[]>('/subjects',[]),groups=useResource<Row[]>('/groups',[]),grades=useResource<Row[]>('/grades',[])
+  const backgroundJobs=useResource<Row[]>('/jobs',[])
   const [statusFilter,setStatusFilter]=useState<ProjectFilter>('in_progress')
   const ready=projects.loaded&&subjects.loaded&&groups.loaded&&grades.loaded
   const {project,subject,group,invalid}=resolveExam(location,projects.data,subjects.data,groups.data)
@@ -89,9 +91,10 @@ export function Exams({location,navigate}:{location:ExamLocation;navigate:(path:
     {!project?<Tabs items={[{key:'projects',label:'考试项目',children:<>{recentProjects.length>0&&<Space className="recent-exam-links" wrap><strong>最近项目</strong>{recentProjects.map(p=><Button key={p.id} onClick={()=>go({projectId:p.id})}>{p.name}</Button>)}</Space>}<EntityTable path="/projects" title="考试项目" extra={<Segmented<ProjectFilter> aria-label="考试状态" value={statusFilter} onChange={setStatusFilter} options={[{value:'in_progress',label:'进行中'},{value:'completed',label:'已完成'},{value:'all',label:'全部'}]}/>} creationFields={<Form.Item name="catalog_ids" label="同时创建科目"><CatalogPicker/></Form.Item>} fields={[{name:'name',label:'考试名称'}]} resource={filteredProjects} onEnter={row=>go({projectId:row.id})} onCreated={async row=>{await refresh();if(row)go({projectId:row.id})}} columns={[
       {title:'考试名称',dataIndex:'name',render:(name:string,row:Row)=><a href={examPath({projectId:row.id})}>{name}</a>},
       {title:'科目',render:(_:unknown,row:Row)=>`${subjects.data.filter(s=>s.project_id===row.id).length} 门`},
+      {title:'进行中任务',render:(_:unknown,row:Row)=>{const jobs=backgroundJobs.data.filter(j=>j.project_id===row.id&&['pending','running','failed'].includes(j.status));return jobs.length?<Space direction="vertical">{jobs.map(j=><span key={j.id}>{j.status==='failed'?'失败':j.status==='running'?'进行中':'等待中'} · {j.phase||j.kind}</span>)}</Space>:'—'}},
       {title:'考试状态',render:(_:unknown,row:Row)=><ExamStatusTag row={row}/>},
       {title:'操作',className:'row-actions',render:(_:unknown,row:Row)=><Space><Rename kind="projects" row={row} refresh={refresh}/><ExamStatusMenu row={row} refresh={refresh}/><HierarchyDelete kind="projects" target={row} onDeleted={refresh}/></Space>},
-    ]}/>{projects.data.length>0&&!filteredProjects.data.length&&<Alert style={{marginTop:12}} type="info" showIcon message="此状态下暂无考试项目" action={<Button size="small" onClick={()=>setStatusFilter('all')}>查看全部考试项目</Button>}/>}</>},{key:'catalog',label:'题卡索引',children:<ExamCatalog/>}]}/>:group?<GroupWorkspace key={group.id} group={group} project={project} section={location.section||'overview'} onSection={section=>go({...base,section})} scanTab={location.scanTab||'capture'} onScanTab={tab=>go({...base,section:'scans',scanTab:tab==='correct'?'correct':undefined})} onRooms={()=>go({projectId:project.id,section:'rooms'})}/>:grade?grade.id===unassignedGrade?<Card title="待设置年级的题卡"><Table rowKey="id" dataSource={children} columns={cardColumns} onRow={row=>rowNavigation(()=>enterCard(row),cardName(row,subject))}/></Card>:<EntityTable key={subject!.id+grade.id} path="/groups" title="题卡" resource={groups} allowImport={false} scope={{subject_id:subject!.id,grade_id:grade.id}} fields={[{name:'name',label:'题卡名称'}]} onEnter={enterCard} onCreated={async row=>{await refresh();if(row)enterCard(row)}} columns={cardColumns}/>:subject?<SubjectGrades subject={subject} groups={groups.data} grades={grades.data} onEnter={id=>go({...base,gradeId:id})} refresh={refresh}/>:<Tabs activeKey={location.section||'subjects'} onChange={section=>go({projectId:project.id,section})} items={[
+    ]}/>{projects.data.length>0&&!filteredProjects.data.length&&<Alert style={{marginTop:12}} type="info" showIcon message="此状态下暂无考试项目" action={<Button size="small" onClick={()=>setStatusFilter('all')}>查看全部考试项目</Button>}/>}</>},{key:'catalog',label:'题卡索引',children:<ExamCatalog/>}]}/>:group?<GroupWorkspace key={group.id} group={group} project={project} section={location.section||'overview'} onSection={section=>go({...base,section})} scanTab={location.scanTab||'capture'} onScanTab={tab=>go({...base,section:'scans',scanTab:tab==='correct'?'correct':undefined})} onRooms={()=>go({projectId:project.id,section:'rooms'})}/>:grade?<ScopedWorkspace project={project} subject={subject!} gradeId={gradeId}>{grade.id===unassignedGrade?<Card title="待设置年级的题卡"><Table rowKey="id" dataSource={children} columns={cardColumns} onRow={row=>rowNavigation(()=>enterCard(row),cardName(row,subject))}/></Card>:<EntityTable key={subject!.id+grade.id} path="/groups" title="题卡" resource={groups} allowImport={false} scope={{subject_id:subject!.id,grade_id:grade.id}} fields={[{name:'name',label:'题卡名称'}]} onEnter={enterCard} onCreated={async row=>{await refresh();if(row)enterCard(row)}} columns={cardColumns}/>}</ScopedWorkspace>:subject?<ScopedWorkspace project={project} subject={subject}><SubjectGrades subject={subject} groups={groups.data} grades={grades.data} onEnter={id=>go({...base,gradeId:id})} refresh={refresh}/></ScopedWorkspace>:<Tabs activeKey={location.section||'subjects'} onChange={section=>go({projectId:project.id,section})} items={[
       {key:'subjects',label:'科目',children:<EntityTable key={project.id} path="/subjects" title="科目" resource={subjects} scope={{project_id:project.id}} fields={[{name:'name',label:'科目名称'}]} onEnter={row=>go({projectId:project.id,subjectId:row.id})} onCreated={async row=>{await refresh();if(row)go({projectId:project.id,subjectId:row.id})}} columns={[
         {title:'科目名称',dataIndex:'name',render:(name:string,row:Row)=><a href={examPath({projectId:project.id,subjectId:row.id})}>{name}</a>},
         {title:'年级',render:(_:unknown,row:Row)=>`${subjectGrades(row,groups.data).length} 个`},
@@ -100,9 +103,10 @@ export function Exams({location,navigate}:{location:ExamLocation;navigate:(path:
       ]}/>},
       {key:'rooms',label:'考场设置',children:<RoomTagManager projectId={project.id}/>},
       {key:'sheets',label:'答题卡查询',children:<SheetLookup key={project.id} projectId={project.id}/>},
-      {key:'summary',label:'跨科成绩',children:<Results key={project.id} admin projectId={project.id} projectOnly/>},
+      {key:'summary',label:'成绩总览',children:<Results key={project.id} admin projectId={project.id} projectOnly/>},
+      {key:'conversions',label:'赋分方案',children:<ConversionWorkspace projectId={project.id}/>},
       {key:'storage',label:'存储设置',children:<ProjectStorage project={project} onSaved={refresh}/>},
-      {key:'archives',label:'归档与释放',children:<ArchiveManager projectId={project.id}/>},
+      {key:'archives',label:'文件管理',children:<ArchiveManager projectId={project.id}/>},
     ]}/>}
   </div>
 }
@@ -171,7 +175,7 @@ function GroupWorkspace({group,project,section,onSection,onRooms,scanTab,onScanT
     (key==='scans'||key==='marking')&&!group.template_id?<Card><Empty description={key==='scans'?'发布题卡后即可建立扫描批次':'发布题卡后即可分配教师与阅卷'}><Button type="primary" onClick={()=>onSection('template')}>设计题卡</Button></Empty></Card>:
     key==='template'?<TemplateEditor groupId={group.id}/>:key==='roster'?<Roster groupId={group.id}/>:
     key==='scans'?<Space direction="vertical" size={24} style={{width:'100%'}}><div><Button onClick={onRooms}>考场设置</Button></div><Scans groupId={group.id} tab={scanTab} onTab={onScanTab}/></Space>:key==='marking'?<Tabs defaultActiveKey="teachers" items={[{key:'answers',label:'答卷池',children:<AnswerPool groupId={group.id} projectId={project.id}/>},{key:'teachers',label:'阅卷池',children:<ReviewAllocation templateId={group.template_id} frozen={!!group.frozen}/>}]} />:
-    key==='exceptions'?<Exceptions groupId={group.id}/>:<Results admin groupId={group.id} projectId={project.id}/>,
+    key==='exceptions'?<Exceptions groupId={group.id}/>:<><Results admin projectId={project.id} groupId={group.id}/><ConversionWorkspace projectId={project.id} subjectId={group.subject_id} gradeId={group.grade_id} groupId={group.id}/></>,
   }))}/></>
 }
 function GroupOverview({group,projectId,onSection}:{group:Row;projectId:string;onSection:(section:string)=>void}){
@@ -207,4 +211,8 @@ function GroupOverview({group,projectId,onSection}:{group:Row;projectId:string;o
       {recent&&<Alert style={{marginTop:12}} type={recent.status==='failed'?'error':reprocessFailures.length?'warning':recent.status==='completed'?'success':'info'} showIcon message={`客观题重新识别：${reprocessFailures.length?`${recent.result.updated_pages} 页已更新，${reprocessFailures.length} 页需核查`:({pending:'等待处理',running:'处理中',completed:'已完成',failed:'处理失败'} as Record<string,string>)[recent.status]||recent.status}`} description={recent.error_detail||(reprocessFailures.length?reprocessFailures.slice(0,3).map(f=>f.reason).join('；'):recent.phase)} action={<Button onClick={()=>{void jobs.reload();void workflow.reload()}}>刷新状态</Button>}/>}
     </Card>}
     <div className="group-work-grid">{entries.map(item=><button type="button" className="workspace-entry" key={item.key} onClick={()=>onSection(item.key)}><span className="workspace-entry-title">{item.label}<RightOutlined/></span><span className="workspace-entry-detail">{item.detail}</span></button>)}</div></>
+}
+
+function ScopedWorkspace({project,subject,gradeId,children}:{project:Row;subject:Row;gradeId?:string;children:React.ReactNode}){
+  return <Tabs items={[{key:'cards',label:gradeId?'题卡':'年级',children},{key:'results',label:'成绩',children:<Results admin projectId={project.id} subjectId={subject.id} gradeId={gradeId}/>},{key:'conversions',label:'赋分',children:<ConversionWorkspace projectId={project.id} subjectId={subject.id} gradeId={gradeId}/>}]}/>
 }

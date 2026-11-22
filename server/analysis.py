@@ -155,7 +155,7 @@ def overview_rows(db,current,project_id=None,group_id=None,detail_id=None):
     projects={p['id']:p for p in objects(db,'projects')}
     subjects={s['id']:s for s in objects(db,'subjects')}
     grades={g['id']:g for g in objects(db,'grades')}
-    groups=[g for g in objects(db,'groups') if g.get('template_id') and g.get('subject_id') in subjects]
+    groups=[g for g in objects(db,'groups') if g.get('template_id') and g.get('frozen') and g.get('subject_id') in subjects]
     if group_id:
         groups=[g for g in groups if g['id']==group_id]
     if project_id:
@@ -181,7 +181,8 @@ def overview_rows(db,current,project_id=None,group_id=None,detail_id=None):
         template=require(db,group['template_id'],'templates')
         maximum=sum(q['points'] for q in template.get('questions',[]))
         base={'project_id':project['id'],'project':project['name'],'subject':subject['name'],'subject_id':subject.get('subject_tag_id') or subject['name']}
-        rows=results_for(db,group['id'],current,convert_scores=False)
+        from .gradebook import published_rows
+        rows=published_rows(db,group,current)
         for kind,cohort_key,label,subset,extra in [
             ('card',group['id'],group['name'],rows,{'grade':grades.get(group.get('grade_id'),{}).get('name',''),'grade_id':group.get('grade_id')}),
             ('subject',subject['id'],subject['name'],rows,{}),
@@ -198,7 +199,11 @@ def overview_rows(db,current,project_id=None,group_id=None,detail_id=None):
             target['values'].extend({**r,**record} for r in subset)
     output=[]
     for cohort in cohorts.values():
-        rows=cohort.pop('values');completed=[r for r in rows if r['status']=='completed' and r.get('total') is not None]
+        rows=cohort.pop('values')
+        counts={}
+        for row in rows:counts[row['student_id']]=counts.get(row['student_id'],0)+1
+        rows=list({r['student_id']:{**r,'status':'duplicate_subject','total':None} if counts[r['student_id']]>1 else r for r in rows}.values())
+        completed=[r for r in rows if r['status']=='completed' and r.get('total') is not None]
         full_scores=cohort.pop('full_scores');maximum=next(iter(full_scores)) if len(full_scores)==1 else None
         values=[r['total'] for r in completed]
         stats=describe(values,maximum or 0,.6,.85)

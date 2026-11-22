@@ -269,6 +269,7 @@ def create_route(kind):
                 from .candidate_numbers import validate
                 validate(db,value.get('candidate_number'))
             if kind=='score-conversions':
+                if value.get('project_id'):require(db,value['project_id'],'projects')
                 from .conversion import validate_conversion
                 if not isinstance(value.get('name'),str) or not 1<=len(value['name'].strip())<=100:raise HTTPException(422,'请填写100字以内方案名称')
                 try: validate_conversion(value)
@@ -613,6 +614,21 @@ from .http_guard_api import router as http_guard_router
 app.include_router(http_guard_router)
 from .http_guard_analytics import router as http_analytics_router
 app.include_router(http_analytics_router)
+
+from .gradebook import router as gradebook_router
+app.include_router(gradebook_router)
+from .conversion_bindings import router as conversion_bindings_router
+app.include_router(conversion_bindings_router)
+
+from .file_management import router as file_management_router
+app.include_router(file_management_router)
+
+from .workspace_activity import router as workspace_activity_router
+app.include_router(workspace_activity_router)
+
+from .comparison import router as comparison_router
+app.include_router(comparison_router)
+
 
 if web_files is not None:
     app.mount('/',web_files,name='web')

@@ -34,6 +34,7 @@ CHILDREN = (
     ('exceptions', ('group_id', 'batch_id', 'page_id', 'submission_id', 'task_id')),
     ('page-alignments', ('page_id',)), ('publication-events', ('group_id',)),
     ('regrade-events', ('template_id', 'task_id')),
+    ('result-snapshots', ('group_id',)),
 )
 FILE_JOBS = ('archive-project', 'preview-release', 'release-project', 'restore-archive', 'delete-hierarchy')
 POLICY = 'archive-and-remove-scans-v1'

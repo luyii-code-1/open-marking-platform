@@ -2,7 +2,7 @@ import csv
 import io
 import math
 from collections import Counter
-from decimal import Decimal,DecimalException,ROUND_HALF_UP
+from decimal import Decimal,DecimalException,ROUND_HALF_UP,ROUND_CEILING,ROUND_FLOOR
 
 
 def number(value):
@@ -19,6 +19,9 @@ def key(value):return format(value.normalize(),'f') if value else '0'
 
 def validate_conversion(config):
     mode=config.get('mode','segments')
+    if config.get('rounding','nearest') not in ('nearest','up','down'):raise ValueError('赋分取整方式无效')
+    if config.get('table_match','exact') not in ('exact','up','down'):raise ValueError('对照表匹配方式无效')
+    if number(config.get('step','0.01'))<=0:raise ValueError('赋分步长必须大于0')
     if type(config.get('precision',2)) is not int or not 0<=config.get('precision',2)<=2:raise ValueError('赋分保留位数应为0、1或2')
     if config.get('boundary','lower') not in ('lower','upper'):raise ValueError('分段边界归属无效')
     if mode=='table':
@@ -55,6 +58,9 @@ def calculator(config):
       try:
         if config.get('mode')=='table':
             result=table.get(number(raw))
+            if result is None and config.get('table_match') in ('up','down'):
+                candidates=[v for v in table if v>=number(raw)] if config['table_match']=='up' else [v for v in table if v<=number(raw)]
+                if candidates:result=table[min(candidates) if config['table_match']=='up' else max(candidates)]
             if result is None:raise ValueError('对照表未包含原始分数：'+str(raw))
         else:
             if config.get('mode')=='percentile' and percentile is None:raise ValueError('百分位赋分需要统计范围')
@@ -62,7 +68,10 @@ def calculator(config):
             for low,high,start,end in ordered:
                 if low<=value<=high:result=start+(value-low)/(high-low)*(end-start);break
             if result is None:raise ValueError('分数不在赋分区间内：'+str(value))
-        result=float(result.quantize(Decimal(1).scaleb(-config.get('precision',2)),rounding=ROUND_HALF_UP))
+        rounding={'nearest':ROUND_HALF_UP,'up':ROUND_CEILING,'down':ROUND_FLOOR}[config.get('rounding','nearest')]
+        step=number(config.get('step','0.01'))
+        result=(result/step).quantize(Decimal(1),rounding=rounding)*step
+        result=float(result.quantize(Decimal(1).scaleb(-config.get('precision',2)),rounding=rounding))
         if not math.isfinite(result):raise ValueError('赋分结果超出数值范围')
         return result
       except DecimalException:raise ValueError('赋分计算超出精度范围')
@@ -90,7 +99,17 @@ def active_config(group,config):
 
 def import_table(data,name,precision=2):
     if len(data)>2*1024*1024:raise ValueError('对照表超过2MB')
-    if data.startswith(b'PK'):raise ValueError('请将Excel表格另存为CSV，或粘贴两列文本')
+    if data.startswith(b'PK'):
+        from openpyxl import load_workbook
+        try:
+            book=load_workbook(io.BytesIO(data),read_only=True,data_only=True)
+            output=io.StringIO();writer=csv.writer(output)
+            for index,row in enumerate(book.active.iter_rows(values_only=True)):
+                if index>20000:raise ValueError('对照表最多20000行')
+                writer.writerow(['' if v is None else v for v in row])
+            book.close();data=output.getvalue().encode('utf-8')
+        except ValueError:raise
+        except Exception:raise ValueError('Excel对照表无法读取')
     try:text=data.decode('utf-8-sig')
     except UnicodeDecodeError:
         try:text=data.decode('gb18030')

@@ -607,6 +607,8 @@ def result_class_scope(db,group,current):
 
 def card_result_rows(db,group,convert_scores=True):
     """Internal scoring rows before applying a caller-authorized view."""
+    from .conversion_bindings import resolve
+    group=resolve(db,group)
     group_id=group['id']
     roster=require(db,group['roster_id'],'rosters') if group.get('roster_id') else None
     from .school import group_students,student_view
@@ -667,11 +669,14 @@ def publish_results(body:dict,current=Depends(admin)):
         if db.execute("SELECT 1 FROM regrade_queue r JOIN objects t ON t.id=r.task_id JOIN objects s ON s.id=json_extract(t.body,'$.submission_id') WHERE s.deleted=0 AND json_extract(s.body,'$.group_id')=? LIMIT 1",(group_id,)).fetchone():raise HTTPException(409,'存在尚未完成的重阅任务')
         if any(e['status']=='open' and e['kind']!='excellent' and (e.get('submission_id') in submissions or e.get('batch_id') in batches) for e in objects(db,'exceptions')): raise HTTPException(409,'存在未处理异常')
         put(db,'publication-events',{'group_id':group_id,'forced_unscanned':bool(unscanned),'unscanned_student_ids':unscanned,'reason':str(body.get('reason',''))},current['id'])
+        from .conversion_bindings import resolve
+        group=resolve(db,group)
         if group.get('conversion_id') and not group.get('frozen'):
             from copy import deepcopy
             group['conversion_snapshot']=deepcopy(require(db,group['conversion_id'],'score-conversions'))
             group['conversion_revision']=group['conversion_snapshot'].get('revision',1)
-        group.update(frozen=True,published_at=time.time(),published_unscanned_count=len(unscanned))
+        snapshot=put(db,'result-snapshots',{'group_id':group_id,'rows':rows},current['id'])
+        group.update(frozen=True,published_at=time.time(),published_unscanned_count=len(unscanned),result_snapshot_id=snapshot['id'])
         return put(db,'groups',group,current['id'])
 
 
