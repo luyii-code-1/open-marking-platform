@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { serverBuild, workerBuild, type BuildMetadata } from './buildVersion'
-import { canPreparePwaUpdate, requestPwaUpdateNow, watchPwaUpdateState } from './pwaCoordinator'
+import { canPreparePwaUpdate, forceReloadClient, requestPwaUpdateNow, watchPwaUpdateState } from './pwaCoordinator'
 import { settleReviewWrites } from './reviewStore'
+
+const AUTO_FORCE_TIMEOUT_SECONDS = 8
 
 export function BuildVersionMonitor() {
   const [committing, setCommitting] = useState(false)
@@ -9,9 +11,33 @@ export function BuildVersionMonitor() {
   const [available, setAvailable] = useState<BuildMetadata | null>(null)
   const [dismissed, setDismissed] = useState('')
   const [applying, setApplying] = useState(false)
+  const [forcing, setForcing] = useState(false)
+  const [countdown, setCountdown] = useState(AUTO_FORCE_TIMEOUT_SECONDS)
   const [notice, setNotice] = useState('')
 
   useEffect(() => watchPwaUpdateState(state => setCommitting(state.committing)), [])
+
+  const updatingOverlay = committing || reloading
+
+  useEffect(() => {
+    if (!updatingOverlay) {
+      setCountdown(AUTO_FORCE_TIMEOUT_SECONDS)
+      return
+    }
+    setCountdown(AUTO_FORCE_TIMEOUT_SECONDS)
+    const started = Date.now()
+    const interval = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - started) / 1000)
+      const left = Math.max(0, AUTO_FORCE_TIMEOUT_SECONDS - elapsed)
+      setCountdown(left)
+      if (left <= 0) {
+        clearInterval(interval)
+        setForcing(true)
+        void forceReloadClient()
+      }
+    }, 500)
+    return () => clearInterval(interval)
+  }, [updatingOverlay])
 
   useEffect(() => {
     if (!import.meta.env.PROD) return
@@ -106,25 +132,51 @@ export function BuildVersionMonitor() {
   }, [])
 
   async function applyNow() {
-    if (!available || applying) return
+    if (!available || applying || forcing) return
     setApplying(true)
     setNotice('')
+    const fallbackTimer = setTimeout(() => {
+      setForcing(true)
+      void forceReloadClient()
+    }, AUTO_FORCE_TIMEOUT_SECONDS * 1000)
     try {
       const result = await requestPwaUpdateNow(available.shell_version)
+      if (result === 'committed' || result === 'reloading') {
+        setReloading(true)
+        return
+      }
+      clearTimeout(fallbackTimer)
       if (result === 'deferred') {
-        setNotice('当前或其它已打开的标签页存在未保存操作，保存或关闭后将自动更新。')
+        setNotice('检测到未保存操作或其它标签页正在编辑；可直接点击「强制刷新」立即切换。')
       } else if (result === 'unavailable') {
-        setNotice('新版本仍在准备中，请稍后再试。')
+        setNotice('缓存版本尚未就绪，可点击「强制刷新」从服务端重新加载。')
       }
     } finally {
+      clearTimeout(fallbackTimer)
       setApplying(false)
     }
   }
 
-  if (committing || reloading) {
+  async function forceNow() {
+    if (forcing) return
+    setForcing(true)
+    setReloading(true)
+    await forceReloadClient()
+  }
+
+  if (updatingOverlay) {
     return (
-      <div role="status" className="pwa-updating-mask">
-        正在更新客户端，请稍候…
+      <div role="status" aria-live="polite" className="pwa-updating-mask">
+        <div className="pwa-updating-card">
+          <div className="pwa-updating-spinner" aria-hidden="true" />
+          <strong>正在更新到最新版本{available ? `（${available.build_number}）` : ''}</strong>
+          <p>{forcing ? '正在清理旧缓存并强制刷新…' : `正在切换版本，${countdown} 秒后若未完成将自动强制刷新。`}</p>
+          <div className="pwa-updating-actions">
+            <button type="button" className="pwa-update-btn primary" disabled={forcing} onClick={() => void forceNow()}>
+              {forcing ? '正在强制刷新…' : '立即强制刷新'}
+            </button>
+          </div>
+        </div>
       </div>
     )
   }
@@ -135,13 +187,16 @@ export function BuildVersionMonitor() {
     <aside role="status" aria-live="polite" className="pwa-update-toast">
       <div className="pwa-update-toast-body">
         <strong>发现新版本（{available.build_number}）</strong>
-        <span>{notice || '空闲时将自动切换，也可立即更新。'}</span>
+        <span>{notice || '空闲时将自动切换，也可立即更新或强制刷新。'}</span>
       </div>
       <div className="pwa-update-toast-actions">
-        <button type="button" className="pwa-update-btn primary" disabled={applying} onClick={() => void applyNow()}>
+        <button type="button" className="pwa-update-btn primary" disabled={applying || forcing} onClick={() => void applyNow()}>
           {applying ? '正在更新…' : '立即更新'}
         </button>
-        <button type="button" className="pwa-update-btn" disabled={applying} onClick={() => setDismissed(available.shell_version)}>
+        <button type="button" className="pwa-update-btn" disabled={forcing} onClick={() => void forceNow()}>
+          {forcing ? '刷新中…' : '强制刷新'}
+        </button>
+        <button type="button" className="pwa-update-btn ghost" disabled={applying || forcing} onClick={() => setDismissed(available.shell_version)}>
           稍后
         </button>
       </div>

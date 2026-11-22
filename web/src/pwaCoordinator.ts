@@ -132,6 +132,25 @@ export async function requestPwaUpdateNow(expectedVersion?: string): Promise<'co
   return 'reloading'
 }
 
+export async function forceReloadClient(): Promise<void> {
+  try {
+    await settleReviewWrites()
+  } catch {}
+  try {
+    if ('caches' in window) {
+      const keys = await caches.keys()
+      await Promise.all(keys.filter(key => key.startsWith('omp-shell-')).map(key => caches.delete(key)))
+    }
+  } catch {}
+  try {
+    if ('serviceWorker' in navigator) {
+      const registrations = await navigator.serviceWorker.getRegistrations()
+      await Promise.all(registrations.map(reg => reg.unregister()))
+    }
+  } catch {}
+  window.location.reload()
+}
+
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.addEventListener('message', event => {
     const value = event.data
