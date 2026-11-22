@@ -9,3 +9,9 @@
 .brand-name{font-size:12px;font-weight:600;color:#374151}
 .brand-collapsed{justify-content:center;padding:0 8px}
 .brand-login{height:auto;padding:0;justify-content:center;margin:0 auto 24px}
+.pwa-updating-mask{position:fixed;inset:0;z-index:10000;background:rgba(255,255,255,.96);display:grid;place-items:center;font-size:15px;color:#141414}
+.pwa-update-toast{position:fixed;right:20px;bottom:20px;z-index:9999;max-width:min(380px,calc(100vw - 32px));padding:14px 16px;background:#fff;border:1px solid #d5e1f5;border-radius:8px;box-shadow:0 8px 28px rgba(15,23,42,.12);display:grid;gap:10px}
+.pwa-update-toast-body{display:grid;gap:4px}.pwa-update-toast-body strong{font-size:14px;color:#141414}.pwa-update-toast-body span{font-size:13px;color:#595959;line-height:1.5}
+.pwa-update-toast-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px}
+.pwa-update-btn{padding:5px 12px;border-radius:5px;border:1px solid #d9d9d9;background:#fff;color:#141414;font-size:13px;cursor:pointer}
+.pwa-update-btn.primary{background:#0866ff;border-color:#0866ff;color:#fff}.pwa-update-btn:disabled{opacity:.6;cursor:not-allowed}
