@@ -34,8 +34,19 @@
 .group-work-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.group-work-grid .ant-card-body{display:flex;flex-direction:column;align-items:start;gap:12px;padding:20px}.group-work-grid h4{margin:0!important}.group-work-grid .ant-typography-secondary{min-height:20px}.group-work-grid .ant-btn{margin-top:0}
 .hierarchy-picker{width:300px;max-width:100%}.exam-workspace>.ant-tabs>.ant-tabs-nav{margin-bottom:16px}
 .workspace-entry{font:inherit;text-align:left;min-width:0;padding:24px;background:#fff;color:inherit;border:1px solid #e3e7ed;border-radius:6px;cursor:pointer;display:grid;gap:12px}
-.workspace-entry-title{display:flex;align-items:center;justify-content:space-between;gap:16px;font-size:16px;font-weight:500}.workspace-entry-title .anticon{font-size:13px;color:#595959}.workspace-entry-detail{color:#434343;line-height:1.7;font-size:14px}.workspace-entry:focus-visible,.navigable-row:focus-visible{outline:2px solid #0866ff;outline-offset:2px}.navigable-row{cursor:pointer}.roster-summary{display:flex;align-items:center;gap:32px;flex-wrap:wrap}.scan-filters{display:flex;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:24px}
-@media(hover:hover) and (pointer:fine){.workspace-entry:hover{border-color:#8db8ff;background:#fbfcfe}}
+.workspace-entry-title{display:flex;align-items:center;justify-content:space-between;gap:16px;font-size:16px;font-weight:500}.workspace-entry-title .anticon{font-size:13px;color:#595959}.workspace-entry-detail{color:#434343;line-height:1.7;font-size:14px}.workspace-entry:focus-visible,.navigable-row:focus-visible,.recent-exam-card:focus-visible{outline:2px solid #0866ff;outline-offset:2px}.navigable-row{cursor:pointer}.roster-summary{display:flex;align-items:center;gap:32px;flex-wrap:wrap}.scan-filters{display:flex;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:24px}
+.recent-exams-panel{margin-bottom:16px;display:grid;gap:10px}
+.recent-exams-header{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.recent-exams-title{font-size:13px;font-weight:600;color:#526174}
+.recent-exams-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}
+.recent-exam-card{font:inherit;text-align:left;min-width:0;padding:12px 14px;background:#fff;color:inherit;border:1px solid #e3e7ed;border-radius:6px;cursor:pointer;display:grid;gap:8px;transition:border-color 150ms ease,background-color 150ms ease,transform 120ms cubic-bezier(0.23,1,0.32,1)}
+.recent-exam-card:active{transform:scale(0.99)}
+.recent-exam-card-head{display:flex;align-items:center;justify-content:space-between;gap:8px;min-width:0}
+.recent-exam-card-name{font-size:14px;font-weight:600;color:#141414;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.recent-exam-card-meta{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;color:#595959}
+.recent-exam-card-arrow{font-size:11px;color:#8c98a9;transition:transform 150ms cubic-bezier(0.23,1,0.32,1),color 150ms ease}
+@media(hover:hover) and (pointer:fine){.workspace-entry:hover,.recent-exam-card:hover{border-color:#8db8ff;background:#fbfcfe}.recent-exam-card:hover .recent-exam-card-arrow{transform:translateX(2px);color:#0866ff}}
+@media(prefers-reduced-motion:reduce){.recent-exam-card,.recent-exam-card-arrow{transition:none}.recent-exam-card:active,.recent-exam-card:hover .recent-exam-card-arrow{transform:none}}
 .login-footer-preview{border:1px solid #e3e7ed;border-radius:4px;background:#f5f7fa;padding:16px}
 .account-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:start}.account-grid>.ant-card:nth-child(3){grid-column:1/-1}.account-grid form{max-width:520px}
 .template-layout{display:grid;grid-template-columns:240px minmax(300px,1fr) 260px;gap:16px;align-items:start}.field-pair{display:grid;grid-template-columns:1fr 1fr;gap:12px}.field-pair .ant-input-number{width:100%}.section-title{margin-bottom:12px}.question-list .ant-list-item{cursor:pointer;padding:8px}.question-list .selected{background:#edf4ff;border-radius:4px}

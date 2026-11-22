@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { ArrowLeftOutlined } from '@ant-design/icons'
-import { Alert, Breadcrumb, Card, Empty, Form, Segmented, Space, Spin, Tabs, Tag, Typography } from 'antd'
+import { ArrowLeftOutlined, RightOutlined } from '@ant-design/icons'
+import { Alert, Breadcrumb, Card, Empty, Form, Segmented, Space, Spin, Tabs, Tag, Tooltip, Typography } from 'antd'
 import { Button } from './Button'
 import { Table } from './DataTable'
 import { CatalogPicker } from './Electives'
@@ -19,6 +19,7 @@ import { HierarchyDelete } from './HierarchyDelete'
 import { RoomTagManager } from './RoomTags'
 import { useReviewWorkspace } from './ReviewWorkspace'
 import { WorkspaceNotificationButton } from './WorkspaceNotifications'
+import { jobDetailText, jobKindLabel, jobStatusColor, jobStatusLabel } from './jobDisplay'
 import { useResource, type Row } from './api'
 import {
   cardName,
@@ -287,14 +288,54 @@ export function Exams({ location, navigate }: { location: ExamLocation; navigate
               children: (
                 <>
                   {recentProjects.length > 0 && (
-                    <Space className="recent-exam-links" wrap>
-                      <strong>最近项目</strong>
-                      {recentProjects.map(p => (
-                        <Button key={p.id} onClick={() => go({ projectId: p.id })}>
-                          {p.name}
+                    <section className="recent-exams-panel" aria-label="最近项目">
+                      <div className="recent-exams-header">
+                        <span className="recent-exams-title">最近项目</span>
+                        <Button
+                          type="text"
+                          size="small"
+                          onClick={() => {
+                            try {
+                              localStorage.removeItem(recentKey)
+                            } catch {}
+                            setRecent([])
+                          }}
+                        >
+                          清除记录
                         </Button>
-                      ))}
-                    </Space>
+                      </div>
+                      <div className="recent-exams-grid">
+                        {recentProjects.map(p => {
+                          const projectSubjects = subjects.data.filter(s => s.project_id === p.id)
+                          const subjectIds = new Set(projectSubjects.map(s => s.id))
+                          const cardCount = groups.data.filter(g => subjectIds.has(g.subject_id)).length
+                          const completed = p.exam_status === 'completed'
+                          return (
+                            <button
+                              type="button"
+                              key={p.id}
+                              className="recent-exam-card"
+                              onClick={() => go({ projectId: p.id })}
+                            >
+                              <div className="recent-exam-card-head">
+                                <span className="recent-exam-card-name" title={p.name}>
+                                  {p.name}
+                                </span>
+                                <Tag color={completed ? 'default' : 'processing'} style={{ marginInlineEnd: 0 }}>
+                                  {completed ? '已完成' : '进行中'}
+                                </Tag>
+                              </div>
+                              <div className="recent-exam-card-meta">
+                                <span className="numeric-cell">
+                                  {projectSubjects.length} 门科目 · {cardCount} 份题卡
+                                </span>
+                                <RightOutlined className="recent-exam-card-arrow" />
+                              </div>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </section>
                   )}
                   <EntityTable
                     path="/projects"
@@ -331,18 +372,23 @@ export function Exams({ location, navigate }: { location: ExamLocation; navigate
                       },
                       { title: '科目', render: (_: unknown, row: Row) => `${subjects.data.filter(s => s.project_id === row.id).length} 门` },
                       {
-                        title: '进行中任务',
+                        title: '后台任务',
                         render: (_: unknown, row: Row) => {
                           const jobs = backgroundJobs.data.filter(
                             j => j.project_id === row.id && ['pending', 'running', 'failed'].includes(j.status),
                           )
                           return jobs.length ? (
-                            <Space direction="vertical" size={2}>
-                              {jobs.map(j => (
-                                <Tag key={j.id} color={j.status === 'failed' ? 'error' : j.status === 'running' ? 'processing' : 'default'}>
-                                  {j.status === 'failed' ? '失败' : j.status === 'running' ? '进行中' : '等待中'} · {j.phase || j.kind}
-                                </Tag>
-                              ))}
+                            <Space direction="vertical" size={4}>
+                              {jobs.map(j => {
+                                const detail = jobDetailText(j)
+                                return (
+                                  <Tooltip key={j.id} title={detail}>
+                                    <Tag color={jobStatusColor(j.status)} style={{ marginInlineEnd: 0 }}>
+                                      {jobKindLabel(j.kind)} · {jobStatusLabel(j.status)}
+                                    </Tag>
+                                  </Tooltip>
+                                )
+                              })}
                             </Space>
                           ) : (
                             '—'

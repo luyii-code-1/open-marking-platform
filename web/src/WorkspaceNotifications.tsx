@@ -3,6 +3,7 @@ import { Alert, App, Badge, Drawer, List, Space, Tag, Typography } from 'antd'
 import { BellOutlined } from '@ant-design/icons'
 import { Button } from './Button'
 import { ErrorNotice } from './EntityTable'
+import { jobDetailText, jobKindLabel, jobStatusColor, jobStatusLabel } from './jobDisplay'
 import { request, type Row } from './api'
 import { serviceIsSlow, setServiceSlow } from './networkPolicy'
 
@@ -151,21 +152,26 @@ export function WorkspaceNotificationsProvider({ isAdmin, children }: { isAdmin:
             loading={isAdmin && activityLoading && !activityLoaded}
             dataSource={jobs}
             locale={{ emptyText: '暂无待处理通知' }}
-            renderItem={job => (
-              <List.Item>
-                <Space direction="vertical" size={4} style={{ width: '100%' }}>
-                  <Space wrap>
-                    <Tag color={job.status === 'failed' ? 'error' : 'processing'}>
-                      {job.status === 'failed' ? '失败' : job.status === 'running' ? '进行中' : '等待中'}
-                    </Tag>
-                    <a href={job.project_id ? `#/exams/${job.project_id}` : '#/dashboard'} onClick={() => setOpen(false)}>
-                      {job.stage || job.phase || job.kind}
-                    </a>
+            renderItem={job => {
+              const detail = jobDetailText(job)
+              return (
+                <List.Item>
+                  <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                    <Space wrap>
+                      <Tag color={jobStatusColor(job.status)}>{jobStatusLabel(job.status)}</Tag>
+                      <a href={job.project_id ? `#/exams/${job.project_id}` : '#/dashboard'} onClick={() => setOpen(false)}>
+                        {jobKindLabel(job.kind)}
+                      </a>
+                    </Space>
+                    {detail && (
+                      <Typography.Text type={job.status === 'failed' ? 'danger' : 'secondary'}>
+                        {detail}
+                      </Typography.Text>
+                    )}
                   </Space>
-                  {job.error_detail && <Typography.Text type="danger">{job.error_detail}</Typography.Text>}
-                </Space>
-              </List.Item>
-            )}
+                </List.Item>
+              )
+            }}
           />
           {!isAdmin && !slow && (
             <Typography.Text type="secondary">服务连接正常，响应慢时将在此处提示。</Typography.Text>
