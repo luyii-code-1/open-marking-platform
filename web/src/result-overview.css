@@ -7,3 +7,7 @@
 
 .result-comparison-label{border:0;background:transparent;padding:0;text-align:start;font:inherit;color:var(--ant-color-link,#1677ff);cursor:pointer}
 .result-comparison-label:hover{text-decoration:underline}
+.comparison-chart-box{display:grid;gap:12px}
+.comparison-chart-header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px 16px}
+.comparison-chart-focus{padding:4px 10px;border-radius:6px;background:#f5f8fc;border:1px solid #e3eaf5;font-size:13px}
+.comparison-chart-scroll{overflow-x:auto;padding-bottom:4px}

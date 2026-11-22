@@ -8,6 +8,13 @@
 .record-picker-selected{max-height:96px;overflow:auto;padding:8px;background:var(--surface-muted,#f6f8fa);border-radius:6px}
 .record-picker-selected .ant-tag,.record-picker-tags .ant-tag{margin:0}
 .managed-table-toolbar{display:flex;align-items:center;gap:12px;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap}
+.managed-table-toolbar .entity-toolbar{flex:1;margin-bottom:0}
 .managed-table-toolbar .list-search{margin:0;max-width:360px}
 .managed-table-columns{margin-left:auto;flex-shrink:0}
+.filter-summary-bar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px 16px;padding-top:4px;border-top:1px dashed #e6ebf2}
+.filter-summary-count{margin-left:auto;font-size:13px;font-variant-numeric:tabular-nums}
+.gradebook-toolbar{display:flex;align-items:center;justify-content:space-between;flex:1;flex-wrap:wrap;gap:8px 16px}
+.gradebook-toolbar>.ant-tabs{margin-bottom:0}
+.gradebook-toolbar>.ant-tabs>.ant-tabs-nav{margin-bottom:0}
+.numeric-cell{font-variant-numeric:tabular-nums}
 @media(max-width:600px){.record-picker-modal{width:calc(100vw - 24px)!important}.record-picker-filters>.ant-select{max-width:none}}

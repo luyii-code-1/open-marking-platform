@@ -14,6 +14,7 @@ import { cacheReview, enqueueReview, forgetReview, getReview, hasUnsentReview, l
 import { useUnsavedChanges } from './useNavigation'
 import { ApiError, request, send, useResource, watchChanges, type Row, type Template } from './api'
 import { ErrorNotice } from './EntityTable'
+import { WorkspaceNotificationButton } from './WorkspaceNotifications'
 
 export function Marking({ admin, groupId, initialProjectId, initialTemplateId, initialQuestionId, onExit }: { admin: boolean; groupId?: string; initialProjectId?:string; initialTemplateId?: string; initialQuestionId?: string; onExit?: (projectId?:string) => void }) {
   const workspace=useReviewWorkspace()
@@ -191,6 +192,7 @@ export function Marking({ admin, groupId, initialProjectId, initialTemplateId, i
         <Button type="primary" disabled={!question||workspace.updateLocked||!workspace.ready||busy||record?.status==='draft'} loading={action.pending==='claim'} onClick={next}>{task?'领取下一份':'进入阅卷'}</Button>
       </div>
       <Space size={4} wrap>
+        <WorkspaceNotificationButton compact onlyWhenActive/>
         {onExit&&<Button onClick={leave}>退出阅卷</Button>}<Button icon={<HistoryOutlined/>} disabled={!question||workspace.offline||locked} onClick={openHistory}>历史</Button>
         <Button icon={<BarChartOutlined/>} disabled={!question} onClick={()=>setProgressOpen(true)}>进度</Button>
         <Button icon={<SettingOutlined/>} onClick={()=>setSettingsOpen(true)}>设置</Button>
