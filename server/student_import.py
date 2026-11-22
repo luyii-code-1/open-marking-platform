@@ -98,8 +98,9 @@ def plan(db, tables, settings, commit, actor):
     existing = by_number(objects(db,'students'))
     classes = defaultdict(list)
     def class_key(name):
-        number = re.fullmatch(r'0*(\d+)(?:班)?', name)
-        return str(int(number[1])) + '班' if number else name
+        cleaned = re.sub(r'^(?:高[一二三]|初[一二三]|[一二三四五六七八九十]+年级)\s*', '', str(name).strip())
+        number = re.fullmatch(r'[（(]?0*(\d+)[）)]?(?:班)?', cleaned)
+        return str(int(number[1])) + '班' if number else str(name).strip()
     for cls in objects(db, 'classes'):
         classes[(cls.get('grade_id'), class_key(cls['name']))].append(cls)
     policy = settings.get('conflicts', 'block')

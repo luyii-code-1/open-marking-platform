@@ -22,13 +22,62 @@ def list_electives(current=Depends(admin)):
         return objects(db,'electives')
 
 
+def extract_elective_rows(data, filename, subject=''):
+    subject = (subject or '').strip()
+    if filename.lower().endswith('.xlsx'):
+        import io
+        from .student_import import read_file
+        from .roster_import import HEADERS
+
+        class _MemFile:
+            def __init__(self, raw, name):
+                self.file = io.BytesIO(raw)
+                self.filename = name
+
+        tables = read_file(_MemFile(data, filename))
+        target_sheets = (
+            [tables[subject]]
+            if subject and subject in tables
+            else [tables['应考名单']]
+            if '应考名单' in tables
+            else list(tables.values())
+        )
+        extracted = []
+        for headers, records in target_sheets:
+            mapped = [HEADERS.get(str(h).strip()) for h in headers]
+            if mapped.count('candidate_number') != 1:
+                continue
+            c_idx = mapped.index('candidate_number')
+            n_idx = mapped.index('name') if 'name' in mapped else None
+            subj_idx = headers.index(subject) if subject and subject in headers else None
+            lang_idx = next((headers.index(h) for h in ('外语', '语种', '外语语种') if h in headers), None)
+            for line, row in records:
+                if subj_idx is not None:
+                    marker = (row[subj_idx] if subj_idx < len(row) else '').strip()
+                    if marker not in ('选', '1', '是', '√', 'Y', 'y', 'true', 'True', subject):
+                        continue
+                elif subject in ('日语', '英语') and lang_idx is not None:
+                    lang = (row[lang_idx] if lang_idx < len(row) else '').strip()
+                    is_jp = lang in ('日', '日语')
+                    if (subject == '日语' and not is_jp) or (subject == '英语' and is_jp):
+                        continue
+                extracted.append({
+                    'row': line,
+                    'candidate_number': row[c_idx] if c_idx < len(row) else '',
+                    'name': row[n_idx] if n_idx is not None and n_idx < len(row) else '',
+                })
+        if extracted:
+            return extracted
+    return read_rows(data, filename)
+
+
 @router.post('/electives/match')
-def match(grade_id:str,file:UploadFile=File(),current=Depends(admin)):
+def match(grade_id:str,subject:str='',file:UploadFile=File(),current=Depends(admin)):
     data=file.file.read(8*1024*1024+1)
     if len(data)>8*1024*1024: raise HTTPException(413,'文件超过8 MB')
     with connect() as db:
         require(db,grade_id,'grades')
-        report=match_rows(db,{'grade_id':grade_id},read_rows(data,file.filename))
+        report=match_rows(db,{'grade_id':grade_id},extract_elective_rows(data,file.filename,subject))
         issues=report['errors']+report['warnings']
         if issues: raise HTTPException(422,'；'.join(f"第{r['row']}行：{r['reason']}" for r in issues[:10]))
         return [s['id'] for s in report['students']]

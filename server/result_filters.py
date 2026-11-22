@@ -37,7 +37,7 @@ def filter_options(rows):
     classes={};students={};states=set()
     for row in rows:
         cid=row.get('class_id')
-        if cid:classes[cid]={'id':cid,'name':row.get('class_name',cid),'grade':row.get('grade'),'grade_name':row.get('grade'),'grade_id':row.get('grade_id')}
+        if cid:classes[cid]={'id':cid,'name':row.get('class_name',cid),'class_name':row.get('class_name',cid),'grade':row.get('grade'),'grade_name':row.get('grade'),'grade_id':row.get('grade_id'),'tags':row.get('class_tags',[])}
         sid=row.get('student_id')
         if sid:students[sid]={'id':sid,'name':row.get('name',sid),'class_id':cid,'candidate_number':row.get('candidate_number','')}
         if row.get('status') in STATUS_NAMES:states.add(row['status'])

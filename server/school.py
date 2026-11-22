@@ -17,6 +17,9 @@ def grade_by_name(db,name,actor=None):
 def clean_class_tags(raw):
     if raw is None:
         return []
+    if isinstance(raw, str):
+        import re
+        raw = [part for part in re.split(r'[,，、;/|\s]+', raw.strip()) if part]
     if not isinstance(raw, list):
         raise HTTPException(422, '班级标签格式无效')
     tags = []
@@ -66,6 +69,7 @@ def student_view(db,student):
     cls=get(db,student.get('class_id'),'classes') or {}
     grade=get(db,cls.get('grade_id'),'grades') or {}
     return {**student,'class_name':cls.get('name',student.get('class_name','')),
+            'class_tags':cls.get('tags',[]),
             'grade_id':grade.get('id'),'grade':grade.get('name',cls.get('grade',student.get('grade')))}
 
 
