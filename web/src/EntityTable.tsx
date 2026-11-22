@@ -16,7 +16,7 @@ type ListResource = { data: Row[]; loading: boolean; error: string; reload: () =
 export function ErrorNotice({ error, retry }: { error: string; retry?: () => void }) {
   return error ? <Alert type="error" showIcon message={error} action={retry && <Button onClick={retry}>重试</Button>} /> : null
 }
-export function EntityTable({ path, title, fields, columns, extra, creationFields, onCreated, scope = {}, searchText, resource: external,onEnter,allowImport=true,filterFields }: { path: string; title: string; fields: Field[]; columns?: TableColumnsType<Row>; extra?: ReactNode; creationFields?:ReactNode; onCreated?: (row?: Row) => void | Promise<unknown>; scope?: Record<string, string>; searchText?:(row:Row)=>unknown; resource?: ListResource; onEnter?:(row:Row)=>void; allowImport?:boolean;filterFields?:FilterField<Row>[] }) {
+export function EntityTable({ path, title, fields, columns, extra, creationFields, onCreated, scope = {}, searchText, resource: external,onEnter,allowImport=true,filterFields,hideTitle=false }: { path: string; title: string; fields: Field[]; columns?: TableColumnsType<Row>; extra?: ReactNode; creationFields?:ReactNode; onCreated?: (row?: Row) => void | Promise<unknown>; scope?: Record<string, string>; searchText?:(row:Row)=>unknown; resource?: ListResource; onEnter?:(row:Row)=>void; allowImport?:boolean;filterFields?:FilterField<Row>[];hideTitle?:boolean }) {
   const internal = useResource<Row[]>(external ? null : path, []), resource = external || internal, [open, setOpen] = useState(false), [saving, setSaving] = useState(false), [importing, setImporting] = useState(false), [csv, setCsv] = useState(''), [search, setSearch] = useState(''), [progress, setProgress] = useState(0), [form] = Form.useForm()
   const { message } = App.useApp()
   const rows = resource.data.filter(row => Object.entries(scope).every(([key, value]) => row[key] === value))
@@ -49,7 +49,7 @@ export function EntityTable({ path, title, fields, columns, extra, creationField
     } catch (e) { message.error((e as Error).message) }
     finally { setSaving(false); await resource.reload(); await onCreated?.() }
   }
-  return <Card title={title}>
+  return <Card title={hideTitle ? undefined : title}>
     <ErrorNotice error={resource.error} retry={resource.reload} />
     <Table toolbar={<div className="entity-toolbar">
       <Input.Search className="entity-search" placeholder={`搜索${title}`} allowClear value={search} onChange={e => setSearch(e.target.value)} />

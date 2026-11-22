@@ -3,10 +3,10 @@
 .app-shell{min-height:100vh}.app-shell>.ant-layout{min-width:0}
 .sidebar{background:#fff!important;border-right:1px solid #e3e7ed}
 .sidebar .ant-menu{border-inline-end:0!important}.sidebar .ant-menu-item-group-title{font-size:13px;padding:16px 16px 6px}
-.topbar{height:52px;min-height:52px;background:#fff;display:flex;align-items:center;justify-content:space-between;padding:0 20px;gap:16px;border-bottom:1px solid #e3e7ed;line-height:normal}
-.topbar-left{min-width:0}.topbar-actions{flex-shrink:0}.topbar-actions .ant-tag{margin-inline-end:0;font-size:13px}.topbar-actions .account-name{max-width:90px}
-.breadcrumb{color:#434343;font-size:13px;white-space:nowrap}.breadcrumb span{padding:0 8px;color:#c0c6d0}
-.page-content{padding:20px 24px 32px;width:100%;margin:0;min-width:0}
+.topbar{height:48px;min-height:48px;background:#fff;display:flex;align-items:center;justify-content:space-between;padding:0 16px;gap:12px;border-bottom:1px solid #e3e7ed;line-height:normal}
+.topbar-left{min-width:0}.topbar-actions{flex-shrink:0}.topbar-actions .ant-tag{margin-inline-end:0;font-size:12px}.topbar-actions .account-name{max-width:96px}
+.breadcrumb{display:inline-flex;align-items:center;font-size:13px;white-space:nowrap}.breadcrumb-root{color:#667085}.breadcrumb-sep{padding:0 6px;color:#c0c6d0}.breadcrumb-current{color:#141414;font-weight:600;font-size:14px}
+.page-content{padding:14px 20px 24px;width:100%;margin:0;min-width:0}
 /* Let wide tables scroll inside their card without sizing the page to their columns. */
 .page-content .ant-table-wrapper {
   contain: inline-size;
@@ -17,14 +17,21 @@
   min-width: 0;
   max-width: 100%;
 }
-.page-heading{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;gap:16px}.page-heading[hidden]{display:none}.page-heading h2{margin:0!important;font-weight:500}.account-tag{margin:0}
-.page-content>.ant-space-vertical{row-gap:16px!important}.page-content>.ant-tabs>.ant-tabs-nav{margin-bottom:16px}
+.page-heading{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:12px}.page-heading[hidden]{display:none}.page-heading h2{margin:0!important;font-weight:600}.account-tag{margin:0}
+.page-content>.ant-space-vertical{row-gap:12px!important}.page-content>.ant-tabs>.ant-tabs-nav{margin-bottom:12px}
 .stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:16px}.stat-grid.compact{margin-bottom:16px}
 .workflow-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}
 .workflow-item{background:#fff;border:1px solid #e3e7ed;border-radius:4px;padding:16px;text-align:left;cursor:pointer;display:grid;gap:8px;color:inherit}.workflow-item:hover{border-color:#8db8ff;background:#f8fbff}.workflow-item strong{font-size:14px;font-weight:500}
 .help-text{display:block;color:#595959;line-height:1.7;font-size:13px;margin-top:12px}
 .exam-tree{padding:8px 0;border-bottom:1px solid #e3e7ed}.exam-tree>div{padding:8px 16px;display:flex;gap:16px}
-.exam-workspace{display:grid;grid-template-columns:minmax(0,1fr);gap:16px}.workspace-heading{display:flex;align-items:center;justify-content:space-between;gap:16px}.workspace-heading h3{margin:0 0 4px!important}.workspace-heading .ant-space{gap:10px!important}.workspace-loading{min-height:240px;display:grid;place-items:center}
+.exam-workspace{display:grid;grid-template-columns:minmax(0,1fr);gap:10px}
+.workspace-header-bar{display:grid;gap:4px}
+.workspace-header-bar .ant-breadcrumb{font-size:12px;line-height:18px}
+.workspace-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:32px;flex-wrap:wrap}
+.workspace-heading-main{display:flex;align-items:center;gap:8px;min-width:0;flex-wrap:wrap}
+.workspace-heading-title{margin:0!important;font-size:18px!important;line-height:24px!important;font-weight:600!important}
+.workspace-heading-meta{font-size:13px;color:#667085}
+.workspace-heading .ant-space{gap:8px!important}.workspace-loading{min-height:240px;display:grid;place-items:center}
 .entity-toolbar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:12px}.entity-search{width:min(100%,300px)}.table-name-link{height:auto;padding:0;font-size:14px}
 .result-toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:12px 24px}
 .result-toolbar>.ant-space:last-child{margin-inline-start:auto}
@@ -45,6 +52,19 @@
 .recent-exam-card-name{font-size:14px;font-weight:600;color:#141414;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .recent-exam-card-meta{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;color:#595959}
 .recent-exam-card-arrow{font-size:11px;color:#8c98a9;transition:transform 150ms cubic-bezier(0.23,1,0.32,1),color 150ms ease}
+.notification-card-list{display:grid;gap:10px}
+.notification-card{display:grid;gap:8px;padding:12px 14px;background:#fff;border:1px solid #e3e7ed;border-left:3px solid #cbd5e1;border-radius:6px;transition:border-color 150ms ease,box-shadow 150ms ease}
+.notification-card.is-failed{border-left-color:#ff4d4f;background:#fffcfc}
+.notification-card.is-running{border-left-color:#0866ff;background:#fafcff}
+.notification-card-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.notification-card-title{font-size:14px;font-weight:600;color:#141414}
+.notification-card-time{font-size:12px;color:#8c98a9;white-space:nowrap}
+.notification-card-close{color:#8c98a9!important}
+.notification-card-scope{font-size:12px;color:#526174}
+.notification-card-detail{font-size:13px;line-height:1.5;word-break:break-word}
+.notification-card-actions{display:flex;align-items:center;justify-content:space-between;gap:8px;padding-top:6px;border-top:1px solid #f0f2f5}
+.notification-card-link{display:inline-flex;align-items:center;gap:4px;font-size:13px;color:#0866ff}
+.notification-card-link .anticon{font-size:11px}
 @media(hover:hover) and (pointer:fine){.workspace-entry:hover,.recent-exam-card:hover{border-color:#8db8ff;background:#fbfcfe}.recent-exam-card:hover .recent-exam-card-arrow{transform:translateX(2px);color:#0866ff}}
 @media(prefers-reduced-motion:reduce){.recent-exam-card,.recent-exam-card-arrow{transition:none}.recent-exam-card:active,.recent-exam-card:hover .recent-exam-card-arrow{transform:none}}
 .login-footer-preview{border:1px solid #e3e7ed;border-radius:4px;background:#f5f7fa;padding:16px}

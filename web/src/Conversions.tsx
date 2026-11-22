@@ -113,24 +113,22 @@ export function Conversions({ projectId }: { projectId?: string }) {
   }
 
   return (
-    <Card
-      title="赋分方案"
-      extra={
-        <Space>
-          <Button onClick={reloadAll} loading={schemes.loading}>
-            刷新
-          </Button>
-          <Button type="primary" onClick={() => load()}>
-            新建方案
-          </Button>
-        </Space>
-      }
-    >
+    <Card>
       <ErrorNotice error={schemes.error || groups.error || projects.error} retry={reloadAll} />
       <Table
         rowKey="id"
         dataSource={schemes.data}
         loading={schemes.loading}
+        toolbar={
+          <Space>
+            <Button onClick={reloadAll} loading={schemes.loading}>
+              刷新
+            </Button>
+            <Button type="primary" onClick={() => load()}>
+              新建方案
+            </Button>
+          </Space>
+        }
         filterFields={[
           {
             key: 'project',

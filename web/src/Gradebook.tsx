@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Alert, Card, Empty, Input, Segmented, Select, Space, Tabs, Tag, Typography } from 'antd'
+import { Card, Empty, Input, Segmented, Select, Space, Tabs, Tag, Typography } from 'antd'
 import { Table } from './DataTable'
 import { Button } from './Button'
 import { ErrorNotice } from './EntityTable'
@@ -157,7 +157,6 @@ function GradebookScope({ projectId, subjectId, gradeId, groupId }: Scope) {
     })
   }, [data.data.columns, activeMetric])
 
-  const scopeTitle = groupId ? '题卡成绩' : subjectId ? '科目成绩' : '成绩总览'
   const searchPending = text.trim() !== q.trim()
 
   return (
@@ -246,16 +245,15 @@ function GradebookScope({ projectId, subjectId, gradeId, groupId }: Scope) {
         </Space>
       </Card>
 
-      <Alert
-        type="info"
-        showIcon
-        message={groupId ? '当前题卡自身成绩；总分按当前可见范围混合排名' : '汇总已发布成绩；同一学生同科多份题卡记录标记为异常卷'}
-        description="默认显示裸分；小题分始终显示原始得分。同分并列，后续名次跳号。"
-      />
-
-      <Card title={scopeTitle}>
-        <ErrorNotice error={data.error} retry={data.reload} />
-        <Table
+      <Card>
+        <Space direction="vertical" size={10} style={{ width: '100%' }}>
+          <ErrorNotice error={data.error} retry={data.reload} />
+          <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+            {groupId
+              ? '当前题卡自身成绩，总分按可见范围混合排名；默认裸分，小题分始终显示原始得分，同分并列跳号。'
+              : '汇总已发布成绩，同一学生同科多份题卡按异常卷处理；默认裸分，小题分始终显示原始得分，同分并列跳号。'}
+          </Typography.Text>
+          <Table
           query=""
           columnChooser
           rowKey="student_id"
@@ -311,6 +309,7 @@ function GradebookScope({ projectId, subjectId, gradeId, groupId }: Scope) {
           }
           pagination={{ current: page, pageSize: 50, total: data.data.total, onChange: setPage, showSizeChanger: false }}
         />
+        </Space>
       </Card>
 
       {exporting && (

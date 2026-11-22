@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ArrowDownOutlined, ArrowUpOutlined, CloseOutlined } from '@ant-design/icons'
-import { Alert, Card, Checkbox, Drawer, Empty, Select, Space, Typography } from 'antd'
+import { Card, Checkbox, Drawer, Empty, Select, Space, Typography } from 'antd'
 import { Button } from './Button'
 import { Table } from './DataTable'
 import { ErrorNotice } from './EntityTable'
@@ -174,14 +174,7 @@ export function ResultOverview({ projectId, groupId, onOpenExam }: { projectId?:
   return (
     <Space direction="vertical" size={12} style={{ width: '100%' }}>
       {detail && <ScopeDetail key={detail.id} scope={detail} groupId={groupId} onClose={() => setDetail(null)} />}
-      <Card
-        title="多次对比"
-        extra={
-          <Button onClick={() => void resource.reload()} loading={resource.loading}>
-            刷新
-          </Button>
-        }
-      >
+      <Card size="small">
         <Space direction="vertical" size={10} style={{ width: '100%' }}>
           <Space wrap>
             <Select
@@ -237,6 +230,9 @@ export function ResultOverview({ projectId, groupId, onOpenExam }: { projectId?:
             </Button>
             <Button disabled={!visible.length || !!exporting} loading={exporting === 'xlsx'} onClick={() => exportRows('xlsx', visible.map(r => r.id))}>
               导出预览（Excel）
+            </Button>
+            <Button onClick={() => void resource.reload()} loading={resource.loading}>
+              刷新
             </Button>
           </Space>
           <FilterSummaryBar

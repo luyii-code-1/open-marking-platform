@@ -224,17 +224,15 @@ export function SubjectGrades({
   }
 
   return (
-    <Card
-      title="年级"
-      extra={
-        <Button type="primary" icon={<PlusOutlined />} disabled={!available.length} onClick={() => setOpen(true)}>
-          创建题卡
-        </Button>
-      }
-    >
+    <Card>
       <Table
         rowKey="id"
         dataSource={rows}
+        toolbar={
+          <Button type="primary" icon={<PlusOutlined />} disabled={!available.length} onClick={() => setOpen(true)}>
+            创建题卡
+          </Button>
+        }
         onRow={row => rowNavigation(() => onEnter(row.id), row.name)}
         columns={[
           {

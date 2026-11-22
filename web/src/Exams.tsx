@@ -232,51 +232,48 @@ export function Exams({ location, navigate }: { location: ExamLocation; navigate
   return (
     <div className="exam-workspace">
       <ErrorNotice error={error} retry={refresh} />
-      <Breadcrumb items={crumbs} />
       {project && (
-        <div className="workspace-heading">
-          <Space align="start">
-            <Button
-              type="text"
-              className="hierarchy-back"
-              icon={<ArrowLeftOutlined />}
-              aria-label={group ? '返回题卡列表' : grade ? '返回年级列表' : subject ? '返回科目列表' : '返回考试项目'}
-              onClick={() => go(back)}
-            />
-            <div>
-              <Space align="center" wrap>
-                <Title level={3} style={{ marginBottom: 0 }}>
-                  {group ? cardName(group, subject) : grade?.name || subject?.name || project.name}
-                </Title>
-                {!subject && <ExamStatusTag row={project} />}
-              </Space>
-              <div style={{ marginTop: 4 }}>
-                <Text type="secondary">
-                  {group
-                    ? `${subject!.name} · ${grade?.name} · ${cardStatusText(group)}`
-                    : grade
-                      ? `${children.length} 份题卡`
-                      : subject
-                        ? `${subjectGrades(subject, groups.data).length} 个年级`
-                        : `${subjects.data.filter(s => s.project_id === project.id).length} 门科目`}
-                </Text>
-              </div>
-            </div>
-          </Space>
-          <Space>
-            {!subject && <ExamStatusMenu row={project} refresh={refresh} />}
-            {!grade || group ? (
-              <HierarchyDelete
-                kind={group ? 'groups' : subject ? 'subjects' : 'projects'}
-                target={group || subject || project}
-                onDeleted={async () => {
-                  navigate(examPath(back), true)
-                  await refresh()
-                }}
+        <header className="workspace-header-bar">
+          <Breadcrumb items={crumbs} />
+          <div className="workspace-heading">
+            <div className="workspace-heading-main">
+              <Button
+                type="text"
+                size="small"
+                className="hierarchy-back"
+                icon={<ArrowLeftOutlined />}
+                aria-label={group ? '返回题卡列表' : grade ? '返回年级列表' : subject ? '返回科目列表' : '返回考试项目'}
+                onClick={() => go(back)}
               />
-            ) : null}
-          </Space>
-        </div>
+              <Title level={3} className="workspace-heading-title">
+                {group ? cardName(group, subject) : grade?.name || subject?.name || project.name}
+              </Title>
+              {!subject && <ExamStatusTag row={project} />}
+              <Text className="workspace-heading-meta">
+                {group
+                  ? `${subject!.name} · ${grade?.name} · ${cardStatusText(group)}`
+                  : grade
+                    ? `${children.length} 份题卡`
+                    : subject
+                      ? `${subjectGrades(subject, groups.data).length} 个年级`
+                      : `${subjects.data.filter(s => s.project_id === project.id).length} 门科目`}
+              </Text>
+            </div>
+            <Space size={4}>
+              {!subject && <ExamStatusMenu row={project} refresh={refresh} />}
+              {!grade || group ? (
+                <HierarchyDelete
+                  kind={group ? 'groups' : subject ? 'subjects' : 'projects'}
+                  target={group || subject || project}
+                  onDeleted={async () => {
+                    navigate(examPath(back), true)
+                    await refresh()
+                  }}
+                />
+              ) : null}
+            </Space>
+          </div>
+        </header>
       )}
 
       {!project ? (
@@ -340,6 +337,7 @@ export function Exams({ location, navigate }: { location: ExamLocation; navigate
                   <EntityTable
                     path="/projects"
                     title="考试项目"
+                    hideTitle
                     extra={
                       <Segmented<ProjectFilter>
                         aria-label="考试状态"
@@ -457,6 +455,7 @@ export function Exams({ location, navigate }: { location: ExamLocation; navigate
               key={subject!.id + grade.id}
               path="/groups"
               title="题卡"
+              hideTitle
               resource={groups}
               allowImport={false}
               scope={{ subject_id: subject!.id, grade_id: grade.id }}
@@ -493,6 +492,7 @@ export function Exams({ location, navigate }: { location: ExamLocation; navigate
                   key={project.id}
                   path="/subjects"
                   title="科目"
+                  hideTitle
                   resource={subjects}
                   scope={{ project_id: project.id }}
                   fields={[{ name: 'name', label: '科目名称' }]}

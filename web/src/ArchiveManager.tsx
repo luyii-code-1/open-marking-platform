@@ -154,14 +154,7 @@ export function ArchiveManager({ projectId }: { projectId?: string }) {
 
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
-      <Card
-        title="文件管理"
-        extra={
-          <Button disabled={busy} loading={archives.loading || projects.loading} onClick={refreshAll}>
-            刷新
-          </Button>
-        }
-      >
+      <Card size="small">
         <Space direction="vertical" size={12} style={{ width: '100%' }}>
           <ErrorNotice error={projects.error || archives.error || jobs.error} retry={refreshAll} />
 
@@ -206,6 +199,9 @@ export function ArchiveManager({ projectId }: { projectId?: string }) {
                 </Button>
               </>
             )}
+            <Button disabled={busy} loading={archives.loading || projects.loading} onClick={refreshAll}>
+              刷新
+            </Button>
           </Space>
 
           {!project && (

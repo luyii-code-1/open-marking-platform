@@ -1,10 +1,10 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
-import { Alert, App, Badge, Drawer, List, Space, Tag, Typography } from 'antd'
-import { BellOutlined } from '@ant-design/icons'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Alert, App, Badge, Drawer, Empty, Progress, Space, Tag, Typography } from 'antd'
+import { BellOutlined, CloseOutlined, ReloadOutlined, RightOutlined } from '@ant-design/icons'
 import { Button } from './Button'
 import { ErrorNotice } from './EntityTable'
 import { jobDetailText, jobKindLabel, jobStatusColor, jobStatusLabel } from './jobDisplay'
-import { request, type Row } from './api'
+import { request, send, type Row } from './api'
 import { serviceIsSlow, setServiceSlow } from './networkPolicy'
 
 type WorkspaceActivity = { exams: Row[]; events: Row[]; jobs: Row[] }
@@ -20,6 +20,44 @@ type NotificationsContextValue = {
   open: boolean
   setOpen: (open: boolean) => void
   reloadActivity: () => Promise<void>
+}
+
+const DISMISSED_KEY = 'omp-dismissed-notifications'
+
+function readDismissed(): string[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem(DISMISSED_KEY) || '[]')
+    return Array.isArray(raw) ? raw.filter((v: unknown): v is string => typeof v === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+function saveDismissed(keys: string[]) {
+  try {
+    localStorage.setItem(DISMISSED_KEY, JSON.stringify(keys.slice(-200)))
+  } catch {}
+}
+
+function notificationKey(job: Row) {
+  return `${job.id}:${job.status}:${job.attempts ?? 0}`
+}
+
+function jobTargetHref(job: Row) {
+  if (!job.project_id) return '#/dashboard'
+  if (['archive-project', 'preview-release', 'release-project', 'restore-archive'].includes(job.kind)) {
+    return `#/exams/${encodeURIComponent(job.project_id)}/archives`
+  }
+  return `#/exams/${encodeURIComponent(job.project_id)}`
+}
+
+function formatJobTime(timestamp?: number) {
+  if (!timestamp) return ''
+  const seconds = Math.max(0, Math.floor(Date.now() / 1000 - timestamp))
+  if (seconds < 60) return '刚刚'
+  if (seconds < 3600) return `${Math.floor(seconds / 60)} 分钟前`
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)} 小时前`
+  return new Date(timestamp * 1000).toLocaleString()
 }
 
 const fallbackContext: NotificationsContextValue = {
@@ -48,10 +86,12 @@ export function WorkspaceNotificationsProvider({ isAdmin, children }: { isAdmin:
   const [jobs, setJobs] = useState<Row[]>([])
   const [exams, setExams] = useState<Row[]>([])
   const [events, setEvents] = useState<Row[]>([])
+  const [dismissed, setDismissed] = useState<string[]>(readDismissed)
+  const [retryingId, setRetryingId] = useState('')
   const [activityLoaded, setActivityLoaded] = useState(false)
   const [activityLoading, setActivityLoading] = useState(false)
   const [activityError, setActivityError] = useState('')
-  const { notification } = App.useApp()
+  const { notification, message } = App.useApp()
   const mounted = useRef(true)
   const lastNotice = useRef(0)
 
@@ -120,12 +160,54 @@ export function WorkspaceNotificationsProvider({ isAdmin, children }: { isAdmin:
     }
   }, [isAdmin, loadActivity, notification])
 
-  const count = jobs.length + (slow ? 1 : 0)
+  const dismissedSet = useMemo(() => new Set(dismissed), [dismissed])
+  const visibleJobs = useMemo(
+    () =>
+      jobs
+        .filter(job => !dismissedSet.has(notificationKey(job)))
+        .sort((a, b) => (b.created_at || 0) - (a.created_at || 0)),
+    [jobs, dismissedSet],
+  )
+  const examNames = useMemo(() => new Map(exams.map(e => [e.id, e.name])), [exams])
+
+  const dismissOne = (job: Row) => {
+    const key = notificationKey(job)
+    setDismissed(current => {
+      if (current.includes(key)) return current
+      const next = [...current, key]
+      saveDismissed(next)
+      return next
+    })
+  }
+
+  const dismissAll = () => {
+    setDismissed(current => {
+      const next = [...new Set([...current, ...visibleJobs.map(notificationKey)])]
+      saveDismissed(next)
+      return next
+    })
+  }
+
+  const retryJob = async (job: Row) => {
+    if (retryingId) return
+    setRetryingId(job.id)
+    try {
+      await send(`/jobs/${job.id}/retry`)
+      message.success('已重新提交后台任务')
+      await loadActivity()
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : '重试失败')
+    } finally {
+      setRetryingId('')
+    }
+  }
+
+  const count = visibleJobs.length + (slow ? 1 : 0)
   return (
     <NotificationsContext.Provider
       value={{
         slow,
-        jobs,
+        jobs: visibleJobs,
         exams,
         events,
         activityLoaded,
@@ -139,42 +221,97 @@ export function WorkspaceNotificationsProvider({ isAdmin, children }: { isAdmin:
     >
       {children}
       <Drawer
-        title="重要通知"
+        title={`重要通知${count > 0 ? `（${count}）` : ''}`}
         open={open}
         onClose={() => setOpen(false)}
-        width={480}
-        extra={isAdmin ? <Button size="small" loading={activityLoading} onClick={() => void loadActivity()}>刷新</Button> : undefined}
+        width={460}
+        extra={
+          <Space size={4}>
+            {visibleJobs.length > 0 && (
+              <Button size="small" type="text" onClick={dismissAll}>
+                清空全部
+              </Button>
+            )}
+            {isAdmin && (
+              <Button size="small" icon={<ReloadOutlined />} loading={activityLoading} onClick={() => void loadActivity()}>
+                刷新
+              </Button>
+            )}
+          </Space>
+        }
       >
         <Space direction="vertical" size={12} style={{ width: '100%' }}>
           {slow && <Alert type="warning" showIcon message="服务器响应较慢" description="正在自动降低状态查询频率，请稍候。" />}
           {isAdmin && <ErrorNotice error={activityError} retry={loadActivity} />}
-          <List
-            loading={isAdmin && activityLoading && !activityLoaded}
-            dataSource={jobs}
-            locale={{ emptyText: '暂无待处理通知' }}
-            renderItem={job => {
-              const detail = jobDetailText(job)
-              return (
-                <List.Item>
-                  <Space direction="vertical" size={4} style={{ width: '100%' }}>
-                    <Space wrap>
-                      <Tag color={jobStatusColor(job.status)}>{jobStatusLabel(job.status)}</Tag>
-                      <a href={job.project_id ? `#/exams/${job.project_id}` : '#/dashboard'} onClick={() => setOpen(false)}>
-                        {jobKindLabel(job.kind)}
-                      </a>
-                    </Space>
+
+          {visibleJobs.length > 0 ? (
+            <div className="notification-card-list">
+              {visibleJobs.map(job => {
+                const detail = jobDetailText(job)
+                const projectName = job.project_id ? examNames.get(job.project_id) : ''
+                const percent =
+                  job.status === 'running' && job.progress_total
+                    ? Math.round((100 * (job.progress_current || 0)) / job.progress_total)
+                    : null
+                return (
+                  <article key={job.id} className={`notification-card is-${job.status || 'pending'}`}>
+                    <div className="notification-card-head">
+                      <Space size={6} wrap>
+                        <Tag color={jobStatusColor(job.status)} style={{ marginInlineEnd: 0 }}>
+                          {jobStatusLabel(job.status)}
+                        </Tag>
+                        <strong className="notification-card-title">{jobKindLabel(job.kind)}</strong>
+                      </Space>
+                      <Space size={4}>
+                        {job.created_at && <span className="notification-card-time">{formatJobTime(job.created_at)}</span>}
+                        <Button
+                          type="text"
+                          size="small"
+                          className="notification-card-close"
+                          icon={<CloseOutlined />}
+                          aria-label={`删除${jobKindLabel(job.kind)}通知`}
+                          onClick={() => dismissOne(job)}
+                        />
+                      </Space>
+                    </div>
+                    {projectName && <div className="notification-card-scope">考试项目：{projectName}</div>}
                     {detail && (
-                      <Typography.Text type={job.status === 'failed' ? 'danger' : 'secondary'}>
+                      <Typography.Paragraph
+                        className="notification-card-detail"
+                        type={job.status === 'failed' ? 'danger' : 'secondary'}
+                        style={{ marginBottom: 0 }}
+                      >
                         {detail}
-                      </Typography.Text>
+                      </Typography.Paragraph>
                     )}
-                  </Space>
-                </List.Item>
-              )
-            }}
-          />
-          {!isAdmin && !slow && (
-            <Typography.Text type="secondary">服务连接正常，响应慢时将在此处提示。</Typography.Text>
+                    {percent !== null && <Progress percent={percent} size="small" status="active" style={{ margin: 0 }} />}
+                    <div className="notification-card-actions">
+                      <a href={jobTargetHref(job)} className="notification-card-link" onClick={() => setOpen(false)}>
+                        <span>前往查看</span>
+                        <RightOutlined />
+                      </a>
+                      {job.status === 'failed' && !job.cancelled_by_deletion && (
+                        <Button
+                          size="small"
+                          loading={retryingId === job.id}
+                          disabled={!!retryingId && retryingId !== job.id}
+                          onClick={() => void retryJob(job)}
+                        >
+                          重试任务
+                        </Button>
+                      )}
+                    </div>
+                  </article>
+                )
+              })}
+            </div>
+          ) : (
+            !activityLoading && (
+              <Empty
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                description={isAdmin ? '暂无待处理通知' : slow ? '当前仅服务慢响应提醒' : '服务连接正常，暂无待处理通知'}
+              />
+            )
           )}
         </Space>
       </Drawer>
