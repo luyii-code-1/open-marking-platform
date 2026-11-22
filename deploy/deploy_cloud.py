@@ -44,6 +44,8 @@ def main():
     if not re.fullmatch('[a-f0-9]{40}',revision):raise RuntimeError('Invalid source revision')
     if subprocess.check_output(['git','status','--porcelain','--untracked-files=normal'],cwd=REPO,text=True).strip():
         raise RuntimeError('Commit the intended source changes before deploying')
+    remote=subprocess.check_output(['git','ls-remote','origin','refs/heads/main'],cwd=REPO,text=True).split()[0]
+    if remote!=revision:raise RuntimeError('Push or merge the current main revision before deploying')
     if not args.skip_verify:
         subprocess.run(['powershell','-NoProfile','-ExecutionPolicy','Bypass','-File',str(REPO/'deploy/verify.ps1')],cwd=REPO,check=True)
     out=REPO/'dist'/'cloud-release';out.mkdir(parents=True,exist_ok=True)
