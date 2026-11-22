@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { ArrowRightOutlined } from '@ant-design/icons'
 import { Card, Empty, Input, Segmented, Select, Space, Tabs, Tag, Typography } from 'antd'
 import { Table } from './DataTable'
 import { Button } from './Button'
@@ -21,7 +22,7 @@ const statusColors: Record<string, string> = {
 
 const numericKeys = new Set(['total', 'rank'])
 
-function formatCell(value: unknown, row: Row, key: string, metric: string) {
+function formatCell(value: unknown, row: Row, key: string, metric: string, showConversionFlow = true) {
   if (key === 'status') {
     const label = value === null || value === undefined ? '—' : String(value)
     return <Tag color={statusColors[label] || 'default'}>{label}</Tag>
@@ -35,6 +36,30 @@ function formatCell(value: unknown, row: Row, key: string, metric: string) {
       return <Typography.Text type="secondary">未配置</Typography.Text>
     }
     return '—'
+  }
+  if (
+    showConversionFlow &&
+    metric === 'converted' &&
+    typeof value === 'number' &&
+    key !== 'rank' &&
+    row._raw &&
+    typeof row._raw[key] === 'number'
+  ) {
+    const rawVal = row._raw[key] as number
+    const delta = Math.round((value - rawVal) * 100) / 100
+    const deltaLabel = delta > 0 ? `+${delta}` : delta < 0 ? String(delta) : '±0'
+    const tone = delta > 0 ? 'is-up' : delta < 0 ? 'is-down' : 'is-flat'
+    return (
+      <span className="conversion-score-flow numeric-cell" title={`原始分 ${rawVal}，赋分变化 ${deltaLabel}，赋分后 ${value}`}>
+        <span className="conversion-raw">{rawVal}</span>
+        <span className="conversion-link" aria-hidden="true">
+          <span className="conversion-line" />
+          <span className={`conversion-delta ${tone}`}>{deltaLabel}</span>
+          <ArrowRightOutlined className="conversion-arrow" />
+        </span>
+        <strong className="conversion-final">{value}</strong>
+      </span>
+    )
   }
   return <span className={typeof value === 'number' || numericKeys.has(key) ? 'numeric-cell' : undefined}>{String(value)}</span>
 }
@@ -293,8 +318,8 @@ function GradebookScope({ projectId, subjectId, gradeId, groupId }: Scope) {
                       setPage(1)
                     }}
                     options={[
-                      { value: 'raw', label: '裸分' },
-                      { value: 'converted', label: '赋分' },
+                      { value: 'raw', label: '原始分（裸分）' },
+                      { value: 'converted', label: '赋分模式' },
                     ]}
                   />
                 )}
@@ -323,7 +348,7 @@ function GradebookScope({ projectId, subjectId, gradeId, groupId }: Scope) {
           baseParams={baseParams}
           rowKey="student_id"
           filenameBase="成绩"
-          renderCell={(value, row, key) => formatCell(value, row, key, activeMetric)}
+          renderCell={(value, row, key) => formatCell(value, row, key, activeMetric, false)}
         />
       )}
     </Space>

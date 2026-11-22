@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Alert, App, Card, Select, Space, Steps, Tabs, Tag, Typography } from 'antd'
+import { Alert, App, Card, Segmented, Space, Tabs, Tag, Typography } from 'antd'
 import { Button } from './Button'
 import { Table } from './DataTable'
 import { ErrorNotice } from './EntityTable'
@@ -9,18 +9,20 @@ import { useReviewWorkspace } from './ReviewWorkspace'
 import { announceChanges, send, useResource, type Row } from './api'
 
 type ScopeProps = { projectId: string; subjectId?: string; gradeId?: string; groupId?: string }
+type RuleKind = 'projects' | 'subjects' | 'groups'
+type RuleMode = 'inherit' | 'override' | 'none'
 
 function resolveDirectRule(
-  kind: string,
+  kind: RuleKind,
   target: string,
   grade: string,
   data: { project: Row; subjects: Row[]; groups: Row[] },
-): { mode: 'inherit' | 'override' | 'none'; scheme: string } {
+): { mode: RuleMode; scheme: string } {
   if (!target) return { mode: 'inherit', scheme: '' }
   if (kind === 'projects') {
     const p = data.project
     const mode = p.conversion_mode || (p.conversion_id ? 'override' : 'inherit')
-    return { mode: mode as 'inherit' | 'override' | 'none', scheme: p.conversion_id || '' }
+    return { mode: mode as RuleMode, scheme: p.conversion_id || '' }
   }
   if (kind === 'subjects') {
     const sub = data.subjects.find(s => s.id === target)
@@ -34,12 +36,12 @@ function resolveDirectRule(
       return { mode: 'inherit', scheme: '' }
     }
     const mode = sub.conversion_mode || (sub.conversion_id ? 'override' : 'inherit')
-    return { mode: mode as 'inherit' | 'override' | 'none', scheme: sub.conversion_id || '' }
+    return { mode: mode as RuleMode, scheme: sub.conversion_id || '' }
   }
   const grp = data.groups.find(g => g.id === target)
   if (!grp) return { mode: 'inherit', scheme: '' }
   const mode = grp.conversion_mode || (grp.conversion_id ? 'override' : 'inherit')
-  return { mode: mode as 'inherit' | 'override' | 'none', scheme: grp.conversion_id || '' }
+  return { mode: mode as RuleMode, scheme: grp.conversion_id || '' }
 }
 
 function sourceTag(group: Row) {
@@ -61,16 +63,16 @@ function AdminConversionWorkspace({ projectId, subjectId, gradeId, groupId }: Sc
   const schemes = useResource<Row[]>('/score-conversions', [])
   const grades = useResource<Row[]>('/grades', [])
 
-  const [kind, setKind] = useState(groupId ? 'groups' : subjectId ? 'subjects' : 'projects')
+  const [kind, setKind] = useState<RuleKind>(groupId ? 'groups' : subjectId ? 'subjects' : 'projects')
   const [target, setTarget] = useState(groupId || subjectId || projectId)
   const [grade, setGrade] = useState(gradeId || '')
-  const [mode, setMode] = useState<'inherit' | 'override' | 'none'>('inherit')
+  const [mode, setMode] = useState<RuleMode>('inherit')
   const [scheme, setScheme] = useState('')
   const [busy, setBusy] = useState(false)
   const { message } = App.useApp()
 
   useEffect(() => {
-    const nextKind = groupId ? 'groups' : subjectId ? 'subjects' : 'projects'
+    const nextKind: RuleKind = groupId ? 'groups' : subjectId ? 'subjects' : 'projects'
     setKind(nextKind)
     setTarget(groupId || subjectId || projectId)
     setGrade(gradeId || '')
@@ -134,19 +136,32 @@ function AdminConversionWorkspace({ projectId, subjectId, gradeId, groupId }: Sc
     }
   }
 
-  const activeStep = groupId || kind === 'groups' ? 3 : gradeId || (kind === 'subjects' && grade) ? 2 : subjectId || kind === 'subjects' ? 1 : 0
+  const levelOptions = [
+    ...(!subjectId && !groupId ? [{ value: 'projects' as const, label: '项目默认' }] : []),
+    ...(!groupId ? [{ value: 'subjects' as const, label: '科目 / 年级' }] : []),
+    { value: 'groups' as const, label: '单张题卡' },
+  ]
+
   const modeOptions =
     kind === 'projects'
       ? [
-          { value: 'inherit', label: '未配置默认（不赋分）' },
-          { value: 'override', label: '指定项目默认方案' },
-          { value: 'none', label: '明确停用赋分' },
+          { value: 'inherit' as const, label: '不设默认' },
+          { value: 'override' as const, label: '指定方案' },
+          { value: 'none' as const, label: '停用赋分' },
         ]
       : [
-          { value: 'inherit', label: '继承上级' },
-          { value: 'override', label: '指定方案' },
-          { value: 'none', label: '停用赋分（不赋分）' },
+          { value: 'inherit' as const, label: '继承上级' },
+          { value: 'override' as const, label: '指定方案' },
+          { value: 'none' as const, label: '停用赋分' },
         ]
+
+  const priorityChain = [
+    { key: 'groups', label: '题卡指定' },
+    { key: 'grade', label: '科目内年级' },
+    { key: 'subjects', label: '科目默认' },
+    { key: 'projects', label: '考试项目默认' },
+  ]
+  const activePriority = kind === 'groups' ? 'groups' : kind === 'subjects' && grade ? 'grade' : kind
 
   return (
     <Tabs
@@ -157,78 +172,110 @@ function AdminConversionWorkspace({ projectId, subjectId, gradeId, groupId }: Sc
           children: (
             <Space direction="vertical" size={12} style={{ width: '100%' }}>
               <ErrorNotice error={data.error || schemes.error || grades.error} retry={reloadAll} />
-              <Card size="small">
-                <Space direction="vertical" size={10} style={{ width: '100%' }}>
-                  <Steps
-                    size="small"
-                    current={activeStep}
-                    items={[
-                      { title: '考试项目默认' },
-                      { title: '科目默认' },
-                      { title: '科目内年级' },
-                      { title: '题卡指定（最高优先级）' },
-                    ]}
-                  />
-                  <Typography.Text type="secondary">
-                    按「题卡 &gt; 科目内年级 &gt; 科目 &gt; 考试项目」顺序生效；引用其他考试或通用模板时将在当前项目生成副本。已发布成绩保持发布快照锁定，复核并重新发布后才应用新标准。
-                  </Typography.Text>
-                </Space>
-              </Card>
 
-              <Card
-                title="配置赋分规则"
-                extra={
-                  <Button size="small" loading={data.loading || schemes.loading} onClick={() => void reloadAll()}>
-                    刷新
-                  </Button>
-                }
-              >
+              <Card size="small">
                 <Space direction="vertical" size={12} style={{ width: '100%' }}>
-                  <Space wrap align="center">
-                    <Select
-                      aria-label="分配层级"
-                      value={kind}
-                      disabled={busy || !!groupId}
-                      onChange={v => {
-                        setKind(v)
-                        setTarget(v === 'projects' ? projectId : v === 'subjects' ? subjectId || '' : groupId || '')
-                        setGrade(v === 'subjects' ? gradeId || '' : '')
-                      }}
-                      options={[
-                        ...(!subjectId && !groupId ? [{ value: 'projects', label: '考试项目默认' }] : []),
-                        ...(!groupId ? [{ value: 'subjects', label: '科目 / 年级' }] : []),
-                        { value: 'groups', label: '题卡' },
-                      ]}
-                    />
-                    <RecordSelect title="适用对象" records={records} value={target} disabled={busy || !!groupId || (kind === 'subjects' && !!subjectId)} onChange={setTarget} />
-                    {kind === 'subjects' && (
-                      <RecordSelect
-                        title="年级（留空为科目默认）"
-                        records={grades.data}
-                        value={grade}
-                        disabled={busy || !!gradeId}
-                        onChange={setGrade}
-                      />
-                    )}
-                    <Select aria-label="继承方式" value={mode} disabled={busy || targetLocked} onChange={setMode} options={modeOptions} />
-                    {mode === 'override' && (
-                      <RecordSelect
-                        title="赋分方案"
-                        records={schemes.data}
-                        value={scheme}
-                        disabled={busy || targetLocked}
-                        onChange={setScheme}
-                      />
-                    )}
-                    <Button
-                      type="primary"
-                      loading={busy}
-                      disabled={!target || targetLocked || (mode === 'override' && !scheme)}
-                      onClick={save}
-                    >
-                      保存标准
+                  <div className="conversion-priority-bar">
+                    <span className="conversion-priority-label">生效优先级</span>
+                    <div className="conversion-priority-chain">
+                      {priorityChain.map((item, idx) => (
+                        <span key={item.key} className="conversion-priority-step">
+                          <Tag color={activePriority === item.key ? 'blue' : 'default'} style={{ marginInlineEnd: 0 }}>
+                            {item.label}
+                          </Tag>
+                          {idx < priorityChain.length - 1 && <span className="conversion-priority-gt">&gt;</span>}
+                        </span>
+                      ))}
+                    </div>
+                    <Button size="small" loading={data.loading || schemes.loading} onClick={() => void reloadAll()}>
+                      刷新
                     </Button>
-                  </Space>
+                  </div>
+
+                  <div className="conversion-rule-grid">
+                    {levelOptions.length > 1 && (
+                      <div className="conversion-rule-field">
+                        <span className="conversion-rule-label">生效层级</span>
+                        <Segmented<RuleKind>
+                          aria-label="分配层级"
+                          value={kind}
+                          disabled={busy}
+                          onChange={v => {
+                            setKind(v)
+                            setTarget(v === 'projects' ? projectId : v === 'subjects' ? subjectId || '' : groupId || '')
+                            setGrade(v === 'subjects' ? gradeId || '' : '')
+                          }}
+                          options={levelOptions}
+                        />
+                      </div>
+                    )}
+
+                    {kind !== 'projects' && (
+                      <div className="conversion-rule-field">
+                        <span className="conversion-rule-label">{kind === 'subjects' ? '目标科目' : '目标题卡'}</span>
+                        <RecordSelect
+                          title={kind === 'subjects' ? '科目' : '题卡'}
+                          records={records}
+                          value={target}
+                          disabled={busy || !!groupId || (kind === 'subjects' && !!subjectId)}
+                          onChange={setTarget}
+                        />
+                      </div>
+                    )}
+
+                    {kind === 'subjects' && (
+                      <div className="conversion-rule-field">
+                        <span className="conversion-rule-label">限定年级（可选）</span>
+                        <RecordSelect
+                          title="年级"
+                          records={grades.data}
+                          value={grade}
+                          disabled={busy || !!gradeId}
+                          onChange={setGrade}
+                        />
+                      </div>
+                    )}
+
+                    <div className="conversion-rule-field">
+                      <span className="conversion-rule-label">赋分策略</span>
+                      <Segmented<RuleMode>
+                        aria-label="继承方式"
+                        value={mode}
+                        disabled={busy || targetLocked}
+                        onChange={setMode}
+                        options={modeOptions}
+                      />
+                    </div>
+
+                    {mode === 'override' && (
+                      <div className="conversion-rule-field">
+                        <span className="conversion-rule-label">应用方案</span>
+                        <RecordSelect
+                          title="赋分方案"
+                          records={schemes.data}
+                          value={scheme}
+                          disabled={busy || targetLocked}
+                          onChange={setScheme}
+                        />
+                      </div>
+                    )}
+
+                    <div className="conversion-rule-submit">
+                      <Button
+                        type="primary"
+                        loading={busy}
+                        disabled={!target || targetLocked || (mode === 'override' && !scheme)}
+                        onClick={save}
+                      >
+                        保存标准
+                      </Button>
+                    </div>
+                  </div>
+
+                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                    引用其他考试或通用模板时将在当前项目生成副本；已发布成绩保持发布快照锁定，复核并重新发布后才更新。
+                  </Typography.Text>
+
                   {targetLocked && (
                     <Alert
                       type="warning"
@@ -240,7 +287,7 @@ function AdminConversionWorkspace({ projectId, subjectId, gradeId, groupId }: Sc
                 </Space>
               </Card>
 
-              <Card title="当前题卡生效标准">
+              <Card size="small" title="当前题卡生效标准">
                 <Table<Row>
                   rowKey="id"
                   loading={data.loading}
@@ -254,7 +301,7 @@ function AdminConversionWorkspace({ projectId, subjectId, gradeId, groupId }: Sc
                         if (g.conversion_id) {
                           return schemes.data.find(s => s.id === g.conversion_id)?.name || g.conversion_id
                         }
-                        return <Typography.Text type="secondary">未配置赋分（停用或未设置）</Typography.Text>
+                        return <Typography.Text type="secondary">未配置赋分</Typography.Text>
                       },
                     },
                     { title: '规则来源', render: (_, g) => sourceTag(g) },
@@ -262,6 +309,27 @@ function AdminConversionWorkspace({ projectId, subjectId, gradeId, groupId }: Sc
                       title: '发布锁定',
                       render: (_, g) => (g.frozen ? <Tag color="green">已发布锁定</Tag> : <Tag>未发布 · 可调整</Tag>),
                     },
+                    ...(!groupId
+                      ? [
+                          {
+                            title: '操作',
+                            width: 84,
+                            render: (_: unknown, g: Row) => (
+                              <Button
+                                type="link"
+                                size="small"
+                                disabled={!!g.frozen}
+                                onClick={() => {
+                                  setKind('groups')
+                                  setTarget(g.id)
+                                }}
+                              >
+                                配置
+                              </Button>
+                            ),
+                          },
+                        ]
+                      : []),
                   ]}
                 />
               </Card>

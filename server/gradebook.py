@@ -78,15 +78,23 @@ def build_table(db, current, project_id, subject_id='', grade_id='', group_id=''
         student['status'] = 'duplicate_subject' if duplicate else 'unscanned' if 'unscanned' in states else 'pending' if 'pending' in states else 'absent' if states == {'absent'} else 'completed'
         student['note'] = '、'.join(subject_columns[sid] for sid in duplicate)+'存在多张题卡，按异常卷处理' if duplicate else ''
         values = []
+        raw_values = []
+        raw_map = {}
         for sid,rows in scores.items():
             row = rows[0]
-            value = row['total'] if metric == 'raw' else row.get('converted_score')
-            if len(rows)>1:value = None
+            raw_value = None if len(rows)>1 else row['total']
+            value = raw_value if metric == 'raw' else (None if len(rows)>1 else row.get('converted_score'))
             student[sid] = value
             values.append(value)
+            raw_values.append(raw_value)
+            if metric == 'converted' and view == 'totals':
+                raw_map[sid] = raw_value
             if metric == 'converted' and row['total'] is not None and value is None:
                 student['note'] += ('；' if student['note'] else '')+subject_columns[sid]+'未配置赋分'
         student['total'] = round(sum(values),2) if values and all(v is not None for v in values) and not duplicate else None
+        if metric == 'converted' and view == 'totals':
+            raw_total = round(sum(raw_values),2) if raw_values and all(v is not None for v in raw_values) and not duplicate else None
+            student['_raw'] = {**raw_map, 'total': raw_total}
         student['rank'] = None
         output.append(student)
     counts = Counter(r['total'] for r in output if r['total'] is not None and r['status']=='completed')
