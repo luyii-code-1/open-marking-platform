@@ -15,6 +15,7 @@ import {
   ScopedWorkspace,
   SubjectGrades,
 } from './ExamWorkspaces'
+import { CardConversionFields } from './ConversionWorkspace'
 import { HierarchyDelete } from './HierarchyDelete'
 import { RoomTagManager } from './RoomTags'
 import { useReviewWorkspace } from './ReviewWorkspace'
@@ -37,7 +38,7 @@ import { rowNavigation } from './rowNavigation'
 import './cardFlow.css'
 
 const ArchiveManager = loadPage(() => import('./ArchiveManager').then(module => ({ default: module.ArchiveManager })))
-const ConversionWorkspace = loadPage(() => import('./ConversionWorkspace').then(module => ({ default: module.ConversionWorkspace })))
+const Conversions = loadPage(() => import('./Conversions').then(module => ({ default: module.Conversions })))
 const ProjectStorage = loadPage(() => import('./StorageConnections').then(module => ({ default: module.ProjectStorage })))
 const Results = loadPage(() => import('./Results').then(module => ({ default: module.Results })))
 const SheetLookup = loadPage(() => import('./SheetLookup').then(module => ({ default: module.SheetLookup })))
@@ -201,6 +202,11 @@ export function Exams({ location, navigate }: { location: ExamLocation; navigate
     },
     { title: '版式', render: (_: unknown, row: Row) => (row.template_id ? '已发布' : '待设计') },
     { title: '应考名单', render: (_: unknown, row: Row) => (row.roster_mode === 'selected' ? '指定名单' : row.grade_id ? '年级全体' : '待设置') },
+    {
+      title: '赋分',
+      render: (_: unknown, row: Row) =>
+        row.conversion_id && row.conversion_mode !== 'none' ? <Tag color="blue">已启用</Tag> : <Tag>不赋分</Tag>,
+    },
     {
       title: '成绩',
       render: (_: unknown, row: Row) => (
@@ -460,6 +466,7 @@ export function Exams({ location, navigate }: { location: ExamLocation; navigate
               allowImport={false}
               scope={{ subject_id: subject!.id, grade_id: grade.id }}
               fields={[{ name: 'name', label: '题卡名称' }]}
+              creationFields={<CardConversionFields projectId={project.id} />}
               onEnter={enterCard}
               onCreated={async row => {
                 await refresh()
@@ -526,7 +533,7 @@ export function Exams({ location, navigate }: { location: ExamLocation; navigate
             { key: 'rooms', label: '考场设置', children: <RoomTagManager projectId={project.id} /> },
             { key: 'sheets', label: '答题卡查询', children: <SheetLookup key={project.id} projectId={project.id} /> },
             { key: 'summary', label: '成绩总览', children: <Results key={project.id} admin projectId={project.id} /> },
-            { key: 'conversions', label: '赋分方案', children: <ConversionWorkspace projectId={project.id} /> },
+            { key: 'conversions', label: '赋分方案', children: <Conversions projectId={project.id} /> },
             { key: 'storage', label: '存储设置', children: <ProjectStorage project={project} onSaved={refresh} /> },
             { key: 'archives', label: '文件管理', children: <ArchiveManager projectId={project.id} /> },
           ]}

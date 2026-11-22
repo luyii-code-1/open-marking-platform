@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { PlusOutlined, RightOutlined } from '@ant-design/icons'
 import { Alert, App, Card, Dropdown, Empty, Form, Input, Modal, Popconfirm, Progress, Select, Space, Tabs, Tag, Tooltip, Typography } from 'antd'
 import { Button } from './Button'
+import { CardConversionFields, ConversionWorkspace } from './ConversionWorkspace'
 import { Table } from './DataTable'
 import { ErrorNotice } from './EntityTable'
 import { HierarchyDelete } from './HierarchyDelete'
@@ -16,7 +17,6 @@ const Roster = loadPage(() => import('./Roster').then(module => ({ default: modu
 const Scans = loadPage(() => import('./Management').then(module => ({ default: module.Scans })))
 const ReviewAllocation = loadPage(() => import('./ReviewAllocation').then(module => ({ default: module.ReviewAllocation })))
 const Exceptions = loadPage(() => import('./Exceptions').then(module => ({ default: module.Exceptions })))
-const ConversionWorkspace = loadPage(() => import('./ConversionWorkspace').then(module => ({ default: module.ConversionWorkspace })))
 const Results = loadPage(() => import('./Results').then(module => ({ default: module.Results })))
 
 export function ExamStatusTag({ row }: { row: Row }) {
@@ -307,6 +307,7 @@ export function SubjectGrades({
           <Form.Item name="grade_id" label="所属年级" rules={[{ required: true, message: '请选择年级' }]}>
             <Select showSearch optionFilterProp="label" options={available.map(g => ({ label: g.name, value: g.id }))} />
           </Form.Item>
+          <CardConversionFields projectId={subject.project_id} />
         </Form>
       </Modal>
     </Card>
@@ -328,7 +329,7 @@ export function ScopedWorkspace({
   onSection: (section?: string) => void
   children: ReactNode
 }) {
-  const activeKey = section === 'results' || section === 'conversions' ? section : 'cards'
+  const activeKey = section === 'results' ? 'results' : 'cards'
   return (
     <Tabs
       activeKey={activeKey}
@@ -336,11 +337,6 @@ export function ScopedWorkspace({
       items={[
         { key: 'cards', label: gradeId ? '题卡' : '年级', children },
         { key: 'results', label: '成绩', children: <Results admin projectId={project.id} subjectId={subject.id} gradeId={gradeId} /> },
-        {
-          key: 'conversions',
-          label: '赋分',
-          children: <ConversionWorkspace projectId={project.id} subjectId={subject.id} gradeId={gradeId} />,
-        },
       ]}
     />
   )
@@ -421,6 +417,11 @@ function GroupOverview({ group, projectId, onSection }: { group: Row; projectId:
       key: 'results',
       label: '成绩',
       detail: group.frozen ? '成绩已发布 · 成绩复核' : w.in_review ? '成绩复核中 · 重新发布' : '检查统计并确认发布',
+    },
+    {
+      key: 'conversions',
+      label: '赋分设置',
+      detail: group.conversion_id && group.conversion_mode !== 'none' ? '已启用赋分 · 查看或调整方案' : '当前不赋分 · 可启用赋分方案',
     },
   ]
   const percent = (done: number, total: number) => (total ? Math.round((done / total) * 100) : 0)
@@ -628,16 +629,10 @@ export function GroupWorkspace({
                 />
               ) : key === 'exceptions' ? (
                 <Exceptions groupId={group.id} />
+              ) : key === 'conversions' ? (
+                <ConversionWorkspace projectId={project.id} groupId={group.id} />
               ) : (
-                <Space direction="vertical" size={16} style={{ width: '100%' }}>
-                  <Results admin projectId={project.id} groupId={group.id} />
-                  <ConversionWorkspace
-                    projectId={project.id}
-                    subjectId={group.subject_id}
-                    gradeId={group.grade_id}
-                    groupId={group.id}
-                  />
-                </Space>
+                <Results admin projectId={project.id} groupId={group.id} />
               ),
           }))}
       />

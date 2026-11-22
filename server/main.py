@@ -233,6 +233,24 @@ def create_route(kind):
             if kind=='groups':
                 value['template_id']=None
                 if value.get('grade_id'):require(db,value['grade_id'],'grades')
+                enabled=bool(value.pop('conversion_enabled',False))
+                cid=value.get('conversion_id') or None
+                if enabled or cid:
+                    if not cid:raise HTTPException(422,'启用赋分时请选择赋分方案')
+                    from copy import deepcopy
+                    config=require(db,cid,'score-conversions')
+                    subject=require(db,value['subject_id'],'subjects')
+                    if config.get('project_id')!=subject.get('project_id'):
+                        copied={k:deepcopy(v) for k,v in config.items() if k not in ('id','revision','change_reason')}
+                        copied.update(project_id=subject.get('project_id'),source_template_id=cid,revision=1)
+                        config=put(db,'score-conversions',copied,current['id'])
+                        cid=config['id']
+                    value['conversion_mode']='override'
+                    value['conversion_id']=cid
+                    value['conversion_revision']=config.get('revision',1)
+                else:
+                    value['conversion_mode']='none'
+                    value['conversion_id']=None
             if kind=='classes':
                 from .school import assign_class
                 assign_class(db,value,body,current['id'])
