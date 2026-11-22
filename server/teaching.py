@@ -54,12 +54,30 @@ def edit(relation: Relation, current=Depends(admin)):
     return {'saved': True}
 
 
+class RelationRef(BaseModel):
+    teacher_id: str
+    class_id: str
+
+
+class BatchRemoveRelations(BaseModel):
+    items: list[RelationRef] = Field(min_length=1, max_length=500)
+
+
 @router.delete('/relation')
 def remove(relation: Relation, current=Depends(admin)):
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
         save(db, relation, current['id'], remove=True)
     return {'removed': True}
+
+
+@router.post('/relations/remove')
+def remove_batch(body: BatchRemoveRelations, current=Depends(admin)):
+    with connect() as db:
+        db.execute('BEGIN IMMEDIATE')
+        for item in body.items:
+            save(db, Relation(teacher_id=item.teacher_id, class_id=item.class_id, subjects=[]), current['id'], remove=True)
+    return {'removed': len(body.items)}
 
 
 @router.get('/template')
