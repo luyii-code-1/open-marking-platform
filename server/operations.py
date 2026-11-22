@@ -91,6 +91,32 @@ def edit_class(identifier:str,body:dict,current=Depends(admin)):
         return put(db,'classes',item,current['id'])
 
 
+@router.post('/classes/batch-tags')
+def batch_class_tags(body:dict,current=Depends(admin)):
+    class_ids=body.get('class_ids')
+    mode=body.get('mode','replace')
+    if not isinstance(class_ids,list) or not class_ids or any(not isinstance(i,str) for i in class_ids):
+        raise HTTPException(422,'请选择至少一个班级')
+    if mode not in ('replace','add','clear'):
+        raise HTTPException(422,'标签更新方式无效')
+    from .school import clean_class_tags
+    tags=[] if mode=='clear' else clean_class_tags(body.get('tags',[]))
+    if mode=='add' and not tags:
+        raise HTTPException(422,'请填写要追加的标签')
+    with connect() as db:
+        db.execute('BEGIN IMMEDIATE')
+        updated=0
+        for cid in dict.fromkeys(class_ids):
+            cls=require(db,cid,'classes')
+            if mode=='replace' or mode=='clear':
+                cls['tags']=list(tags)
+            else:
+                cls['tags']=clean_class_tags([*(cls.get('tags') or []),*tags])
+            put(db,'classes',cls,current['id'])
+            updated+=1
+        return {'updated':updated,'tags':tags}
+
+
 @router.put('/students/{identifier}')
 def edit_student(identifier:str,body:dict,current=Depends(admin)):
     with connect() as db:

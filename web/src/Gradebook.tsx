@@ -6,6 +6,7 @@ import { Button } from './Button'
 import { ErrorNotice } from './EntityTable'
 import { MultipleRecordSelect, RecordSelect } from './RecordSelect'
 import { ExportPreviewModal, FilterSummaryBar, type FilterChip, type ReportColumn } from './ReportToolkit'
+import { ClassTags, DEFAULT_CLASS_TAGS } from './SchoolTags'
 import { useResource, type Row } from './api'
 
 type Scope = { projectId?: string; subjectId?: string; gradeId?: string; groupId?: string }
@@ -210,6 +211,34 @@ function GradebookScope({ projectId, subjectId, gradeId, groupId }: Scope) {
               records={data.data.options.classes || []}
               value={filters.class_ids}
               onChange={ids => change('class_ids', ids)}
+              fields={[
+                {
+                  key: 'grade',
+                  label: '年级',
+                  options: [...new Set((data.data.options.classes || []).map(c => String(c.grade_name || '')).filter(Boolean))].map(value => ({
+                    value,
+                    label: value,
+                  })),
+                  values: c => [c.grade_name || ''],
+                },
+                {
+                  key: 'tag',
+                  label: '班级标签',
+                  options: [
+                    ...new Set(
+                      [...DEFAULT_CLASS_TAGS, ...(data.data.options.classes || []).flatMap(c => (Array.isArray(c.tags) ? c.tags.map(String) : []))].filter(
+                        Boolean,
+                      ),
+                    ),
+                  ].map(value => ({ value, label: value })),
+                  values: c => c.tags || [],
+                },
+              ]}
+              columns={[
+                { title: '班级', render: (_, c) => c.class_name || c.name },
+                { title: '年级', render: (_, c) => c.grade_name || '—' },
+                { title: '标签', render: (_, c) => <ClassTags tags={c.tags} /> },
+              ]}
             />
             <MultipleRecordSelect
               title="学生"

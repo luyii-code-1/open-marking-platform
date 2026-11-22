@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
-import { App, Checkbox, Form, Input, Modal, Select, Space, Tabs, Tag } from 'antd'
+import { App, Checkbox, Form, Input, Modal, Radio, Select, Space, Tabs, Tag } from 'antd'
 import { BatchDeleteButton, DeleteRecord } from './DeleteRecord'
-import { GradeTag } from './SchoolTags'
+import { ClassTags, DEFAULT_CLASS_TAGS, GradeTag } from './SchoolTags'
 import { Teaching, TeacherImport } from './Teaching'
 import { StudentImport } from './StudentImport'
 import { Grades } from './Grades'
@@ -38,14 +38,25 @@ export function Personnel({
   const [busy, setBusy] = useState(false)
   const [teachers, setTeachers] = useState<string[]>([])
   const [roles, setRoles] = useState<Record<string, { subjects: string[]; homeroom: boolean | null }>>({})
+  const [classTags, setClassTags] = useState<string[]>([])
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([])
   const [selectedClassIds, setSelectedClassIds] = useState<string[]>([])
   const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([])
+  const [batchTagOpen, setBatchTagOpen] = useState(false)
+  const [batchTagMode, setBatchTagMode] = useState<'replace' | 'add' | 'clear'>('replace')
+  const [batchTags, setBatchTags] = useState<string[]>([])
   const { message } = App.useApp()
 
   const subjectChoices = [...new Set([...subjectTags.data.map(t => t.name), ...subjects.data.map(s => s.name)].filter(Boolean))].map(value => ({
     value,
   }))
+  const classTagOptions = useMemo(
+    () =>
+      [...new Set([...DEFAULT_CLASS_TAGS, ...classes.data.flatMap(c => (Array.isArray(c.tags) ? c.tags.map(String) : []))].filter(Boolean))].map(
+        value => ({ value, label: value }),
+      ),
+    [classes.data],
+  )
   const gradeName = (id: string) => grades.data.find(g => g.id === id)?.name
   const classLabel = (id: string) => {
     const c = classes.data.find(item => item.id === id)
@@ -53,13 +64,22 @@ export function Personnel({
   }
   const teacherName = (id: string) => users.data.find(u => u.id === id)?.name || id
   const gradeOptions = grades.data.map(g => ({ value: g.id, label: g.name }))
-  const classFields: FilterField<Row>[] = [{ key: 'grade', label: '年级', options: gradeOptions, values: c => [c.grade_id] }]
+  const classFields: FilterField<Row>[] = [
+    { key: 'grade', label: '年级', options: gradeOptions, values: c => [c.grade_id] },
+    { key: 'tag', label: '班级标签', options: classTagOptions, values: c => c.tags || [] },
+  ]
   const teacherFields: FilterField<Row>[] = [
     {
       key: 'grade',
       label: '任教年级',
       options: gradeOptions,
       values: u => classes.data.filter(c => (c.teacher_ids || []).includes(u.id)).map(c => c.grade_id),
+    },
+    {
+      key: 'tag',
+      label: '班级标签',
+      options: classTagOptions,
+      values: u => classes.data.filter(c => (c.teacher_ids || []).includes(u.id)).flatMap(c => c.tags || []),
     },
     {
       key: 'class',
@@ -70,6 +90,7 @@ export function Personnel({
   ]
   const studentFields: FilterField<Row>[] = [
     { key: 'grade', label: '年级', options: gradeOptions, values: s => [classes.data.find(c => c.id === s.class_id)?.grade_id || ''] },
+    { key: 'tag', label: '班级标签', options: classTagOptions, values: s => classes.data.find(c => c.id === s.class_id)?.tags || [] },
     { key: 'class', label: '行政班', options: classes.data.map(c => ({ value: c.id, label: classLabel(c.id) })), values: s => [s.class_id] },
   ]
 
@@ -100,6 +121,7 @@ export function Personnel({
           ? {
               name,
               grade_id: grade,
+              tags: classTags,
               teacher_ids: teachers,
               teaching: Object.fromEntries(teachers.filter(id => roles[id]).map(id => [id, roles[id]])),
               previous_teaching: selected.teaching || {},
@@ -121,9 +143,29 @@ export function Personnel({
     }
   }
 
+  async function saveBatchTags() {
+    if (!validClassIds.length || busy) return
+    setBusy(true)
+    try {
+      const res = await send<{ updated: number }>('/classes/batch-tags', {
+        class_ids: validClassIds,
+        tags: batchTags,
+        mode: batchTagMode,
+      })
+      message.success(`已更新 ${res.updated} 个班级的自定义标签`)
+      setBatchTagOpen(false)
+      await classes.reload()
+    } catch (e) {
+      message.error((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   function edit(type: string, row: Row) {
     setTeachers(row.teacher_ids || [])
     setRoles(row.teaching || {})
+    setClassTags(Array.isArray(row.tags) ? row.tags.map(String) : [])
     setKind(type)
     setSelected(row)
     setRole(row.role || 'teacher')
@@ -250,7 +292,7 @@ export function Personnel({
                 hideTitle
                 filterFields={classFields}
                 resource={classes}
-                searchText={c => [gradeName(c.grade_id), ...(c.teacher_ids || []).map(teacherName)]}
+                searchText={c => [gradeName(c.grade_id), ...(c.tags || []), ...(c.teacher_ids || []).map(teacherName)]}
                 path="/classes"
                 title="班级"
                 rowSelection={{
@@ -262,6 +304,16 @@ export function Personnel({
                     <div className="selection-action-bar">
                       <span className="selection-action-summary">已选 {validClassIds.length} 个班级</span>
                       <Space size={8}>
+                        <Button
+                          size="small"
+                          onClick={() => {
+                            setBatchTagMode('replace')
+                            setBatchTags([])
+                            setBatchTagOpen(true)
+                          }}
+                        >
+                          批量设置标签（{validClassIds.length}）
+                        </Button>
                         <BatchDeleteButton
                           kind="classes"
                           ids={validClassIds}
@@ -286,9 +338,19 @@ export function Personnel({
                     options: grades.data.filter(g => !g.archived).map(g => ({ label: g.name, value: g.id })),
                   },
                 ]}
+                creationFields={
+                  <Form.Item name="tags" label="自定义标签（可选）">
+                    <Select
+                      mode="tags"
+                      placeholder="输入或选择标签，如：直卓、卓越、重点、实验、普通"
+                      options={classTagOptions}
+                    />
+                  </Form.Item>
+                }
                 columns={[
                   { title: '班级', dataIndex: 'name' },
                   { title: '年级', dataIndex: 'grade_id', render: id => <GradeTag name={gradeName(id)} /> },
+                  { title: '自定义标签', dataIndex: 'tags', render: (tags: string[]) => <ClassTags tags={tags} /> },
                   {
                     title: '任教教师',
                     dataIndex: 'teacher_ids',
@@ -395,7 +457,19 @@ export function Personnel({
                   { title: '姓名', dataIndex: 'name' },
                   { title: '考号', dataIndex: 'candidate_number' },
                   { title: '年级', dataIndex: 'class_id', render: id => <GradeTag name={gradeName(classes.data.find(c => c.id === id)?.grade_id)} /> },
-                  { title: '班级', dataIndex: 'class_id', render: id => classes.data.find(c => c.id === id)?.name || id },
+                  {
+                    title: '班级',
+                    dataIndex: 'class_id',
+                    render: id => {
+                      const cls = classes.data.find(c => c.id === id)
+                      return (
+                        <Space size={6} wrap>
+                          <span>{cls?.name || id}</span>
+                          <ClassTags tags={cls?.tags} empty={null} />
+                        </Space>
+                      )
+                    },
+                  },
                   {
                     title: '操作',
                     render: (_, row) => (
@@ -439,6 +513,15 @@ export function Personnel({
                   value={grade}
                   onChange={setGrade}
                   records={grades.data.filter(g => !g.archived || g.id === grade)}
+                />
+              </Form.Item>
+              <Form.Item label="自定义标签">
+                <Select
+                  mode="tags"
+                  value={classTags}
+                  onChange={setClassTags}
+                  placeholder="输入或选择标签，如：直卓、卓越、重点、实验、普通"
+                  options={classTagOptions}
                 />
               </Form.Item>
               <Form.Item label="任教教师">
@@ -496,6 +579,7 @@ export function Personnel({
                   columns={[
                     { title: '班级', dataIndex: 'name' },
                     { title: '年级', render: (_, c) => gradeName(c.grade_id) },
+                    { title: '标签', render: (_, c) => <ClassTags tags={c.tags} /> },
                   ]}
                 />
               </Form.Item>
@@ -517,6 +601,35 @@ export function Personnel({
           {kind === 'users' && (
             <Form.Item label="重置密码（不修改时留空）">
               <Input.Password autoComplete="new-password" value={password} onChange={e => setPassword(e.target.value)} />
+            </Form.Item>
+          )}
+        </Form>
+      </Modal>
+      <Modal
+        title={`批量设置班级标签（已选 ${validClassIds.length} 个班级）`}
+        open={batchTagOpen}
+        onCancel={() => !busy && setBatchTagOpen(false)}
+        onOk={() => void saveBatchTags()}
+        confirmLoading={busy}
+        okButtonProps={{ disabled: batchTagMode !== 'clear' && !batchTags.length }}
+      >
+        <Form layout="vertical">
+          <Form.Item label="设置方式">
+            <Radio.Group value={batchTagMode} onChange={e => setBatchTagMode(e.target.value)}>
+              <Radio.Button value="replace">覆盖原标签</Radio.Button>
+              <Radio.Button value="add">追加标签</Radio.Button>
+              <Radio.Button value="clear">清空标签</Radio.Button>
+            </Radio.Group>
+          </Form.Item>
+          {batchTagMode !== 'clear' && (
+            <Form.Item label="自定义标签">
+              <Select
+                mode="tags"
+                value={batchTags}
+                onChange={setBatchTags}
+                placeholder="输入或选择标签，如：直卓、卓越、重点、实验、普通"
+                options={classTagOptions}
+              />
             </Form.Item>
           )}
         </Form>

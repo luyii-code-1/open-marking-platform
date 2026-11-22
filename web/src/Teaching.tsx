@@ -3,6 +3,7 @@ import { Alert, App, Card, Form, Modal, Popconfirm, Select, Space, Switch, Tag, 
 import { Table } from './DataTable'
 import { Button } from './Button'
 import { RecordSelect } from './RecordSelect'
+import { ClassTags, DEFAULT_CLASS_TAGS } from './SchoolTags'
 import { download, request, send, useResource, type Row } from './api'
 
 type TeachingRow = {
@@ -39,6 +40,13 @@ export function Teaching({
   const subjectChoices = [...new Set([...subjectTags.data.map(t => t.name), ...subjects.data.map(s => s.name)].filter(Boolean))].map(value => ({
     value,
   }))
+  const classTagOptions = useMemo(
+    () =>
+      [...new Set([...DEFAULT_CLASS_TAGS, ...classes.flatMap(c => (Array.isArray(c.tags) ? c.tags.map(String) : []))].filter(Boolean))].map(
+        value => ({ value, label: value }),
+      ),
+    [classes],
+  )
   const label = (c: Row) => [grades.find(g => g.id === c.grade_id)?.name || c.grade, c.name].filter(Boolean).join(' · ')
   const rows: TeachingRow[] = useMemo(
     () =>
@@ -123,6 +131,12 @@ export function Teaching({
             values: r => [classes.find(c => c.id === r.class_id)?.grade_id || ''],
           },
           {
+            key: 'tag',
+            label: '班级标签',
+            options: classTagOptions,
+            values: r => classes.find(c => c.id === r.class_id)?.tags || [],
+          },
+          {
             key: 'class',
             label: '行政班',
             options: classes.map(c => ({ value: c.id, label: label(c) })),
@@ -139,7 +153,16 @@ export function Teaching({
         rowKey="id"
         columns={[
           { title: '教师', dataIndex: 'teacher' },
-          { title: '行政班', dataIndex: 'className' },
+          {
+            title: '行政班',
+            dataIndex: 'className',
+            render: (value: string, r) => (
+              <Space size={6} wrap>
+                <span>{value}</span>
+                <ClassTags tags={classes.find(c => c.id === r.class_id)?.tags} empty={null} />
+              </Space>
+            ),
+          },
           { title: '学科', render: (_, r) => r.subjects?.join('、') || '—' },
           { title: '班主任', render: (_, r) => (r.homeroom == null ? '待设置' : r.homeroom ? '是' : '否') },
           {
@@ -209,10 +232,14 @@ export function Teaching({
               disabled={editing}
               records={classes}
               label={label}
-              fields={[{ key: 'grade', label: '年级', options: grades.map(g => ({ value: g.id, label: g.name })), values: c => [c.grade_id] }]}
+              fields={[
+                { key: 'grade', label: '年级', options: grades.map(g => ({ value: g.id, label: g.name })), values: c => [c.grade_id] },
+                { key: 'tag', label: '班级标签', options: classTagOptions, values: c => c.tags || [] },
+              ]}
               columns={[
                 { title: '班级', dataIndex: 'name' },
                 { title: '年级', render: (_, c) => grades.find(g => g.id === c.grade_id)?.name || c.grade },
+                { title: '标签', render: (_, c) => <ClassTags tags={c.tags} /> },
               ]}
             />
           </Form.Item>

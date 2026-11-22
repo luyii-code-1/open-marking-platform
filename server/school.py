@@ -14,6 +14,25 @@ def grade_by_name(db,name,actor=None):
     return existing or put(db,'grades',{'name':name,'archived':False},actor)
 
 
+def clean_class_tags(raw):
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise HTTPException(422, '班级标签格式无效')
+    tags = []
+    for item in raw:
+        text = str(item).strip()
+        if not text:
+            continue
+        if len(text) > 30:
+            raise HTTPException(422, '单个班级标签不能超过30字')
+        if text not in tags:
+            tags.append(text)
+    if len(tags) > 12:
+        raise HTTPException(422, '单个班级最多设置12个标签')
+    return tags
+
+
 def assign_class(db,value,body,actor=None):
     if 'grade_id' in body:
         grade=require(db,body['grade_id'],'grades')
@@ -22,6 +41,10 @@ def assign_class(db,value,body,actor=None):
     elif 'grade' in body and str(body['grade']).strip():
         grade=grade_by_name(db,body['grade'],actor)
         value.update(grade_id=grade['id'],grade=body['grade'])
+    if 'tags' in body:
+        value['tags']=clean_class_tags(body['tags'])
+    elif 'tags' not in value:
+        value['tags']=[]
     return value
 
 

@@ -51,13 +51,22 @@ def build_table(db, current, project_id, subject_id='', grade_id='', group_id=''
               and (not filters['groups'] or g['id'] in filters['groups'])]
     columns = [{'key':k, 'label':v} for k,v in [('candidate_number','准考证号'),('name','姓名'),('grade','年级'),('class_name','班级')]]
     students = {}; question_columns = {}; subject_columns = {}
+    from .db import objects as db_objects
+    class_objects = {c['id']:c for c in db_objects(db,'classes')}
     for g in groups:
         rows = published_rows(db, g, current) if g.get('frozen') else results_for(db, g['id'], current)
         subject = subjects[g['subject_id']]
         subject_columns[subject['id']] = subject['name']
         for row in rows:
             if row.get('class_id'):
-                choices['classes'].append({'id':row['class_id'],'name':str(row.get('grade') or '')+' · '+row['class_name']})
+                c_obj = class_objects.get(row['class_id'], {})
+                choices['classes'].append({
+                    'id':row['class_id'],
+                    'name':str(row.get('grade') or '')+' · '+row['class_name'],
+                    'grade_name':str(row.get('grade') or ''),
+                    'class_name':row['class_name'],
+                    'tags':c_obj.get('tags', []),
+                })
             choices['students'].append({'id':row['student_id'],'name':row['name']+' · '+str(row.get('candidate_number',''))})
             student = students.setdefault(row['student_id'], {**{k:row.get(k) for k in ('student_id','candidate_number','name','grade','class_id','class_name')}, '_scores':{}, '_records':[]})
             student['_records'].append((subject['id'], row))
