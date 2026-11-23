@@ -142,6 +142,7 @@ export function TagsManager({
       )}
       <Table<Row>
         rowKey="id"
+        query={search}
         loading={tags.loading}
         dataSource={visibleTags}
         pagination={{ defaultPageSize: 50, showSizeChanger: true }}
