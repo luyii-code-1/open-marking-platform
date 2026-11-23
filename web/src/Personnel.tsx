@@ -52,9 +52,13 @@ export function Personnel({
   const [batchTagTarget, setBatchTagTarget] = useState<'classes' | 'students'>('classes')
   const [batchTagMode, setBatchTagMode] = useState<'replace' | 'add' | 'clear'>('replace')
   const [batchTags, setBatchTags] = useState<string[]>([])
+  const [batchPwdOpen, setBatchPwdOpen] = useState(false)
+  const [batchPwd, setBatchPwd] = useState('')
+  const [batchRoleOpen, setBatchRoleOpen] = useState(false)
+  const [batchRole, setBatchRole] = useState<'teacher' | 'manager'>('teacher')
   const [classFilters, setClassFilters] = useState<FilterValues>({})
   const [studentFilters, setStudentFilters] = useState<FilterValues>({})
-  const { message } = App.useApp()
+  const { message, modal } = App.useApp()
 
   const applyClassFilter = (key: string, val: string) => {
     if (!val) return
@@ -216,6 +220,63 @@ export function Personnel({
     }
   }
 
+  async function saveBatchPassword() {
+    if (!validUserIds.length || busy) return
+    if (batchPwd.length < 10 || batchPwd.length > 200) {
+      message.warning('密码需 10 至 200 个字符')
+      return
+    }
+    setBusy(true)
+    try {
+      const res = await send<{ updated: number }>('/users/batch-reset-password', {
+        user_ids: validUserIds,
+        password: batchPwd,
+      })
+      message.success(`已将 ${res.updated} 个账号的密码重置为指定密码`)
+      setBatchPwdOpen(false)
+      setBatchPwd('')
+      setSelectedUserIds([])
+    } catch (e) {
+      message.error((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function confirmBatchForceLogout() {
+    if (!validUserIds.length || busy) return
+    modal.confirm({
+      title: `强制下线已选 ${validUserIds.length} 个教师账号？`,
+      content: '操作后这些账号当前的登录会话将立即失效，需要重新登录。',
+      okText: '确认下线',
+      cancelText: '取消',
+      onOk: async () => {
+        const res = await send<{ updated: number }>('/users/batch-force-logout', { user_ids: validUserIds })
+        message.success(`已强制下线 ${res.updated} 个账号`)
+        setSelectedUserIds([])
+      },
+    })
+  }
+
+  async function saveBatchRole() {
+    if (!validUserIds.length || busy) return
+    setBusy(true)
+    try {
+      const res = await send<{ updated: number }>('/users/batch-role', {
+        user_ids: validUserIds,
+        role: batchRole,
+      })
+      message.success(`已更新 ${res.updated} 个账号的角色`)
+      setBatchRoleOpen(false)
+      setSelectedUserIds([])
+      await reloadAll()
+    } catch (e) {
+      message.error((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   function edit(type: string, row: Row) {
     setTeachers(row.teacher_ids || [])
     setRoles(row.teaching || {})
@@ -266,7 +327,30 @@ export function Personnel({
                   validUserIds.length > 0 && (
                     <div className="selection-action-bar">
                       <span className="selection-action-summary">已选 {validUserIds.length} 个教师账号</span>
-                      <Space size={8}>
+                      <Space size={8} wrap>
+                        <Button
+                          size="small"
+                          onClick={() => {
+                            setBatchPwd('')
+                            setBatchPwdOpen(true)
+                          }}
+                        >
+                          批量重置密码（{validUserIds.length}）
+                        </Button>
+                        <Button size="small" onClick={confirmBatchForceLogout}>
+                          批量强制下线
+                        </Button>
+                        {systemAdmin && (
+                          <Button
+                            size="small"
+                            onClick={() => {
+                              setBatchRole('teacher')
+                              setBatchRoleOpen(true)
+                            }}
+                          >
+                            批量设置角色
+                          </Button>
+                        )}
                         <BatchDeleteButton
                           kind="users"
                           ids={validUserIds}
@@ -735,6 +819,50 @@ export function Personnel({
               />
             </Form.Item>
           )}
+        </Form>
+      </Modal>
+      <Modal
+        title={`批量重置密码（已选 ${validUserIds.length} 个教师账号）`}
+        open={batchPwdOpen}
+        onCancel={() => !busy && setBatchPwdOpen(false)}
+        onOk={() => void saveBatchPassword()}
+        confirmLoading={busy}
+        okText="确认重置"
+        okButtonProps={{ disabled: batchPwd.length < 10 || batchPwd.length > 200 }}
+      >
+        <Form layout="vertical">
+          <Form.Item
+            label="指定新密码（10 至 200 个字符）"
+            extra="所有已选账号的密码将被统一设为该密码，且其当前登录状态会立即失效。"
+          >
+            <Input.Password
+              autoComplete="new-password"
+              placeholder="请输入统一密码，至少 10 个字符"
+              value={batchPwd}
+              onChange={e => setBatchPwd(e.target.value)}
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
+      <Modal
+        title={`批量设置角色（已选 ${validUserIds.length} 个教师账号）`}
+        open={batchRoleOpen}
+        onCancel={() => !busy && setBatchRoleOpen(false)}
+        onOk={() => void saveBatchRole()}
+        confirmLoading={busy}
+        okText="确认修改"
+      >
+        <Form layout="vertical">
+          <Form.Item label="目标角色">
+            <Select
+              value={batchRole}
+              onChange={v => setBatchRole(v)}
+              options={[
+                { value: 'teacher', label: '阅卷教师' },
+                { value: 'manager', label: '管理教师' },
+              ]}
+            />
+          </Form.Item>
         </Form>
       </Modal>
     </>

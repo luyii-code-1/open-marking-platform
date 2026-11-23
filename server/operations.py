@@ -147,6 +147,79 @@ def promote(body:dict,current=Depends(admin)):
         return {'updated':len(classes)}
 
 
+@router.post('/users/batch-reset-password')
+def batch_reset_password(body:dict,current=Depends(admin)):
+    user_ids=body.get('user_ids')
+    password=body.get('password','')
+    if not isinstance(user_ids,list) or not user_ids or any(not isinstance(i,str) for i in user_ids):
+        raise HTTPException(422,'请选择至少一个账号')
+    if not isinstance(password,str) or not 10<=len(password)<=200:
+        raise HTTPException(422,'密码需10至200个字符')
+    hashed=password_hash(password)
+    with connect() as db:
+        db.execute('BEGIN IMMEDIATE')
+        updated=0
+        for uid in dict.fromkeys(user_ids):
+            person=db.execute('SELECT role FROM users WHERE id=?',(uid,)).fetchone()
+            if not person:
+                raise HTTPException(404,'账号不存在')
+            if current['role']=='manager' and person['role']!='teacher':
+                raise HTTPException(403,'管理教师只能重置普通教师密码')
+            db.execute('UPDATE users SET password=? WHERE id=?',(hashed,uid))
+            db.execute('DELETE FROM sessions WHERE user_id=?',(uid,))
+            put(db,'account-events',{'user_id':uid,'action':'password_reset','batch':True},current['id'])
+            updated+=1
+    return {'updated':updated}
+
+
+@router.post('/users/batch-force-logout')
+def batch_force_logout(body:dict,current=Depends(admin)):
+    user_ids=body.get('user_ids')
+    if not isinstance(user_ids,list) or not user_ids or any(not isinstance(i,str) for i in user_ids):
+        raise HTTPException(422,'请选择至少一个账号')
+    with connect() as db:
+        db.execute('BEGIN IMMEDIATE')
+        updated=0
+        for uid in dict.fromkeys(user_ids):
+            person=db.execute('SELECT role FROM users WHERE id=?',(uid,)).fetchone()
+            if not person:
+                raise HTTPException(404,'账号不存在')
+            if current['role']=='manager' and person['role']!='teacher':
+                raise HTTPException(403,'管理教师只能操作普通教师账号')
+            db.execute('DELETE FROM sessions WHERE user_id=?',(uid,))
+            put(db,'account-events',{'user_id':uid,'action':'force_logout','batch':True},current['id'])
+            updated+=1
+    return {'updated':updated}
+
+
+@router.post('/users/batch-role')
+def batch_user_role(body:dict,current=Depends(system_admin)):
+    user_ids=body.get('user_ids')
+    role=body.get('role')
+    if not isinstance(user_ids,list) or not user_ids or any(not isinstance(i,str) for i in user_ids):
+        raise HTTPException(422,'请选择至少一个账号')
+    if role not in ('teacher','manager','admin'):
+        raise HTTPException(422,'角色无效')
+    with connect() as db:
+        db.execute('BEGIN IMMEDIATE')
+        ids=list(dict.fromkeys(user_ids))
+        rows=[]
+        for uid in ids:
+            row=db.execute('SELECT id,name,role FROM users WHERE id=?',(uid,)).fetchone()
+            if not row:
+                raise HTTPException(404,'账号不存在')
+            rows.append(dict(row))
+        if role!='admin':
+            demoting_admins=sum(1 for r in rows if r['role']=='admin')
+            total_admins=db.execute("SELECT COUNT(*) FROM users WHERE role='admin'").fetchone()[0]
+            if demoting_admins and total_admins-demoting_admins<1:
+                raise HTTPException(409,'至少保留一名管理员')
+        for r in rows:
+            db.execute('UPDATE users SET role=? WHERE id=?',(role,r['id']))
+            put(db,'account-events',{'user_id':r['id'],'action':'profile_update','name':r['name'],'role':role,'batch':True},current['id'])
+    return {'updated':len(rows),'role':role}
+
+
 @router.post('/users/{identifier}/reset-password')
 def reset_password(identifier:str,body:dict,current=Depends(admin)):
     password=body.get('password','')
