@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import shutil
 import tempfile
+from uuid import NAMESPACE_URL, uuid5
 import zipfile
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
@@ -14,7 +15,7 @@ from .db import connect, get, put
 from .dependencies import system_admin
 
 router = APIRouter(prefix='/api/v1/system')
-RETENTION_SETTING_ID = 'system-log-retention'
+RETENTION_SETTING_ID = str(uuid5(NAMESPACE_URL, 'omp:system-log-retention'))
 
 
 def _dir_size(path: Path) -> tuple[int, int]:
@@ -50,6 +51,8 @@ def storage_summary(current=Depends(system_admin)):
         ('archives', '考试归档（archives）', root / 'archives'),
         ('backups', '数据库备份（backups）', root / 'backups'),
         ('assets', '题卡底图与资源（assets）', root / 'assets'),
+        ('scanner-distribution', '扫描端安装包（scanner-distribution）', root / 'scanner-distribution'),
+        ('http-guard', '安全防护数据（http-guard）', root / 'http-guard'),
         ('logs', '文件日志（logs）', root / 'logs'),
     ]
     breakdown = []
@@ -86,7 +89,8 @@ def update_log_retention(body: dict, current=Depends(system_admin)):
         raise HTTPException(422, '保留天数需为 0 至 3650 的整数（0 表示不限）')
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
-        saved = put(db, 'system-settings', {'id': RETENTION_SETTING_ID, 'retention_days': days}, current['id'])
+        existing = get(db, RETENTION_SETTING_ID, 'system-settings') or {}
+        saved = put(db, 'system-settings', {**existing, 'id': RETENTION_SETTING_ID, 'retention_days': days}, current['id'])
         return {'retention_days': saved['retention_days']}
 
 
@@ -121,7 +125,18 @@ def cleanup_logs(body: dict | None = None, current=Depends(system_admin)):
                             deleted_files += 1
                     except OSError:
                         pass
-        put(db, 'system-settings', {'id': RETENTION_SETTING_ID, 'retention_days': _get_retention_days(db), 'last_cleanup_at': datetime.now(timezone.utc).isoformat()}, current['id'])
+        existing = get(db, RETENTION_SETTING_ID, 'system-settings') or {}
+        put(
+            db,
+            'system-settings',
+            {
+                **existing,
+                'id': RETENTION_SETTING_ID,
+                'retention_days': _get_retention_days(db),
+                'last_cleanup_at': datetime.now(timezone.utc).isoformat(),
+            },
+            current['id'],
+        )
         return {'deleted_request_logs': max(0, deleted_req or 0), 'deleted_files': deleted_files, 'freed_bytes': freed_bytes, 'days': days}
 
 

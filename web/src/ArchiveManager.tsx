@@ -39,27 +39,35 @@ export function ArchiveManager({ projectId }: { projectId?: string }) {
     if (next) rememberExamContext({ projectId: next })
   }
 
-  const usage = useResource<any>(project ? `/projects/${project}/files` : null, null)
-  const [deleting, setDeleting] = useState<any>(null)
-  const jobs = useFileJobs(project)
-  const action = useAction()
-  const busy = action.busy
-  const [acknowledged, setAcknowledged] = useState(false)
-  const purged = !!projects.data.find(p => p.id === project)?.scans_purged
-
-  useEffect(() => {
-    setPlan(null)
-    setOutcome(null)
-    setAcknowledged(false)
-  }, [project])
-
   const deletedProjects = [
     ...new Map(
       archives.data.filter(a => a.project_deleted).map(a => [a.project_id, { id: a.project_id, name: `${a.project_name || a.project_id}（已删除）` }]),
     ).values(),
   ]
   const projectOptions = [...projects.data, ...deletedProjects.filter(p => !projects.data.some(active => active.id === p.id))]
-  const projectDeleted = archives.data.some(a => a.project_id === project && a.project_deleted)
+  const projectExists = projectOptions.some(p => p.id === project)
+  const effectiveProject = projectId ? project : projects.loaded && archives.loaded ? (projectExists ? project : '') : ''
+  const projectDeleted = archives.data.some(a => a.project_id === effectiveProject && a.project_deleted)
+
+  useEffect(() => {
+    if (!projectId && projects.loaded && archives.loaded && selectedProject && !projectExists) {
+      setSelectedProject('')
+    }
+  }, [projectId, projects.loaded, archives.loaded, selectedProject, projectExists])
+
+  const usage = useResource<any>(effectiveProject ? `/projects/${effectiveProject}/files` : null, null)
+  const [deleting, setDeleting] = useState<any>(null)
+  const jobs = useFileJobs(effectiveProject)
+  const action = useAction()
+  const busy = action.busy
+  const [acknowledged, setAcknowledged] = useState(false)
+  const purged = !!projects.data.find(p => p.id === effectiveProject)?.scans_purged
+
+  useEffect(() => {
+    setPlan(null)
+    setOutcome(null)
+    setAcknowledged(false)
+  }, [effectiveProject])
 
   useEffect(() => {
     const job = jobs.finished
@@ -87,7 +95,7 @@ export function ArchiveManager({ projectId }: { projectId?: string }) {
     }
   }, [jobs.finished])
 
-  const scoped = archives.data.filter(a => !project || a.project_id === project).sort((a, b) => b.created_at - a.created_at)
+  const scoped = archives.data.filter(a => !effectiveProject || a.project_id === effectiveProject).sort((a, b) => b.created_at - a.created_at)
   const projectName = (id: string) =>
     projectOptions.find(p => p.id === id)?.name || archives.data.find(a => a.project_id === id)?.project_name || id
 
@@ -103,10 +111,10 @@ export function ArchiveManager({ projectId }: { projectId?: string }) {
   }
 
   async function create() {
-    await enqueue('archive', `/projects/${project}/archive-jobs`)
+    await enqueue('archive', `/projects/${effectiveProject}/archive-jobs`)
   }
 
-  async function preview(id: string, targetProject = project) {
+  async function preview(id: string, targetProject = effectiveProject) {
     if (!targetProject) return
     setOutcome(null)
     await enqueue(`preview:${id}`, `/projects/${targetProject}/release-preview-jobs`, { archive_id: id, mode })
@@ -114,14 +122,14 @@ export function ArchiveManager({ projectId }: { projectId?: string }) {
 
   async function previewPurge() {
     setOutcome(null)
-    await enqueue('purge-preview', `/projects/${project}/release-preview-jobs`, { action: 'purge', mode: 'all' })
+    await enqueue('purge-preview', `/projects/${effectiveProject}/release-preview-jobs`, { action: 'purge', mode: 'all' })
   }
 
   async function release() {
     if (!plan || busy) return
     const id = plan.id
     setPlan(null)
-    await enqueue('release', `/projects/${project}/release-jobs`, { plan_id: id, confirm: true })
+    await enqueue('release', `/projects/${effectiveProject}/release-jobs`, { plan_id: id, confirm: true })
   }
 
   async function restore(id: string) {
@@ -141,7 +149,7 @@ export function ArchiveManager({ projectId }: { projectId?: string }) {
   const refreshAll = () => {
     void projects.reload()
     void archives.reload()
-    if (project) void usage.reload()
+    if (effectiveProject) void usage.reload()
   }
 
   const tableRows = [
@@ -168,14 +176,14 @@ export function ArchiveManager({ projectId }: { projectId?: string }) {
                 style={{ width: 280, maxWidth: '100%' }}
                 placeholder="选择考试项目"
                 disabled={busy}
-                value={projectOptions.some(p => p.id === project) ? project : undefined}
+                value={effectiveProject || undefined}
                 onChange={v => setProject(v || '')}
                 options={projectOptions.map(p => ({ label: p.name, value: p.id }))}
               />
             )}
             {!projectDeleted && (
               <>
-                <Button type="primary" loading={action.pending === 'archive'} disabled={busy || !project || jobs.active || purged} onClick={create}>
+                <Button type="primary" loading={action.pending === 'archive'} disabled={busy || !effectiveProject || jobs.active || purged} onClick={create}>
                   生成项目归档
                 </Button>
                 <Select
@@ -191,7 +199,7 @@ export function ArchiveManager({ projectId }: { projectId?: string }) {
                 />
                 <Button
                   danger
-                  disabled={busy || !project || jobs.active || purged}
+                  disabled={busy || !effectiveProject || jobs.active || purged}
                   loading={action.pending === 'purge-preview'}
                   onClick={previewPurge}
                 >
@@ -204,7 +212,7 @@ export function ArchiveManager({ projectId }: { projectId?: string }) {
             </Button>
           </Space>
 
-          {!project && (
+          {!effectiveProject && (
             <Alert type="info" showIcon message="请选择上方考试项目以核算空间、生成归档、预览释放或清理扫描文件；下方展示已有归档记录。" />
           )}
           {purged && <Alert type="info" showIcon message="本考试扫描文件已清理，成绩查询、统计与导出保留。已有归档仍可下载。" />}
@@ -217,10 +225,10 @@ export function ArchiveManager({ projectId }: { projectId?: string }) {
         </Space>
       </Card>
 
-      {project && (
+      {effectiveProject && (
         <Card
           size="small"
-          title={`空间占用摘要 · ${projectName(project)}`}
+          title={`空间占用摘要 · ${projectName(effectiveProject)}`}
           extra={
             <Button size="small" loading={usage.loading} onClick={() => void usage.reload()}>
               重新核算

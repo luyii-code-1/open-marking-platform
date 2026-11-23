@@ -72,10 +72,11 @@ def main():
         subprocess.run(['git','merge-base','--is-ancestor',old_revision,revision],cwd=REPO,check=True)
         image=command("docker inspect --format '{{.Config.Image}}' omp-production-api-1")
         if not re.fullmatch('[a-zA-Z0-9./:_-]+',image):raise RuntimeError('Invalid image reference')
+        base_image=command("if docker image inspect openmarkingplatform/api:base >/dev/null 2>&1; then echo openmarkingplatform/api:base; else echo "+shlex.quote(image)+"; fi")
         if release==old:raise RuntimeError('This source commit is already deployed')
         tag='openmarkingplatform/api:workspace-'+revision[:10]
         dockerfile=out/'Dockerfile'
-        dockerfile.write_text('FROM '+image+'\nRUN rm -rf /app/server /app/web/dist\nCOPY server/ /app/server/\nCOPY web/dist/ /app/web/dist/\nLABEL org.opencontainers.image.revision='+revision+'\n',encoding='utf-8')
+        dockerfile.write_text('FROM '+base_image+'\nRUN rm -rf /app/server /app/web/dist\nCOPY server/ /app/server/\nCOPY web/dist/ /app/web/dist/\nLABEL org.opencontainers.image.revision='+revision+'\n',encoding='utf-8')
         bundle=out/'context.tar.gz'
         with tarfile.open(bundle,'w:gz') as archive:
             archive.add(dockerfile,arcname='Dockerfile')
@@ -95,6 +96,7 @@ def main():
         phase('building_cloud_image',commit=revision)
         command('tar -xzf '+shlex.quote(release+'/build/context.tar.gz')+' -C '+shlex.quote(release+'/build'))
         command('docker build --network=none --pull=false -q -t '+shlex.quote(tag)+' '+shlex.quote(release+'/build'),timeout=240)
+        command('rm -rf '+shlex.quote(release+'/build'))
         # Always take one validated recovery point before a deployment.
         backup_script=(REPO/'deploy/database_backup.py').read_text(encoding='utf-8')
         write(release+'/deploy/database_backup.py',backup_script)
@@ -129,6 +131,23 @@ def main():
         command('docker cp '+shlex.quote(release+'/deploy/database_backup.py')+' omp-production-api-1:/tmp/omp-deployment-backup.py')
         rotation=json.loads(command('docker exec -e PYTHONPATH=/app omp-production-api-1 python /tmp/omp-deployment-backup.py complete '+revision))
         phase('backup_rotation',**rotation)
+        # Prune older release directories (keep current and previous) and unused images/build cache.
+        keep_releases={Path(release).name,Path(old).name}
+        keep_images={'openmarkingplatform/api:base',tag,image}
+        prune_cmd=(
+            'for d in '+BASE+'/releases/*; do '
+            'b=$(basename "$d"); '
+            'if [ -d "$d" ] && [ "$b" != '+shlex.quote(Path(release).name)+' ] && [ "$b" != '+shlex.quote(Path(old).name)+' ]; then rm -rf "$d"; fi; '
+            'done; '
+            'rm -rf '+shlex.quote(old+'/build')+'; '
+            'for img in $(docker images --format "{{.Repository}}:{{.Tag}}" openmarkingplatform/api); do '
+            'if [ "$img" != "openmarkingplatform/api:base" ] && [ "$img" != '+shlex.quote(tag)+' ] && [ "$img" != '+shlex.quote(image)+' ] && [ "$img" != "openmarkingplatform/api:<none>" ]; then docker rmi "$img" >/dev/null 2>&1 || true; fi; '
+            'done; '
+            'docker image prune -f >/dev/null 2>&1 || true; '
+            'docker builder prune -f --keep-storage=500MB >/dev/null 2>&1 || true'
+        )
+        command(prune_cmd,timeout=180)
+        phase('server_cleanup',kept_releases=sorted(keep_releases),kept_images=sorted(keep_images))
         changed=False
         report={'commit':revision,'release':release,'url':url,'backup':backup['backup'],'removed_backups':rotation['removed'],'build':local_build,'checks':'syntax, frontend build, bounded retries, automatic updates, build identity, cloud health and routes'}
         (out/'deployment.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')

@@ -101,12 +101,20 @@ def choices(current=Depends(admin)):
     with connect() as db:return [{k:v.get(k) for k in ('id','name','kind','bucket','is_default')} for v in objects(db,'storage-connections')]
 
 
+def _active_connection_assets(db,identifier):
+    active_projects={p['id'] for p in objects(db,'projects')}
+    return [
+        r for r in find(db,'storage-assets',connection_id=identifier)
+        if r.get('status')=='stored' and (not r.get('project_id') or r.get('project_id') in active_projects)
+    ]
+
+
 def save(body,current,identifier=None):
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
         old=config(identifier,db) if identifier else None
         value=validated(body,old)
-        if old and any(value.get(k)!=old.get(k) for k in ('kind','endpoint','bucket','prefix')) and find(db,'storage-assets',connection_id=identifier):
+        if old and any(value.get(k)!=old.get(k) for k in ('kind','endpoint','bucket','prefix')) and _active_connection_assets(db,identifier):
             raise HTTPException(409,'该连接已有文件登记；更换桶、端点或前缀请新增连接，原连接可更新凭据')
         saved={k:value.get(k) for k in PUBLIC if k not in ('id','last_test','revision')}
         saved['revision']=(old or {}).get('revision',0)+1
@@ -149,7 +157,7 @@ def update(identifier:str,body:dict,current=Depends(system_admin)):return save(b
 def remove(identifier:str,current=Depends(system_admin)):
     with connect() as db:
         db.execute('BEGIN IMMEDIATE');require(db,identifier,'storage-connections')
-        if find(db,'storage-assets',connection_id=identifier) or find(db,'projects',storage_connection_id=identifier):raise HTTPException(409,'连接仍被考试项目或文件引用，请保留以便读取和清理')
+        if _active_connection_assets(db,identifier) or find(db,'projects',storage_connection_id=identifier):raise HTTPException(409,'连接仍被考试项目或文件引用，请保留以便读取和清理')
         put(db,'storage-connection-events',{'connection_id':identifier,'action':'deleted'},current['id'])
         db.execute('UPDATE objects SET deleted=1 WHERE id=?',(identifier,))
     return {'status':'deleted'}

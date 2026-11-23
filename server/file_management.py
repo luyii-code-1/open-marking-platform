@@ -1,7 +1,7 @@
 """Project file accounting and removal of generated archive packages."""
 import time
 from fastapi import APIRouter, Depends, HTTPException
-from .db import connect, objects, find, put
+from .db import connect, get, objects, find, put
 from .dependencies import admin, require
 from .storage import local_path
 from .archive import package_path, checksum
@@ -12,13 +12,24 @@ router=APIRouter(prefix='/api/v1')
 @router.get('/projects/{identifier}/files')
 def files(identifier:str,current=Depends(admin)):
     with connect() as db:
-        require(db,identifier,'projects')
+        project=get(db,identifier,'projects')
+        archives=find(db,'archives',project_id=identifier)
+        if not project:
+            deleted_row=db.execute("SELECT 1 FROM objects WHERE id=? AND kind='projects' AND deleted=1",(identifier,)).fetchone()
+            if not deleted_row and not archives:
+                raise HTTPException(404,'记录不存在')
+            entries={}
+            for archive in archives:
+                path=package_path(archive['id'])
+                if path.is_file():
+                    entries['archive:'+archive['id']]={'id':'archive:'+archive['id'],'name':archive['id']+'.zip','kind':'归档包','local_bytes':path.stat().st_size,'remote_bytes':0}
+            rows=list(entries.values())
+            return {'items':rows,'local_bytes':sum(r['local_bytes'] for r in rows),'remote_bytes':0,'checked_at':time.time(),'unknown_remote_files':0,'project_deleted':True}
         subjects={s['id'] for s in find(db,'subjects',project_id=identifier)}
         groups={g['id'] for g in objects(db,'groups') if g.get('subject_id') in subjects}
         batches={b['id'] for b in objects(db,'scan-batches') if b.get('group_id') in groups}
         pages=[p for p in objects(db,'pages') if p.get('batch_id') in batches]
         refs=[r for r in find(db,'storage-assets',project_id=identifier) if r.get('status')=='stored']
-        archives=find(db,'archives',project_id=identifier)
         from .scan_files import page_suffixes
         entries={}
         for page in pages:

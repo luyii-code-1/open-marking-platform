@@ -134,7 +134,7 @@ def deployment_backup(root, action, release):
                 continue
             if path.is_symlink() or not path.resolve().is_relative_to(backups.resolve()):
                 raise ValueError('备份清理路径超出备份目录')
-            if path.suffix.lower() in ('.ompdb','.sqlite3','.sqlite','.db','.dump','.sql','.bak','.zip','.gz'):
+            if path.suffix.lower() in ('.ompdb','.sqlite3','.sqlite3-shm','.sqlite3-wal','.sqlite','.db','.dump','.sql','.bak','.zip','.gz'):
                 obsolete[path] = identity(path.stat(follow_symlinks=False))
         if os.environ.get('OMP_DATABASE_URL','').startswith(('postgresql:','postgres:')):
             for name in ('omp.sqlite3','omp.sqlite3-wal','omp.sqlite3-shm'):
