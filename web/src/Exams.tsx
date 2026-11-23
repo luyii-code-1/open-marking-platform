@@ -312,7 +312,6 @@ export function Exams({ location, navigate }: { location: ExamLocation; navigate
                           const projectSubjects = subjects.data.filter(s => s.project_id === p.id)
                           const subjectIds = new Set(projectSubjects.map(s => s.id))
                           const cardCount = groups.data.filter(g => subjectIds.has(g.subject_id)).length
-                          const completed = p.exam_status === 'completed'
                           return (
                             <button
                               type="button"
@@ -324,8 +323,11 @@ export function Exams({ location, navigate }: { location: ExamLocation; navigate
                                 <span className="recent-exam-card-name" title={p.name}>
                                   {p.name}
                                 </span>
-                                <Tag color={completed ? 'default' : 'processing'} style={{ marginInlineEnd: 0 }}>
-                                  {completed ? '已完成' : '进行中'}
+                                <Tag
+                                  color={p.exam_status === 'completed' ? 'default' : p.exam_status === 'pending_review' ? 'warning' : 'processing'}
+                                  style={{ marginInlineEnd: 0 }}
+                                >
+                                  {p.exam_status === 'completed' ? '已完成' : p.exam_status === 'pending_review' ? '等待审查' : '进行中'}
                                 </Tag>
                               </div>
                               <div className="recent-exam-card-meta">
@@ -351,6 +353,7 @@ export function Exams({ location, navigate }: { location: ExamLocation; navigate
                         onChange={setStatusFilter}
                         options={[
                           { value: 'in_progress', label: '进行中' },
+                          { value: 'pending_review', label: '等待审查' },
                           { value: 'completed', label: '已完成' },
                           { value: 'all', label: '全部' },
                         ]}

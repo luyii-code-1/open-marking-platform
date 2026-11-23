@@ -1,7 +1,7 @@
 import type {ReviewRecord} from './reviewStore'
 import {questionLabel} from './mergeQuestions'
 
-export type ProjectFilter = 'in_progress' | 'completed' | 'all'
+export type ProjectFilter = 'in_progress' | 'pending_review' | 'completed' | 'all'
 export type ReviewProject = {
   id:string; name:string; exam_status:string; subjects:string[]; template_ids:string[]; question_count:number
 }

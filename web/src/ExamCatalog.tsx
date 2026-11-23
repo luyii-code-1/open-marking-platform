@@ -23,11 +23,11 @@ export function ExamCatalog(){
   const emptyText=catalog.data.length&&!visible.length?<Space><span>此状态下暂无题卡。</span><Button type="link" onClick={()=>setStatusFilter('all')}>查看全部考试题卡</Button></Space>:'暂无题卡'
   return <Card title="题卡索引" extra={<Button onClick={catalog.reload} loading={catalog.loading}>刷新</Button>}><ErrorNotice error={catalog.error||classes.error||grades.error} retry={catalog.reload}/>
     <Segmented<ProjectFilter> aria-label="考试状态" value={statusFilter} onChange={setStatusFilter} style={{marginBottom:12}} options={[
-      {value:'in_progress',label:'进行中'},{value:'completed',label:'已完成'},{value:'all',label:'全部'},
+      {value:'in_progress',label:'进行中'},{value:'pending_review',label:'等待审查'},{value:'completed',label:'已完成'},{value:'all',label:'全部'},
     ]}/>
     <Table<Row> rowKey="id" dataSource={visible} loading={catalog.loading} filterFields={fields} locale={{emptyText}} scroll={{x:'max-content'}} columns={[
       {title:'考试',dataIndex:'project_name'},
-      {title:'考试状态',render:(_,r)=><Tag color={r.project_exam_status==='completed'?'default':'processing'}>{r.project_exam_status==='completed'?'已完成':'进行中'}</Tag>},
+      {title:'考试状态',render:(_,r)=><Tag color={r.project_exam_status==='completed'?'default':r.project_exam_status==='pending_review'?'warning':'processing'}>{r.project_exam_status==='completed'?'已完成':r.project_exam_status==='pending_review'?'等待审查':'进行中'}</Tag>},
       {title:'科目',dataIndex:'subject_name'},
       {title:'年级',dataIndex:'grade_name'},
       {title:'题卡',render:(_,r)=><a href={path(r)}>{cardName(r,{id:r.subject_id,name:r.subject_name})}</a>},

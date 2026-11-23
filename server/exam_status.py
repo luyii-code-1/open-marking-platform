@@ -6,9 +6,9 @@ from .db import connect, objects, put
 from .dependencies import admin, require
 
 router = APIRouter(prefix='/api/v1')
-ExamStatus = Literal['in_progress', 'completed']
-ExamStatusFilter = Literal['all', 'in_progress', 'completed']
-ExamStatusMode = Literal['auto', 'in_progress', 'completed']
+ExamStatus = Literal['in_progress', 'pending_review', 'completed']
+ExamStatusFilter = Literal['all', 'in_progress', 'pending_review', 'completed']
+ExamStatusMode = Literal['auto', 'in_progress', 'pending_review', 'completed']
 STATUS_FIELDS = ('exam_status', 'exam_status_mode', 'auto_exam_status')
 
 
@@ -26,7 +26,7 @@ def project_views(db, projects, subjects=None, groups=None):
     result = []
     for project in projects:
         publications = project_subjects.get(project['id'], [])
-        automatic = 'completed' if publications and all(publications) else 'in_progress'
+        automatic = 'pending_review' if publications and all(publications) else 'in_progress'
         mode = project.get('exam_status_mode', 'auto')
         result.append({**project, 'exam_status_mode': mode, 'auto_exam_status': automatic,
                        'exam_status': automatic if mode == 'auto' else mode})

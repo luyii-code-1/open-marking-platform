@@ -20,12 +20,16 @@ const Exceptions = loadPage(() => import('./Exceptions').then(module => ({ defau
 const Results = loadPage(() => import('./Results').then(module => ({ default: module.Results })))
 
 export function ExamStatusTag({ row }: { row: Row }) {
-  const completed = row.exam_status === 'completed'
+  const status = row.exam_status || 'in_progress'
   const manual = row.exam_status_mode && row.exam_status_mode !== 'auto'
+  const label = status === 'completed' ? '已完成' : status === 'pending_review' ? '等待审查' : '进行中'
+  const color = status === 'completed' ? 'default' : status === 'pending_review' ? 'warning' : 'processing'
   return (
     <Space size={4}>
-      <Tag color={completed ? 'default' : 'processing'}>{completed ? '已完成' : '进行中'}</Tag>
-      {manual && <Tag>手动</Tag>}
+      <Tag color={color} style={{ marginInlineEnd: 0 }}>
+        {label}
+      </Tag>
+      {manual && <Tag style={{ marginInlineEnd: 0 }}>手动</Tag>}
     </Space>
   )
 }
@@ -34,16 +38,24 @@ export function ExamStatusMenu({ row, refresh }: { row: Row; refresh: () => Prom
   const [busy, setBusy] = useState(false)
   const { message } = App.useApp()
   const mode = row.exam_status_mode || 'auto'
-  const autoText = row.auto_exam_status === 'completed' ? '已完成' : '进行中'
+  const autoText = row.auto_exam_status === 'pending_review' ? '等待审查' : '进行中'
 
-  async function update(nextMode: 'auto' | 'in_progress' | 'completed') {
+  async function update(nextMode: 'auto' | 'in_progress' | 'pending_review' | 'completed') {
     if (busy || nextMode === mode) return
     setBusy(true)
     try {
       await send(`/projects/${row.id}/exam-status`, { mode: nextMode }, 'PUT')
       announceChanges(['projects', 'exam-catalog', 'review-projects'])
       await refresh()
-      message.success(nextMode === 'auto' ? '已恢复自动判断考试状态' : nextMode === 'completed' ? '已设为已完成' : '已设为进行中')
+      message.success(
+        nextMode === 'auto'
+          ? '已恢复自动判断考试状态'
+          : nextMode === 'completed'
+            ? '已手动结束并标记为已完成'
+            : nextMode === 'pending_review'
+              ? '已设为等待审查'
+              : '已设为进行中',
+      )
     } catch (e) {
       message.error((e as Error).message)
     } finally {
@@ -58,7 +70,8 @@ export function ExamStatusMenu({ row, refresh }: { row: Row; refresh: () => Prom
         items: [
           { key: 'auto', label: `自动判断（当前自动：${autoText}）`, onClick: () => void update('auto') },
           { key: 'in_progress', label: '手动设为进行中', onClick: () => void update('in_progress') },
-          { key: 'completed', label: '手动设为已完成', onClick: () => void update('completed') },
+          { key: 'pending_review', label: '手动设为等待审查', onClick: () => void update('pending_review') },
+          { key: 'completed', label: '手动结束（标记为已完成）', onClick: () => void update('completed') },
         ],
       }}
     >

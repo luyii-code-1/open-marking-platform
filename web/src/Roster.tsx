@@ -264,7 +264,7 @@ export function Roster({ groupId }: { groupId?: string }) {
                 { title: '姓名', dataIndex: 'name' },
                 { title: '年级', dataIndex: 'grade' },
                 { title: '班级', dataIndex: 'class_name' },
-                { title: '标签', render: (_, s) => <ClassTags tags={s.tags} colorMap={tagColors} max={5} /> },
+                { title: '标签', width: 220, render: (_, s) => <ClassTags tags={s.tags} colorMap={tagColors} /> },
                 {
                   title: '采集状态',
                   dataIndex: 'status',
@@ -306,7 +306,7 @@ export function Roster({ groupId }: { groupId?: string }) {
               { title: '姓名', dataIndex: 'name' },
               { title: '年级', dataIndex: 'grade' },
               { title: '班级', dataIndex: 'class_name' },
-              { title: '标签', render: (_, s) => <ClassTags tags={s.tags} colorMap={tagColors} max={5} /> },
+              { title: '标签', width: 220, render: (_, s) => <ClassTags tags={s.tags} colorMap={tagColors} /> },
               { title: '当前状态', dataIndex: 'in_roster', render: value => <Tag color={value ? 'green' : undefined}>{value ? '已在名单' : '可添加'}</Tag> },
             ]}
             fields={[

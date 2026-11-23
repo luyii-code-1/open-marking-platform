@@ -495,7 +495,7 @@ export function Personnel({
                   { title: '考号', dataIndex: 'candidate_number' },
                   { title: '年级', dataIndex: 'class_id', render: id => <GradeTag name={gradeName(classes.data.find(c => c.id === id)?.grade_id)} colorMap={tagColors} /> },
                   { title: '班级', dataIndex: 'class_id', render: id => classes.data.find(c => c.id === id)?.name || id },
-                  { title: '标签', render: (_, row) => <ClassTags tags={studentAllTags(row)} colorMap={tagColors} max={6} /> },
+                  { title: '标签', width: 240, render: (_, row) => <ClassTags tags={studentAllTags(row)} colorMap={tagColors} /> },
                   {
                     title: '操作',
                     render: (_, row) => (

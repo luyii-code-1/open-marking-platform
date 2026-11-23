@@ -28,6 +28,7 @@ function useReviewList<T>(path:string|null, changes:string[], interval:number) {
 
 function Status({value}:{value:string}) {
   if (value==='cached') return <Tag>本机缓存</Tag>
+  if (value==='pending_review') return <Tag color="warning">等待审查</Tag>
   return value==='completed'?<Tag>已结束</Tag>:<Tag color="processing">进行中</Tag>
 }
 
@@ -54,7 +55,7 @@ export function ReviewTasks({projectId,filter,onFilter,onProject,onOpen}:Props) 
   if (projectId) return <ProjectTasks key={projectId} projectId={projectId} project={project} cached={cached.get(projectId)}
     catalogPending={!workspace.offline&&!catalog.loaded} catalogError={catalog.error} onBack={()=>onProject()} onOpen={onOpen}/>
 
-  const visible=projects.filter(p=>filter==='all'||p.exam_status===filter||(filter==='in_progress'&&p.exam_status==='cached'))
+  const visible=projects.filter(p=>filter==='all'||p.exam_status===filter||(filter==='in_progress'&&(p.exam_status==='cached'||p.exam_status==='pending_review')))
   const emptyText=projects.length?<span>此状态下暂无考试。<Button type="link" onClick={()=>onFilter('all')}>查看全部考试</Button></span>
     :workspace.offline?'本机暂无缓存的阅卷任务。联网后可在阅卷中心领取作答。'
     :!catalog.loaded||catalog.error?'考试列表尚未加载。'
