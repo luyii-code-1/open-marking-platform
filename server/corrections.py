@@ -180,7 +180,7 @@ def mark_absent(identifier:str,body:dict,current=Depends(admin)):
         student=require(db,body.get('student_id'),'students')
         from .school import group_students
         members=group_students(db,group)
-        if (group.get('grade_id') or group.get('roster_mode')=='selected') and not any(s['id']==student['id'] for s in members):raise HTTPException(422,'学生不在本题卡应考名单中')
+        if group.get('roster_mode')!='open' and (group.get('grade_id') or group.get('roster_mode')=='selected') and not any(s['id']==student['id'] for s in members):raise HTTPException(422,'学生不在本题卡应考名单中')
         if not group.get('grade_id') and members is not None:student=next((s for s in members if s['id']==student['id']),student)
         from .student_history import snapshot
         student=snapshot(db,student)

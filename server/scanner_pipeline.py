@@ -63,15 +63,18 @@ def project_package(identifier: str, current=Depends(scan_admin)):
             if not template or template['status'] != 'published': continue
             from .school import group_students
             roster = group_students(db,group)
+            is_open_roster = group.get('roster_mode') == 'open' or not roster
+            scanner_roster = objects(db, 'students') if is_open_roster else roster
             confirmed=find(db,'submissions',group_id=group['id'])
             valid=[s for s in confirmed if s.get('pages') or s.get('status')=='absent']
             packaged.append({'id': group['id'], 'name': group['name'], 'subject_id': group['subject_id'], 'frozen': bool(group.get('frozen')), 'grade_id':group.get('grade_id'), 'grade_name':(get(db,group.get('grade_id'),'grades') or {}).get('name',''),
+                             'roster_mode': 'open' if is_open_roster else (group.get('roster_mode') or ('grade' if group.get('grade_id') else 'selected')),
                              'template': {**configuration(template), 'notice_layout':template.get('notice_layout',1), 'notice_template':template.get('notice_template')}, 'config_sha256': config_hash(template),
                              'confirmed_candidates':sorted({s['candidate_number'] for s in valid}),
                              'confirmed_students':len({s['student_id'] for s in valid}),
                              'confirmed_sheets':sum(bool(s.get('pages')) for s in valid),
                              'unassigned_sheets':sum(bool(s.get('pages')) and not s.get('room_tags') for s in valid),
-                             'roster': [{'id':s['id'],'candidate_number': s['candidate_number'], 'name': s['name']} for s in roster] if roster is not None else None})
+                             'roster': [{'id':s['id'],'candidate_number': s['candidate_number'], 'name': s['name']} for s in scanner_roster] if scanner_roster is not None else None})
         from .room_tags import view,progress
         rooms=[{**view(db,[t])[0],**progress(db,t)} for t in find(db,'room-tags',project_id=identifier)]
         return {'protocol': 'omp-scanner-4', 'engine_version': ENGINE_VERSION,
@@ -215,7 +218,10 @@ def upload_processed(identifier: str, normalized: UploadFile = File(), file: Upl
                     raise HTTPException(409,'页面已上传，请在管理后台核查')
                 if not existing:
                     from .school import group_students
-                    if not any(s['candidate_number']==result['candidate_number'] for s in group_students(db,group) or []):
+                    roster_members = group_students(db,group) or []
+                    is_open_roster = group.get('roster_mode') == 'open' or not roster_members
+                    allowed_students = objects(db, 'students') if is_open_roster else roster_members
+                    if not any(s['candidate_number']==result['candidate_number'] for s in allowed_students):
                         raise HTTPException(422,'更正的准考证号不在当前题卡名单中')
                     if any(s.get('pages') or s.get('status')=='absent' for s in find(db,'submissions',group_id=group['id'],candidate_number=result['candidate_number'])):
                         raise HTTPException(409,'此考生已有答卷')
@@ -241,6 +247,32 @@ def upload_processed(identifier: str, normalized: UploadFile = File(), file: Upl
                                    'image_url': f'/api/v1/pages/{capture_id}/image'}, current['id'])
             from .anomalies import check_candidate
             check_candidate(db, page, current['id'])
+            # Auto-enroll matched school students into the group's open roster on scan upload.
+            if side == 'front' and result.get('candidate_number') and '?' not in result['candidate_number']:
+                from .school import group_students, student_view
+                from .candidate_numbers import by_number
+                roster_members = group_students(db, group) or []
+                is_open_roster = group.get('roster_mode') == 'open' or not roster_members
+                if is_open_roster:
+                    matched_student = by_number(objects(db, 'students')).get(result['candidate_number'])
+                    if matched_student is not None:
+                        existing_map = {s['id']: s for s in roster_members}
+                        if matched_student['id'] not in existing_map:
+                            existing_map[matched_student['id']] = student_view(db, matched_student)
+                            merged_ids = list(existing_map.keys())
+                            old_roster = get(db, group.get('roster_id'), 'rosters') or {}
+                            roster_body = {
+                                'group_id': group['id'],
+                                'source': old_roster.get('source', 'scan'),
+                                'class_ids': [],
+                                'students': list(existing_map.values()),
+                                'student_ids': merged_ids,
+                                'supplemental_ids': old_roster.get('supplemental_ids', []),
+                            }
+                            if group.get('roster_id'):
+                                roster_body['id'] = group['roster_id']
+                            saved_roster = put(db, 'rosters', roster_body, current['id'])
+                            group = put(db, 'groups', {**group, 'roster_mode': 'open', 'roster_id': saved_roster['id'], 'expected_students': len(merged_ids)}, current['id'])
             from .jobs import create_job
             from .storage import Storage
             subject = require(db, group['subject_id'], 'subjects')

@@ -1,6 +1,8 @@
 import re
 from collections import defaultdict
 
+NON_ACADEMIC_SUBJECTS = {'体育', '体育16节', '美术', '音乐', '心理', '音乐（心理高一）'}
+
 
 def matrix_import(db, tables, commit, actor, choices=None):
     from .teaching import save, Relation
@@ -12,7 +14,10 @@ def matrix_import(db, tables, commit, actor, choices=None):
     _, records = sheet
     rows = dict(records)
     labels, sub = rows.get(3, []), rows.get(4, [])
-    cols = [i for i in range(len(sub)-1) if sub[i:i+2] == ['姓名','班级'] and i < len(labels) and labels[i]]
+    cols = [
+        i for i in range(len(sub)-1)
+        if sub[i:i+2] == ['姓名','班级'] and i < len(labels) and labels[i] and labels[i].strip() not in NON_ACADEMIC_SUBJECTS
+    ]
     if not cols:
         raise HTTPException(422, '未找到第3、4行的学科、姓名和班级表头')
     from .teaching_accounts import resolve_accounts
