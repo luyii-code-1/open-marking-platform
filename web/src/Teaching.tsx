@@ -36,12 +36,14 @@ export function Teaching({
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [removingBatch, setRemovingBatch] = useState(false)
   const [teachingFilters, setTeachingFilters] = useState<FilterValues>({})
-  const applyTeachingTagFilter = (tagName: string) => {
+  const applyTeachingFilter = (key: string, val: string) => {
+    if (!val) return
     setTeachingFilters(prev => {
-      const cur = prev.tag || []
-      return { ...prev, tag: cur.includes(tagName) ? cur : [...cur, tagName] }
+      const cur = prev[key] || []
+      return { ...prev, [key]: cur.includes(val) ? cur : [...cur, val] }
     })
   }
+  const applyTeachingTagFilter = (tagName: string) => applyTeachingFilter('tag', tagName)
 
   const subjects = useResource<Row[]>('/subjects', [])
   const subjectTags = useResource<Row[]>('/subject-tags', [])
@@ -133,6 +135,12 @@ export function Teaching({
         }}
         filterFields={[
           {
+            key: 'teacher',
+            label: '教师',
+            options: [...new Map(rows.map(r => [r.teacher_id, { value: r.teacher_id, label: r.teacher || r.teacher_id }])).values()],
+            values: r => [r.teacher_id],
+          },
+          {
             key: 'grade',
             label: '年级',
             options: grades.map(g => ({ value: g.id, label: g.name })),
@@ -162,7 +170,23 @@ export function Teaching({
         dataSource={rows}
         rowKey="id"
         columns={[
-          { title: '教师', dataIndex: 'teacher' },
+          {
+            title: '教师',
+            dataIndex: 'teacher',
+            render: (value: string, r) => (
+              <Tag
+                color="cyan"
+                style={{ cursor: 'pointer', marginInlineEnd: 0 }}
+                title={`点击筛选「${value || r.teacher_id}」的任教关系`}
+                onClick={e => {
+                  e.stopPropagation()
+                  applyTeachingFilter('teacher', r.teacher_id)
+                }}
+              >
+                {value || r.teacher_id}
+              </Tag>
+            ),
+          },
           {
             title: '行政班',
             dataIndex: 'className',
@@ -173,7 +197,29 @@ export function Teaching({
               </Space>
             ),
           },
-          { title: '学科', render: (_, r) => r.subjects?.join('、') || '—' },
+          {
+            title: '学科',
+            render: (_, r) =>
+              r.subjects?.length ? (
+                <Space wrap size={[4, 4]}>
+                  {r.subjects.map(sub => (
+                    <Tag
+                      key={sub}
+                      style={{ cursor: 'pointer', marginInlineEnd: 0 }}
+                      title={`点击筛选「${sub}」学科`}
+                      onClick={e => {
+                        e.stopPropagation()
+                        applyTeachingFilter('subject', sub)
+                      }}
+                    >
+                      {sub}
+                    </Tag>
+                  ))}
+                </Space>
+              ) : (
+                '—'
+              ),
+          },
           { title: '班主任', render: (_, r) => (r.homeroom == null ? '待设置' : r.homeroom ? '是' : '否') },
           {
             title: '操作',

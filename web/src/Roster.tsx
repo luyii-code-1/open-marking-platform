@@ -279,7 +279,17 @@ export function Roster({ groupId }: { groupId?: string }) {
                   title: '采集状态',
                   dataIndex: 'status',
                   render: value => (
-                    <Tag color={value === 'scanned' ? 'green' : undefined}>
+                    <Tag
+                      color={value === 'scanned' ? 'green' : undefined}
+                      style={{ cursor: 'pointer', marginInlineEnd: 0 }}
+                      onClick={e => {
+                        e.stopPropagation()
+                        setRosterFilters(prev => {
+                          const cur = prev.status || []
+                          return { ...prev, status: cur.includes(value) ? cur : [...cur, value] }
+                        })
+                      }}
+                    >
                       {value === 'unscanned' ? '未扫描' : value === 'absent' ? '已确认缺考' : '已扫描'}
                     </Tag>
                   ),

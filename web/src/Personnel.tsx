@@ -56,21 +56,30 @@ export function Personnel({
   const [studentFilters, setStudentFilters] = useState<FilterValues>({})
   const { message } = App.useApp()
 
-  const applyClassTagFilter = (tagName: string) => {
+  const applyClassFilter = (key: string, val: string) => {
+    if (!val) return
     setClassFilters(prev => {
-      const cur = prev.tag || []
-      return { ...prev, tag: cur.includes(tagName) ? cur : [...cur, tagName] }
+      const cur = prev[key] || []
+      return { ...prev, [key]: cur.includes(val) ? cur : [...cur, val] }
     })
   }
-  const applyStudentTagFilter = (tagName: string) => {
+  const applyStudentFilter = (key: string, val: string) => {
+    if (!val) return
     setStudentFilters(prev => {
-      const cur = prev.tag || []
-      return { ...prev, tag: cur.includes(tagName) ? cur : [...cur, tagName] }
+      const cur = prev[key] || []
+      return { ...prev, [key]: cur.includes(val) ? cur : [...cur, val] }
     })
   }
+  const applyClassTagFilter = (tagName: string) => applyClassFilter('tag', tagName)
+  const applyStudentTagFilter = (tagName: string) => applyStudentFilter('tag', tagName)
   const jumpToStudentsByTag = (tagName: string) => {
     setStudentFilters({ tag: [tagName] })
     onTab?.('students')
+  }
+  const jumpToClassesByTag = (row: Row) => {
+    if (row.category === 'grade' && row.ref_id) setClassFilters({ grade: [row.ref_id] })
+    else setClassFilters({ tag: [row.name] })
+    onTab?.('classes')
   }
 
   const subjectChoices = [...new Set([...subjectTags.data.map(t => t.name), ...subjects.data.map(s => s.name)].filter(Boolean))].map(value => ({
@@ -105,9 +114,11 @@ export function Personnel({
   }
   const teacherName = (id: string) => users.data.find(u => u.id === id)?.name || id
   const gradeOptions = grades.data.map(g => ({ value: g.id, label: g.name }))
+  const teacherOptions = users.data.filter(u => u.role === 'teacher').map(u => ({ value: u.id, label: u.name }))
   const classFields: FilterField<Row>[] = [
     { key: 'grade', label: '年级', options: gradeOptions, values: c => [c.grade_id] },
     { key: 'tag', label: '班级标签', options: classTagOptions, values: c => c.tags || [] },
+    { key: 'teacher', label: '任教教师', options: teacherOptions, values: c => c.teacher_ids || [] },
   ]
   const teacherFields: FilterField<Row>[] = [
     {
@@ -396,15 +407,28 @@ export function Personnel({
                 }
                 columns={[
                   { title: '班级', dataIndex: 'name' },
-                  { title: '年级', dataIndex: 'grade_id', render: id => <GradeTag name={gradeName(id)} colorMap={tagColors} /> },
+                  {
+                    title: '年级',
+                    dataIndex: 'grade_id',
+                    render: id => <GradeTag name={gradeName(id)} colorMap={tagColors} onClick={() => applyClassFilter('grade', id)} />,
+                  },
                   { title: '自定义标签', dataIndex: 'tags', render: (tags: string[]) => <ClassTags tags={tags} colorMap={tagColors} onTagClick={applyClassTagFilter} /> },
                   {
                     title: '任教教师',
                     dataIndex: 'teacher_ids',
                     render: value => (
-                      <Space wrap size={[2, 4]}>
+                      <Space wrap size={[4, 4]}>
                         {(value || []).map((id: string) => (
-                          <Tag key={id} color="cyan">
+                          <Tag
+                            key={id}
+                            color="cyan"
+                            style={{ cursor: 'pointer', marginInlineEnd: 0 }}
+                            title={`点击筛选「${teacherName(id)}」任教的班级`}
+                            onClick={e => {
+                              e.stopPropagation()
+                              applyClassFilter('teacher', id)
+                            }}
+                          >
                             {teacherName(id)}
                           </Tag>
                         ))}
@@ -516,7 +540,14 @@ export function Personnel({
                 columns={[
                   { title: '姓名', dataIndex: 'name' },
                   { title: '考号', dataIndex: 'candidate_number' },
-                  { title: '年级', dataIndex: 'class_id', render: id => <GradeTag name={gradeName(classes.data.find(c => c.id === id)?.grade_id)} colorMap={tagColors} /> },
+                  {
+                    title: '年级',
+                    dataIndex: 'class_id',
+                    render: id => {
+                      const gid = classes.data.find(c => c.id === id)?.grade_id
+                      return <GradeTag name={gradeName(gid)} colorMap={tagColors} onClick={gid ? () => applyStudentFilter('grade', gid) : undefined} />
+                    },
+                  },
                   { title: '班级', dataIndex: 'class_id', render: id => classes.data.find(c => c.id === id)?.name || id },
                   { title: '标签', width: 240, render: (_, row) => <ClassTags tags={studentAllTags(row)} colorMap={tagColors} onTagClick={applyStudentTagFilter} /> },
                   {
@@ -549,6 +580,7 @@ export function Personnel({
                 grades={grades.data}
                 onChanged={reloadAll}
                 onFilterByTag={jumpToStudentsByTag}
+                onFilterClassesByTag={jumpToClassesByTag}
               />
             ),
           },

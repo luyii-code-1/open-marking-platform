@@ -24,12 +24,14 @@ export function TagsManager({
   grades,
   onChanged,
   onFilterByTag,
+  onFilterClassesByTag,
 }: {
   classes: Row[]
   students: Row[]
   grades: Row[]
   onChanged: () => Promise<unknown>
   onFilterByTag?: (tagName: string) => void
+  onFilterClassesByTag?: (row: Row) => void
 }) {
   const tags = useResource<Row[]>('/tags', [])
   const electives = useResource<Row[]>('/electives', [])
@@ -269,13 +271,30 @@ export function TagsManager({
           {
             title: '类别',
             dataIndex: 'category',
-            render: (value: string) => <Tag>{categoryLabels[value] || value}</Tag>,
+            render: (value: string) => (
+              <Tag
+                style={{ cursor: 'pointer', marginInlineEnd: 0 }}
+                title="点击按此类别筛选"
+                onClick={() => setCategory(value === 'grade' || value === 'elective' || value === 'custom' ? value : 'all')}
+              >
+                {categoryLabels[value] || value}
+              </Tag>
+            ),
           },
           {
             title: '关联班级',
             dataIndex: 'class_count',
             align: 'right',
-            render: (n: number) => (n ? `${n} 个` : '—'),
+            render: (n: number, row: Row) =>
+              n && onFilterClassesByTag ? (
+                <Button type="link" size="small" onClick={() => onFilterClassesByTag(row)}>
+                  {n} 个
+                </Button>
+              ) : n ? (
+                `${n} 个`
+              ) : (
+                '—'
+              ),
           },
           {
             title: '覆盖学生',
