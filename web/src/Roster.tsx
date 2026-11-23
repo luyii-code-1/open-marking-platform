@@ -8,6 +8,7 @@ import { HierarchyPicker } from './HierarchyPicker'
 import { ErrorNotice } from './EntityTable'
 import { RecordPicker } from './RecordPicker'
 import { ClassTags } from './SchoolTags'
+import type { FilterValues } from './recordFilters'
 
 type CandidateList = {
   group_id: string
@@ -45,6 +46,13 @@ export function Roster({ groupId }: { groupId?: string }) {
   const [importError, setImportError] = useState('')
   const [adding, setAdding] = useState(false)
   const [checked, setChecked] = useState<string[]>([])
+  const [rosterFilters, setRosterFilters] = useState<FilterValues>({})
+  const applyRosterTagFilter = (tagName: string) => {
+    setRosterFilters(prev => {
+      const cur = prev.tag || []
+      return { ...prev, tag: cur.includes(tagName) ? cur : [...cur, tagName] }
+    })
+  }
   const candidates = useResource<CandidateList | null>(adding && group ? `/groups/${group}/roster/candidates` : null, null)
   const data = resource.data?.group_id === group ? resource.data : null
   const frozen = !!current?.frozen
@@ -257,6 +265,8 @@ export function Roster({ groupId }: { groupId?: string }) {
                   values: s => [s.status],
                 },
               ]}
+              filterValues={rosterFilters}
+              onFilterValuesChange={setRosterFilters}
               pagination={{ defaultPageSize: 50, showSizeChanger: true }}
               locale={{ emptyText: '当前名单为空（开放扫入模式，扫入即自动加入，或点击上方「添加名单」）' }}
               columns={[
@@ -264,7 +274,7 @@ export function Roster({ groupId }: { groupId?: string }) {
                 { title: '姓名', dataIndex: 'name' },
                 { title: '年级', dataIndex: 'grade' },
                 { title: '班级', dataIndex: 'class_name' },
-                { title: '标签', width: 220, render: (_, s) => <ClassTags tags={s.tags} colorMap={tagColors} /> },
+                { title: '标签', width: 220, render: (_, s) => <ClassTags tags={s.tags} colorMap={tagColors} onTagClick={applyRosterTagFilter} /> },
                 {
                   title: '采集状态',
                   dataIndex: 'status',

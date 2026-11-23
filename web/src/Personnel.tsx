@@ -10,7 +10,7 @@ import { Button } from './Button'
 import { send, useResource, type Row } from './api'
 import { EntityTable, ErrorNotice } from './EntityTable'
 import { MultipleRecordSelect, RecordSelect } from './RecordSelect'
-import type { FilterField } from './recordFilters'
+import type { FilterField, FilterValues } from './recordFilters'
 
 export function Personnel({
   systemAdmin = false,
@@ -52,7 +52,26 @@ export function Personnel({
   const [batchTagTarget, setBatchTagTarget] = useState<'classes' | 'students'>('classes')
   const [batchTagMode, setBatchTagMode] = useState<'replace' | 'add' | 'clear'>('replace')
   const [batchTags, setBatchTags] = useState<string[]>([])
+  const [classFilters, setClassFilters] = useState<FilterValues>({})
+  const [studentFilters, setStudentFilters] = useState<FilterValues>({})
   const { message } = App.useApp()
+
+  const applyClassTagFilter = (tagName: string) => {
+    setClassFilters(prev => {
+      const cur = prev.tag || []
+      return { ...prev, tag: cur.includes(tagName) ? cur : [...cur, tagName] }
+    })
+  }
+  const applyStudentTagFilter = (tagName: string) => {
+    setStudentFilters(prev => {
+      const cur = prev.tag || []
+      return { ...prev, tag: cur.includes(tagName) ? cur : [...cur, tagName] }
+    })
+  }
+  const jumpToStudentsByTag = (tagName: string) => {
+    setStudentFilters({ tag: [tagName] })
+    onTab?.('students')
+  }
 
   const subjectChoices = [...new Set([...subjectTags.data.map(t => t.name), ...subjects.data.map(s => s.name)].filter(Boolean))].map(value => ({
     value,
@@ -316,6 +335,8 @@ export function Personnel({
               <EntityTable
                 hideTitle
                 filterFields={classFields}
+                filterValues={classFilters}
+                onFilterValuesChange={setClassFilters}
                 resource={classes}
                 searchText={c => [gradeName(c.grade_id), ...(c.tags || []), ...(c.teacher_ids || []).map(teacherName)]}
                 path="/classes"
@@ -376,7 +397,7 @@ export function Personnel({
                 columns={[
                   { title: '班级', dataIndex: 'name' },
                   { title: '年级', dataIndex: 'grade_id', render: id => <GradeTag name={gradeName(id)} colorMap={tagColors} /> },
-                  { title: '自定义标签', dataIndex: 'tags', render: (tags: string[]) => <ClassTags tags={tags} colorMap={tagColors} /> },
+                  { title: '自定义标签', dataIndex: 'tags', render: (tags: string[]) => <ClassTags tags={tags} colorMap={tagColors} onTagClick={applyClassTagFilter} /> },
                   {
                     title: '任教教师',
                     dataIndex: 'teacher_ids',
@@ -429,6 +450,8 @@ export function Personnel({
               <EntityTable
                 hideTitle
                 filterFields={studentFields}
+                filterValues={studentFilters}
+                onFilterValuesChange={setStudentFilters}
                 resource={students}
                 searchText={s => [classLabel(s.class_id), ...studentAllTags(s)]}
                 allowImport={false}
@@ -495,7 +518,7 @@ export function Personnel({
                   { title: '考号', dataIndex: 'candidate_number' },
                   { title: '年级', dataIndex: 'class_id', render: id => <GradeTag name={gradeName(classes.data.find(c => c.id === id)?.grade_id)} colorMap={tagColors} /> },
                   { title: '班级', dataIndex: 'class_id', render: id => classes.data.find(c => c.id === id)?.name || id },
-                  { title: '标签', width: 240, render: (_, row) => <ClassTags tags={studentAllTags(row)} colorMap={tagColors} /> },
+                  { title: '标签', width: 240, render: (_, row) => <ClassTags tags={studentAllTags(row)} colorMap={tagColors} onTagClick={applyStudentTagFilter} /> },
                   {
                     title: '操作',
                     render: (_, row) => (
@@ -519,7 +542,15 @@ export function Personnel({
           {
             key: 'tags',
             label: '标签',
-            children: <TagsManager classes={classes.data} students={students.data} grades={grades.data} onChanged={reloadAll} />,
+            children: (
+              <TagsManager
+                classes={classes.data}
+                students={students.data}
+                grades={grades.data}
+                onChanged={reloadAll}
+                onFilterByTag={jumpToStudentsByTag}
+              />
+            ),
           },
         ]}
       />

@@ -38,8 +38,18 @@ export function classTagColor(tag: string, colorMap?: Record<string, string>) {
   return presetTagColors[tag] || colors[Array.from(tag).reduce((n, c) => n + c.charCodeAt(0), 0) % colors.length]
 }
 
-export function GradeTag({ name, colorMap }: { name?: string; colorMap?: Record<string, string> }) {
-  return name ? <Tag color={gradeColor(name, colorMap)}>{name}</Tag> : <>待设置</>
+export function GradeTag({ name, colorMap, onClick }: { name?: string; colorMap?: Record<string, string>; onClick?: (name: string) => void }) {
+  return name ? (
+    <Tag
+      color={gradeColor(name, colorMap)}
+      style={onClick ? { cursor: 'pointer', marginInlineEnd: 0 } : undefined}
+      onClick={onClick ? e => { e.stopPropagation(); onClick(name) } : undefined}
+    >
+      {name}
+    </Tag>
+  ) : (
+    <>待设置</>
+  )
 }
 
 function estimateTagWidth(text: string) {
@@ -55,11 +65,13 @@ export function ClassTags({
   colorMap,
   empty = '—',
   max,
+  onTagClick,
 }: {
   tags?: string[]
   colorMap?: Record<string, string>
   empty?: string | null
   max?: number
+  onTagClick?: (tag: string) => void
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [fitCount, setFitCount] = useState<number>(max ?? tags?.length ?? 0)
@@ -122,7 +134,12 @@ export function ClassTags({
       style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'nowrap', overflow: 'hidden', width: '100%', minWidth: 0 }}
     >
       {visible.map(tag => (
-        <Tag key={tag} color={classTagColor(tag, colorMap)} style={{ marginInlineEnd: 0, flexShrink: 0 }}>
+        <Tag
+          key={tag}
+          color={classTagColor(tag, colorMap)}
+          style={{ marginInlineEnd: 0, flexShrink: 0, ...(onTagClick ? { cursor: 'pointer' } : {}) }}
+          onClick={onTagClick ? e => { e.stopPropagation(); onTagClick(tag) } : undefined}
+        >
           {tag}
         </Tag>
       ))}
@@ -140,7 +157,12 @@ export function ClassTags({
         title={
           <Space wrap size={[4, 4]}>
             {list.map(tag => (
-              <Tag key={tag} color={classTagColor(tag, colorMap)} style={{ marginInlineEnd: 0 }}>
+              <Tag
+                key={tag}
+                color={classTagColor(tag, colorMap)}
+                style={{ marginInlineEnd: 0, ...(onTagClick ? { cursor: 'pointer' } : {}) }}
+                onClick={onTagClick ? e => { e.stopPropagation(); onTagClick(tag) } : undefined}
+              >
                 {tag}
               </Tag>
             ))}

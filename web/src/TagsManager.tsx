@@ -1,13 +1,14 @@
 import { useMemo, useState } from 'react'
-import { App, Card, ColorPicker, Form, Input, Modal, Segmented, Select, Space, Tag, Typography } from 'antd'
+import { App, Card, ColorPicker, Divider, Form, Input, Modal, Radio, Segmented, Select, Space, Tag, Typography } from 'antd'
 import { PlusOutlined } from '@ant-design/icons'
 import { Table } from './DataTable'
 import { Button } from './Button'
 import { BatchDeleteButton, DeleteRecord } from './DeleteRecord'
-import { ErrorNotice } from './EntityTable'
+import { ErrorNotice } from './ErrorNotice'
+import { RecordPicker } from './RecordPicker'
 import { MultipleRecordSelect } from './RecordSelect'
-import { TAG_COLOR_CHOICES } from './SchoolTags'
-import { send, useResource, type Row } from './api'
+import { ClassTags, TAG_COLOR_CHOICES } from './SchoolTags'
+import { request, send, useResource, type Row } from './api'
 
 type CategoryFilter = 'all' | 'custom' | 'grade' | 'elective'
 
@@ -22,13 +23,16 @@ export function TagsManager({
   students,
   grades,
   onChanged,
+  onFilterByTag,
 }: {
   classes: Row[]
   students: Row[]
   grades: Row[]
   onChanged: () => Promise<unknown>
+  onFilterByTag?: (tagName: string) => void
 }) {
   const tags = useResource<Row[]>('/tags', [])
+  const electives = useResource<Row[]>('/electives', [])
   const [category, setCategory] = useState<CategoryFilter>('all')
   const [search, setSearch] = useState('')
   const [selectedIds, setSelectedIds] = useState<string[]>([])
@@ -40,8 +44,17 @@ export function TagsManager({
   const [classIds, setClassIds] = useState<string[]>([])
   const [studentIds, setStudentIds] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
+
+  // Elective member editor state (for built-in elective tags)
+  const [electiveGrade, setElectiveGrade] = useState('')
+  const [electiveKind, setElectiveKind] = useState<'required' | 'elective'>('elective')
+  const [electiveStudentIds, setElectiveStudentIds] = useState<string[]>([])
+  const [electivePickerOpen, setElectivePickerOpen] = useState(false)
+  const [savingElective, setSavingElective] = useState(false)
+
   const { message } = App.useApp()
 
+  const activeGrades = useMemo(() => grades.filter(g => !g.archived), [grades])
   const gradeName = (id?: string) => grades.find(g => g.id === id)?.name || ''
   const classLabel = (id?: string) => {
     const c = classes.find(item => item.id === id)
@@ -62,6 +75,13 @@ export function TagsManager({
     [selectedIds, tags.data],
   )
 
+  const loadElectiveGrade = (subjectName: string, gid: string) => {
+    setElectiveGrade(gid)
+    const entry = electives.data.find(e => e.grade_id === gid && e.subject === subjectName)
+    setElectiveKind(entry?.kind_of_subject === 'required' ? 'required' : 'elective')
+    setElectiveStudentIds(Array.isArray(entry?.student_ids) ? entry.student_ids : [])
+  }
+
   const openCreate = () => {
     setEditing(null)
     setName('')
@@ -79,7 +99,38 @@ export function TagsManager({
     setDescription(row.description || '')
     setClassIds(Array.isArray(row.class_ids) ? row.class_ids : [])
     setStudentIds(Array.isArray(row.direct_student_ids) ? row.direct_student_ids : [])
+    if (row.category === 'elective') {
+      const firstGrade =
+        electives.data.find(e => e.subject === row.name)?.grade_id ||
+        activeGrades[0]?.id ||
+        ''
+      loadElectiveGrade(row.name || '', firstGrade)
+    }
     setModalOpen(true)
+  }
+
+  async function saveElectiveMembers() {
+    if (!editing || !electiveGrade || savingElective) return
+    setSavingElective(true)
+    try {
+      const targetSubject = name.trim() || editing.name
+      await send(
+        '/electives',
+        {
+          grade_id: electiveGrade,
+          subject: targetSubject,
+          kind: electiveKind,
+          student_ids: electiveKind === 'required' ? [] : electiveStudentIds,
+        },
+        'PUT',
+      )
+      message.success(`已保存 ${gradeName(electiveGrade)}「${targetSubject}」选科成员`)
+      await Promise.all([electives.reload(), tags.reload(), onChanged()])
+    } catch (e) {
+      message.error((e as Error).message)
+    } finally {
+      setSavingElective(false)
+    }
   }
 
   async function save() {
@@ -109,7 +160,7 @@ export function TagsManager({
         message.success('标签已更新')
       }
       setModalOpen(false)
-      await Promise.all([tags.reload(), onChanged()])
+      await Promise.all([tags.reload(), electives.reload(), onChanged()])
     } catch (e) {
       message.error((e as Error).message)
     } finally {
@@ -117,11 +168,24 @@ export function TagsManager({
     }
   }
 
+  const electiveGradeClasses = useMemo(
+    () => classes.filter(c => c.grade_id === electiveGrade),
+    [classes, electiveGrade],
+  )
+  const electiveGradeClassMap = useMemo(
+    () => new Map(electiveGradeClasses.map(c => [c.id, c])),
+    [electiveGradeClasses],
+  )
+  const electiveGradeStudents = useMemo(
+    () => students.filter(s => electiveGradeClassMap.has(s.class_id)),
+    [students, electiveGradeClassMap],
+  )
+
   const isHex = /^#[0-9a-fA-F]{6}$/.test(color)
 
   return (
     <Card>
-      <ErrorNotice error={tags.error} retry={tags.reload} />
+      <ErrorNotice error={tags.error || electives.error} retry={() => Promise.all([tags.reload(), electives.reload()])} />
       {validSelectedIds.length > 0 && (
         <div className="selection-action-bar">
           <span className="selection-action-summary">已选 {validSelectedIds.length} 个自定义标签</span>
@@ -171,7 +235,7 @@ export function TagsManager({
                   { value: 'elective', label: '选科标签' },
                 ]}
               />
-              <Button onClick={() => void tags.reload()} loading={tags.loading}>
+              <Button onClick={() => void Promise.all([tags.reload(), electives.reload()])} loading={tags.loading}>
                 刷新
               </Button>
               <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
@@ -182,10 +246,22 @@ export function TagsManager({
         }
         columns={[
           {
-            title: '标签',
+            title: '标签（点击快速筛选学生）',
             dataIndex: 'name',
             render: (value: string, row: Row) => (
-              <Tag color={row.color || 'blue'} style={{ marginInlineEnd: 0 }}>
+              <Tag
+                color={row.color || 'blue'}
+                style={{ marginInlineEnd: 0, cursor: onFilterByTag ? 'pointer' : undefined }}
+                title={onFilterByTag ? `点击筛选包含「${value}」标签的学生` : undefined}
+                onClick={
+                  onFilterByTag
+                    ? e => {
+                        e.stopPropagation()
+                        onFilterByTag(value)
+                      }
+                    : undefined
+                }
+              >
                 {value}
               </Tag>
             ),
@@ -205,7 +281,14 @@ export function TagsManager({
             title: '覆盖学生',
             dataIndex: 'student_count',
             align: 'right',
-            render: (n: number) => `${n || 0} 人`,
+            render: (n: number, row: Row) =>
+              onFilterByTag ? (
+                <Button type="link" size="small" onClick={() => onFilterByTag(row.name)}>
+                  {n || 0} 人
+                </Button>
+              ) : (
+                `${n || 0} 人`
+              ),
           },
           {
             title: '说明',
@@ -217,7 +300,7 @@ export function TagsManager({
             className: 'row-actions',
             render: (_: unknown, row: Row) => (
               <Space>
-                <Button onClick={() => openEdit(row)}>编辑</Button>
+                <Button onClick={() => openEdit(row)}>{row.category === 'elective' ? '编辑 / 选科成员' : '编辑'}</Button>
                 {!row.builtin && (
                   <DeleteRecord
                     kind="tags"
@@ -237,7 +320,7 @@ export function TagsManager({
       <Modal
         title={editing ? `编辑标签 · ${editing.name}` : '新建自定义标签'}
         open={modalOpen}
-        width={620}
+        width={640}
         onCancel={() => !busy && setModalOpen(false)}
         onOk={() => void save()}
         confirmLoading={busy}
@@ -279,6 +362,54 @@ export function TagsManager({
               </Tag>
             </Space>
           </Form.Item>
+
+          {editing?.category === 'elective' && (
+            <>
+              <Divider style={{ margin: '12px 0' }} />
+              <Typography.Text strong style={{ display: 'block', marginBottom: 10 }}>
+                各年级选科成员维护（原「选科管理」已整合至此）
+              </Typography.Text>
+              <Space direction="vertical" size={10} style={{ width: '100%' }}>
+                <Space wrap align="center">
+                  <Select
+                    style={{ width: 140 }}
+                    placeholder="选择年级"
+                    value={electiveGrade || undefined}
+                    onChange={gid => loadElectiveGrade(editing.name, gid)}
+                    options={activeGrades.map(g => ({ value: g.id, label: g.name }))}
+                  />
+                  <Radio.Group
+                    value={electiveKind}
+                    onChange={e => setElectiveKind(e.target.value)}
+                    options={[
+                      { value: 'required', label: '必考（年级全体）' },
+                      { value: 'elective', label: '选考（指定学生）' },
+                    ]}
+                  />
+                </Space>
+                <Space wrap align="center">
+                  {electiveKind === 'elective' && (
+                    <Button disabled={!electiveGrade || savingElective} onClick={() => setElectivePickerOpen(true)}>
+                      选择学生 / Excel 导入（当前 {electiveStudentIds.length} 人）
+                    </Button>
+                  )}
+                  <Button
+                    type="primary"
+                    ghost
+                    loading={savingElective}
+                    disabled={!electiveGrade}
+                    onClick={() => void saveElectiveMembers()}
+                  >
+                    保存该年级选科名单
+                  </Button>
+                </Space>
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  支持上传学校多工作表选科矩阵 Excel，自动按「{editing.name}」列或外语列匹配选考学生。
+                </Typography.Text>
+              </Space>
+            </>
+          )}
+
           {(!editing || !editing.builtin) && (
             <>
               <Form.Item label="说明（可选）">
@@ -322,6 +453,52 @@ export function TagsManager({
           )}
         </Form>
       </Modal>
+
+      <RecordPicker<Row>
+        open={electivePickerOpen}
+        onClose={() => setElectivePickerOpen(false)}
+        title={`选择 ${gradeName(electiveGrade)}「${editing?.name || ''}」选考学生`}
+        records={electiveGradeStudents}
+        value={electiveStudentIds}
+        onChange={setElectiveStudentIds}
+        label={s => `${s.name}（${s.candidate_number}）`}
+        columns={[
+          { title: '准考证号', dataIndex: 'candidate_number' },
+          { title: '姓名', dataIndex: 'name' },
+          {
+            title: '行政班',
+            render: (_, s) => {
+              const cls = electiveGradeClassMap.get(s.class_id)
+              return (
+                <Space size={6} wrap>
+                  <span>{cls?.name || '—'}</span>
+                  <ClassTags tags={cls?.tags} empty={null} />
+                </Space>
+              )
+            },
+          },
+        ]}
+        fields={[
+          {
+            key: 'class',
+            label: '行政班',
+            options: electiveGradeClasses.map(c => ({ value: c.id, label: c.name })),
+            values: s => [s.class_id],
+          },
+        ]}
+        importer={{
+          templateUrl: '/selection/students/template',
+          templateName: '选考学生导入模板.xlsx',
+          upload: async file => {
+            const body = new FormData()
+            body.append('file', file)
+            return await request<string[]>(
+              `/electives/match?grade_id=${encodeURIComponent(electiveGrade)}&subject=${encodeURIComponent(editing?.name || '')}`,
+              { method: 'POST', body },
+            )
+          },
+        }}
+      />
     </Card>
   )
 }

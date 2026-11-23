@@ -4,6 +4,7 @@ import { Table } from './DataTable'
 import { Button } from './Button'
 import { RecordSelect } from './RecordSelect'
 import { ClassTags, DEFAULT_CLASS_TAGS } from './SchoolTags'
+import type { FilterValues } from './recordFilters'
 import { download, request, send, useResource, type Row } from './api'
 
 type TeachingRow = {
@@ -34,6 +35,13 @@ export function Teaching({
   const [busy, setBusy] = useState(false)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [removingBatch, setRemovingBatch] = useState(false)
+  const [teachingFilters, setTeachingFilters] = useState<FilterValues>({})
+  const applyTeachingTagFilter = (tagName: string) => {
+    setTeachingFilters(prev => {
+      const cur = prev.tag || []
+      return { ...prev, tag: cur.includes(tagName) ? cur : [...cur, tagName] }
+    })
+  }
 
   const subjects = useResource<Row[]>('/subjects', [])
   const subjectTags = useResource<Row[]>('/subject-tags', [])
@@ -149,6 +157,8 @@ export function Teaching({
             values: r => r.subjects || [],
           },
         ]}
+        filterValues={teachingFilters}
+        onFilterValuesChange={setTeachingFilters}
         dataSource={rows}
         rowKey="id"
         columns={[
@@ -159,7 +169,7 @@ export function Teaching({
             render: (value: string, r) => (
               <Space size={6} wrap>
                 <span>{value}</span>
-                <ClassTags tags={classes.find(c => c.id === r.class_id)?.tags} empty={null} />
+                <ClassTags tags={classes.find(c => c.id === r.class_id)?.tags} empty={null} onTagClick={applyTeachingTagFilter} />
               </Space>
             ),
           },

@@ -8,9 +8,15 @@ import {sortableColumns} from './tableSorting'
 function countLabel(total:number){
   return <span className="table-total">共 {total} 条数据</span>
 }
-type Props<T extends object>=TableProps<T>&{totalRows?:number;searchText?:(row:T)=>unknown;query?:string;filterFields?:FilterField<T>[];columnChooser?:boolean;serverSort?:boolean;toolbar?:ReactNode}
-export function Table<T extends object = any>({totalRows,pagination,footer,searchText,query,filterFields=[],columnChooser=true,serverSort=false,toolbar,...props}:Props<T>){
-  const [text,setText]=useState(''),[filters,setFilters]=useState<FilterValues>({}),[searchField,setSearchField]=useState(''),[hidden,setHidden]=useState<string[]>([])
+type Props<T extends object>=TableProps<T>&{totalRows?:number;searchText?:(row:T)=>unknown;query?:string;filterFields?:FilterField<T>[];filterValues?:FilterValues;onFilterValuesChange?:(next:FilterValues)=>void;columnChooser?:boolean;serverSort?:boolean;toolbar?:ReactNode}
+export function Table<T extends object = any>({totalRows,pagination,footer,searchText,query,filterFields=[],filterValues,onFilterValuesChange,columnChooser=true,serverSort=false,toolbar,...props}:Props<T>){
+  const [text,setText]=useState(''),[internalFilters,setInternalFilters]=useState<FilterValues>({}),[searchField,setSearchField]=useState(''),[hidden,setHidden]=useState<string[]>([])
+  const filters=filterValues??internalFilters
+  const setFilters=(updater:FilterValues|((prev:FilterValues)=>FilterValues))=>{
+    const next=typeof updater==='function'?updater(filters):updater
+    if(onFilterValuesChange)onFilterValuesChange(next)
+    else setInternalFilters(next)
+  }
   const wrapRef=useRef<HTMLDivElement>(null)
   const [autoY,setAutoY]=useState<number|undefined>(pagination===false?undefined:480)
   const explicitY=props.scroll?.y

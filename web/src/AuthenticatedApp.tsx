@@ -22,7 +22,6 @@ const { Text } = Typography
 const HttpGuard = loadPage(() => import('./HttpGuard'))
 const Dashboard = loadPage(() => import('./Dashboard').then(module => ({ default: module.Dashboard })))
 const SubjectCatalog = loadPage(() => import('./Electives').then(module => ({ default: module.SubjectCatalog })))
-const ElectiveManagement = loadPage(() => import('./Electives').then(module => ({ default: module.ElectiveManagement })))
 const Exams = loadPage(() => import('./Exams').then(module => ({ default: module.Exams })))
 const Marking = loadPage(() => import('./Marking').then(module => ({ default: module.Marking })))
 const ReviewTasks = loadPage(() => import('./ReviewTasks').then(module => ({ default: module.ReviewTasks })))
@@ -57,7 +56,7 @@ function Workspace({ user, authToken, offlineAccess, management, page, location,
   const items = [
     { key: 'dashboard', icon: <ApartmentOutlined />, label: '工作概览' },
     { type: 'group' as const, key: 'work', label: '考试工作', children: [
-      ...(management ? [{key:'scanner',icon:<ScanOutlined/>,label:'扫描台'},{ key: 'exams', icon: <BookOutlined />, label: '考试项目' },{key:'subject-catalog',icon:<BookOutlined/>,label:'科目管理'},{key:'electives',icon:<TeamOutlined/>,label:'选科管理'}] : []),
+      ...(management ? [{key:'scanner',icon:<ScanOutlined/>,label:'扫描台'},{ key: 'exams', icon: <BookOutlined />, label: '考试项目' },{key:'subject-catalog',icon:<BookOutlined/>,label:'科目管理'}] : []),
       ...(!management ? [{ key: 'marking', icon: <AuditOutlined />, label: '阅卷中心' }] : []),
       ...(management ? [{ key: 'exceptions', icon: <FileSearchOutlined />, label: '异常总览' }] : []),
       { key: 'results', icon: <ReadOutlined />, label: '成绩总览' },
@@ -81,7 +80,7 @@ function Workspace({ user, authToken, offlineAccess, management, page, location,
       <Layout.Content className={page==='marking'?'page-content marking-content':'page-content'}>
         {page === 'dashboard' && <Dashboard onNavigate={setPage} admin={management} />}
         {page === 'subject-catalog'&&management&&<SubjectCatalog/>}
-        {page === 'electives'&&management&&<ElectiveManagement/>}
+        {page === 'electives'&&management&&<Personnel systemAdmin={user.role==='admin'} tab="tags" onTab={key=>navigate('#/people/'+key)}/>}
         {page === 'exams' && <Exams location={location} navigate={navigate} />}
         {page === 'marking' && <ReviewTasks projectId={location.projectId} filter={reviewFilter} onFilter={setReviewFilter}
           onProject={id=>navigate(markingPath(id))} onOpen={(tid,qid)=>navigate(markingPath(location.projectId,tid,qid))}/>}
