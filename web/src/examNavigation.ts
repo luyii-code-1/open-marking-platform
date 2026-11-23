@@ -101,10 +101,10 @@ export function readLocation(hash: string): Location {
       return parts[3] === 'review' && parts[4] && parts[5]
         ? { ...project, templateId: parts[4], questionId: parts[5] } : project
     }
-    if (page==='people' && ['users','grades','classes','teaching','students'].includes(parts[1])) return {page,section:parts[1]}
+    if (page==='people' && ['users','grades','classes','teaching','students','tags'].includes(parts[1])) return {page,section:parts[1]}
     if (page==='http-guard') return {page,section:guardView(parts[1])}
     if (page==='settings' && parts[1]==='http-guard') return {page:'http-guard',section:'overview'}
-    if (page==='settings' && ['login','devices','storage','backups','audit'].includes(parts[1])) return {page,section:parts[1]}
+    if (page==='settings' && ['login','devices','storage','space','backups','audit'].includes(parts[1])) return {page,section:parts[1]}
     if (page !== 'exams') return { page }
     if (!parts[1]) return { page }
     const location: Location = { page, projectId: parts[1] }
