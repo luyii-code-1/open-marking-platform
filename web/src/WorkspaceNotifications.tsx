@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Alert, App, Badge, Drawer, Empty, Progress, Space, Tag, Typography } from 'antd'
+import { Alert, App, Drawer, Empty, Progress, Space, Tag, Typography } from 'antd'
 import { BellOutlined, CloseOutlined, ReloadOutlined, RightOutlined } from '@ant-design/icons'
 import { Button } from './Button'
 import { ErrorNotice } from './EntityTable'
@@ -325,15 +325,15 @@ export function WorkspaceNotificationButton({ compact = false, onlyWhenActive = 
   const count = jobs.length + (slow ? 1 : 0)
   if (onlyWhenActive && count === 0) return null
   return (
-    <Badge count={count} size="small">
-      <Button
-        size={compact ? 'small' : undefined}
-        icon={<BellOutlined />}
-        aria-label={count > 0 ? `通知（${count} 条）` : '通知'}
-        onClick={() => setOpen(true)}
-      >
-        {compact ? (slow ? '服务较慢' : '通知') : '通知'}
-      </Button>
-    </Badge>
+    <Button
+      size={compact ? 'small' : 'middle'}
+      className={count > 0 ? 'topbar-notify-btn has-count' : 'topbar-notify-btn'}
+      icon={<BellOutlined />}
+      aria-label={count > 0 ? `通知（${count} 条）` : '通知'}
+      onClick={() => setOpen(true)}
+    >
+      <span>{compact && slow ? '服务较慢' : '通知'}</span>
+      {count > 0 && <span className="topbar-notify-count">{count > 99 ? '99+' : count}</span>}
+    </Button>
   )
 }

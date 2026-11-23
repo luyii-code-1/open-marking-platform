@@ -214,7 +214,8 @@ def confirm(identifier: str, body: dict, current=Depends(admin)):
         from .jobs import create_job
         job=create_job(db,'delete-hierarchy',{'plan_id':identifier},plan['project_id'],current['id'])
         value,_,_=information(db,plan['target']['kind'],plan['target']['id'])
-        plan.update(status='queued',reason=reason.strip(),confirmed_at=time.time(),locked_fingerprint=value['fingerprint'],job_id=job['id'],archive_id=str(uuid4()))
+        skip_archive=bool(body.get('skip_archive',False))
+        plan.update(status='queued',reason=reason.strip(),skip_archive=skip_archive,confirmed_at=time.time(),locked_fingerprint=value['fingerprint'],job_id=job['id'],archive_id=None if skip_archive else str(uuid4()))
         put(db,'deletion-plans',plan,current['id'])
     from .jobs import dispatch
     dispatch(job['id'],background=True)
@@ -307,6 +308,28 @@ def retire(db,plan,subject):
     plan.update(status='completed', completed_at=deleted_at,phase='已完成')
     return public(put(db, 'deletion-plans', plan, actor))
 
+def prepare_files_direct(db,plan):
+    from .storage import for_reference,local_path
+    files=[]
+    for row in db.execute("SELECT o.body FROM objects o JOIN deletion_scope s ON s.id=o.id WHERE o.kind='pages'"):
+        page=json.loads(row['body'])
+        from .scan_files import page_suffixes
+        for suffix in page_suffixes(page):
+            relative='pages/'+page['id']+suffix;path=local_path(relative)
+            refs=[json.loads(r['body']) for r in db.execute("SELECT body FROM objects WHERE kind='storage-assets' AND deleted=0 AND json_extract(body,'$.relative')=? AND json_extract(body,'$.status')='stored'",(relative,))]
+            if not path.exists() and not refs:
+                continue
+            try:
+                for r in refs:for_reference(r)
+            except Exception:raise HTTPException(409,'远端扫描文件位置与登记不一致，请检查原连接后重试')
+            if any(r['key'] not in (relative,'projects/'+plan['project_id']+'/'+relative) or r.get('project_id') not in (None,plan['project_id']) for r in refs):raise HTTPException(409,'远端扫描文件归属不一致')
+            size=path.stat().st_size if path.exists() else 0
+            files.append((plan['id'],relative,'',size,json.dumps(refs,ensure_ascii=False)))
+    db.executemany('INSERT INTO deletion_files(plan_id,relative,sha256,size,remote_refs) VALUES(?,?,?,?,?)',files)
+    plan.update(files_prepared=True,file_count=len(files),remote_files=sum(bool(json.loads(f[4])) for f in files))
+    put(db,'deletion-plans',plan,plan['actor'])
+
+
 def perform(job,progress):
     from .archive import create,verify
     from .lifecycle import operation
@@ -317,15 +340,23 @@ def perform(job,progress):
             db.execute('BEGIN IMMEDIATE');plan=require(db,identifier,'deletion-plans')
             if plan['status']=='completed':return public(plan)
             unchanged(db,plan,ownership)
-            plan.update(status='running',phase='生成并校验归档');put(db,'deletion-plans',plan,job['actor'])
-        create(plan['project_id'],plan['actor'],progress,plan['archive_id'],ownership,preserve_status=True)
-        archive,manifest,data=verify(plan['archive_id'],progress)
-        with connect() as db:
-            db.execute('BEGIN IMMEDIATE');unchanged(db,plan,ownership);validate_archive(db,plan,data)
-            if not plan.get('files_prepared'):prepare_files(db,plan,manifest)
-            files=[dict(r) for r in db.execute('SELECT * FROM deletion_files WHERE plan_id=? ORDER BY relative',(identifier,))]
-        # Validate every file and location before the first destructive call.
-        preflight_files(files,manifest)
+            skip_archive=bool(plan.get('skip_archive'))
+            plan.update(status='running',phase='清理本地及远端扫描图片' if skip_archive else '生成并校验归档');put(db,'deletion-plans',plan,job['actor'])
+        archive=None
+        if skip_archive:
+            with connect() as db:
+                db.execute('BEGIN IMMEDIATE');unchanged(db,plan,ownership)
+                if not plan.get('files_prepared'):prepare_files_direct(db,plan)
+                files=[dict(r) for r in db.execute('SELECT * FROM deletion_files WHERE plan_id=? ORDER BY relative',(identifier,))]
+        else:
+            create(plan['project_id'],plan['actor'],progress,plan['archive_id'],ownership,preserve_status=True)
+            archive,manifest,data=verify(plan['archive_id'],progress)
+            with connect() as db:
+                db.execute('BEGIN IMMEDIATE');unchanged(db,plan,ownership);validate_archive(db,plan,data)
+                if not plan.get('files_prepared'):prepare_files(db,plan,manifest)
+                files=[dict(r) for r in db.execute('SELECT * FROM deletion_files WHERE plan_id=? ORDER BY relative',(identifier,))]
+            # Validate every file and location before the first destructive call.
+            preflight_files(files,manifest)
         with connect() as db:
             db.execute('BEGIN IMMEDIATE');unchanged(db,plan,ownership)
             plan.update(phase='清理本地及远端扫描图片');put(db,'deletion-plans',plan,plan['actor'])
@@ -342,7 +373,7 @@ def perform(job,progress):
                 db.execute('BEGIN IMMEDIATE');guard(db,ownership)
                 for remote in json.loads(item['remote_refs']):
                     saved=require(db,remote['id'],'storage-assets')
-                    saved.update(status='archived',archive_id=archive['id'],deletion_plan_id=identifier)
+                    saved.update(status='deleted' if skip_archive else 'archived',archive_id=archive['id'] if archive else None,deletion_plan_id=identifier)
                     put(db,'storage-assets',saved,plan['actor'])
                 db.execute('UPDATE deletion_files SET done=1 WHERE plan_id=? AND relative=?',(identifier,item['relative']))
         if progress:progress(len(files),len(files),'移除业务记录')

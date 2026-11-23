@@ -6,7 +6,7 @@ import { announceChanges, send, useResource, type Row } from './api'
 import { ErrorNotice } from './EntityTable'
 
 const { Text } = Typography
-const defaults={kind:'s3',prefix:'omp',region:'us-east-1',addressing:'path',media_enabled:false}
+const defaults={kind:'s3',prefix:'omp',region:'us-east-1',addressing:'path',media_enabled:false,is_default:false}
 
 function ProbeResult({value}:{value:Row|null}) {
   if(!value)return null
@@ -21,20 +21,22 @@ export function StorageConnections() {
   async function save(){try{const value=await form.validateFields();setBusy('save');await send(editing?`/storage-connections/${editing.id}`:'/storage-connections',value,editing?'PUT':'POST');setOpen(false);form.resetFields();await resource.reload();message.success('存储连接已保存')}catch(e){if(e instanceof Error)message.error(e.message)}finally{setBusy('')}}
   async function test(media=false){try{const value=await form.validateFields();setBusy(media?'media':'test');setResult(await send('/storage-connections/test',{...value,id:editing?.id,test_media:media}))}catch(e){if(e instanceof Error)message.error(e.message)}finally{setBusy('')}}
   async function savedTest(row:Row){setBusy(row.id);try{await send(`/storage-connections/${row.id}/test`,{media:row.media_enabled});await resource.reload()}catch(e){message.error((e as Error).message)}finally{setBusy('')}}
+  async function toggleDefault(row:Row,enabled:boolean){setBusy('default:'+row.id);try{await send(`/storage-connections/${row.id}/default`,{is_default:enabled});await resource.reload();message.success(enabled?`已将「${row.name}」设为默认存储器`:'已取消默认存储器')}catch(e){message.error((e as Error).message)}finally{setBusy('')}}
   return <Space direction="vertical" size={24} style={{width:'100%'}}>
     <ErrorNotice error={resource.error} retry={resource.reload}/>
     <Card title="存储连接" extra={<Button type="primary" onClick={()=>edit(null)}>添加连接</Button>}>
       <Table rowKey="id" loading={resource.loading} dataSource={resource.data} pagination={{defaultPageSize:50}} columns={[
-        {title:'连接',render:(_,row)=><Space direction="vertical" size={0}><Text>{row.name}</Text><Text type="secondary">{row.bucket}</Text></Space>},
+        {title:'连接',render:(_,row)=><Space direction="vertical" size={0}><Space size={6}><Text>{row.name}</Text>{row.is_default&&<Tag color="blue" style={{marginInlineEnd:0}}>默认存储器</Tag>}</Space><Text type="secondary">{row.bucket}</Text></Space>},
         {title:'考试项目',dataIndex:'project_count'},
         {title:'媒体处理',render:(_,row)=><Tag>{row.media_enabled?'已开启':'关闭'}</Tag>},
         {title:'最近测试',render:(_,row)=>row.last_test?<Space direction="vertical" size={0}><Tag color={row.last_test.object_io==='passed'?'green':'red'}>{row.last_test.object_io==='passed'?'连接通过':'连接失败'}</Tag>{row.last_test.media==='unavailable'&&<Text type="warning">媒体未就绪</Text>}{row.last_test.media==='passed'&&<Text type="secondary">媒体通过</Text>}</Space>:<Text type="secondary">未测试</Text>},
-        {title:'操作',render:(_,row)=><Space wrap><Button onClick={()=>edit(row)}>编辑</Button><Button loading={busy===row.id} disabled={!!busy&&busy!==row.id} onClick={()=>savedTest(row)}>测试</Button><Popconfirm title="删除此存储连接？" onConfirm={async()=>{try{await send(`/storage-connections/${row.id}`,undefined,'DELETE');await resource.reload()}catch(e){message.error((e as Error).message)}}}><Button type="text" disabled={!!row.project_count}>删除</Button></Popconfirm></Space>},
+        {title:'操作',render:(_,row)=><Space wrap><Button onClick={()=>edit(row)}>编辑</Button><Button loading={busy==='default:'+row.id} disabled={!!busy&&busy!=='default:'+row.id} onClick={()=>toggleDefault(row,!row.is_default)}>{row.is_default?'取消默认':'设为默认'}</Button><Button loading={busy===row.id} disabled={!!busy&&busy!==row.id} onClick={()=>savedTest(row)}>测试</Button><Popconfirm title="删除此存储连接？" onConfirm={async()=>{try{await send(`/storage-connections/${row.id}`,undefined,'DELETE');await resource.reload()}catch(e){message.error((e as Error).message)}}}><Button type="text" disabled={!!row.project_count}>删除</Button></Popconfirm></Space>},
       ]}/>
     </Card>
     <Drawer title={editing?'编辑存储连接':'添加存储连接'} width={560} open={open} onClose={()=>{if(!busy){setOpen(false);form.resetFields();setResult(null)}}} extra={<Button type="primary" loading={busy==='save'} disabled={!!busy&&busy!=='save'} onClick={save}>保存</Button>}>
       <Form form={form} layout="vertical" initialValues={defaults} autoComplete="off">
         <Form.Item name="name" label="连接名称" rules={[{required:true}]}><Input maxLength={100}/></Form.Item>
+        <Form.Item name="is_default" label="设为默认存储器（新建考试项目将自动使用此存储连接）" valuePropName="checked"><Switch/></Form.Item>
         <Form.Item name="kind" label="服务类型"><Select options={[{value:'s3',label:'S3 / MinIO'},{value:'ros',label:'雨云 ROS'}]}/></Form.Item>
         <Form.Item name="endpoint" label="API端点" rules={[{required:true}]}><Input placeholder="https://s3.example.com"/></Form.Item>
         <Form.Item name="bucket" label="存储桶" rules={[{required:true}]}><Input/></Form.Item>

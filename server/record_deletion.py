@@ -11,7 +11,7 @@ from .dependencies import admin, require
 from .lifecycle import writable
 
 router = APIRouter(prefix='/api/v1')
-KINDS = Literal['room-tags', 'grades', 'classes', 'students', 'users', 'subject-tags', 'electives']
+KINDS = Literal['room-tags', 'grades', 'classes', 'students', 'users', 'subject-tags', 'electives', 'tags']
 KIND_LABELS = {
     'projects': '考试项目',
     'subjects': '科目',
@@ -22,6 +22,7 @@ KIND_LABELS = {
     'users': '教师账号',
     'subject-tags': '全校科目',
     'electives': '选科名单',
+    'tags': '自定义标签',
     'rosters': '应考名单',
     'scan-batches': '扫描批次',
     'submissions': '答卷',
@@ -31,16 +32,18 @@ KIND_LABELS = {
     'room-tags': '考场',
     'templates': '题卡版式',
 }
-IGNORED_KINDS = {'account-events', 'passkey', 'auth-challenge', 'recovery-code'}
+IGNORED_KINDS = {'account-events', 'passkey', 'auth-challenge', 'recovery-code', 'tag-meta'}
 
 
 class DeletePreviewRequest(BaseModel):
     ids: list[str] = Field(min_length=1, max_length=500)
+    mode: Literal['cascade', 'unlink'] = 'unlink'
 
 
 class DeleteExecuteRequest(BaseModel):
     ids: list[str] = Field(min_length=1, max_length=500)
     cascade: bool = False
+    mode: Literal['cascade', 'unlink'] = 'cascade'
 
 
 def _find_referenced_ids(value, id_set):
@@ -137,6 +140,12 @@ def _apply_unlink_to_copy(okind, obj, unlink_spec):
     if okind == 'classes':
         remove_teachers = unlink_spec.get('teachers', set())
         remove_subjects = unlink_spec.get('subjects', set())
+        remove_tags = unlink_spec.get('tags', set())
+        if unlink_spec.get('clear_grade'):
+            updated['grade_id'] = None
+            updated['grade'] = ''
+        if remove_tags:
+            updated['tags'] = [t for t in updated.get('tags', []) if t not in remove_tags]
         if remove_teachers:
             updated['teacher_ids'] = [uid for uid in updated.get('teacher_ids', []) if uid not in remove_teachers]
             teaching = dict(updated.get('teaching') or {})
@@ -157,6 +166,16 @@ def _apply_unlink_to_copy(okind, obj, unlink_spec):
                     teaching[uid] = role
             updated['teaching'] = teaching
             updated['teacher_ids'] = sorted(keep_ids)
+    elif okind == 'students':
+        remove_tags = unlink_spec.get('tags', set())
+        if remove_tags:
+            updated['tags'] = [t for t in updated.get('tags', []) if t not in remove_tags]
+        if unlink_spec.get('clear_class'):
+            updated['class_id'] = ''
+    elif okind == 'tags':
+        remove_students = unlink_spec.get('students', set())
+        if remove_students:
+            updated['student_ids'] = [sid for sid in updated.get('student_ids', []) if sid not in remove_students]
     elif okind == 'electives':
         remove_students = unlink_spec.get('students', set())
         if remove_students:
@@ -175,7 +194,7 @@ def _apply_unlink_to_copy(okind, obj, unlink_spec):
     return updated
 
 
-def plan_deletion(db, kind: KINDS, raw_ids: list[str]):
+def plan_deletion(db, kind: KINDS, raw_ids: list[str], mode: Literal['cascade', 'unlink'] = 'cascade'):
     ids = list(dict.fromkeys(i for i in raw_ids if isinstance(i, str) and i.strip()))
     if not ids:
         raise HTTPException(422, '请选择至少一条记录')
@@ -264,23 +283,62 @@ def plan_deletion(db, kind: KINDS, raw_ids: list[str]):
 
     if kind == 'grades':
         grade_set = set(ids)
-        for cls in all_classes:
-            if cls.get('grade_id') in grade_set:
-                mark_cascade_delete('classes', cls)
-                delete_class_ids.add(cls['id'])
-        for stu in all_students:
-            if stu.get('class_id') in delete_class_ids:
-                mark_cascade_delete('students', stu)
-                delete_student_ids.add(stu['id'])
-        for ele in all_electives:
-            if ele.get('grade_id') in grade_set:
-                mark_cascade_delete('electives', ele)
-                delete_elective_ids.add(ele['id'])
+        if mode == 'unlink':
+            for cls in all_classes:
+                if cls.get('grade_id') in grade_set:
+                    mark_unlink('classes', cls, 'clear_grade', {True}, '解除所属年级关联（保留班级与学生）')
+            for ele in all_electives:
+                if ele.get('grade_id') in grade_set:
+                    mark_cascade_delete('electives', ele)
+                    delete_elective_ids.add(ele['id'])
+        else:
+            for cls in all_classes:
+                if cls.get('grade_id') in grade_set:
+                    mark_cascade_delete('classes', cls)
+                    delete_class_ids.add(cls['id'])
+            for stu in all_students:
+                if stu.get('class_id') in delete_class_ids:
+                    mark_cascade_delete('students', stu)
+                    delete_student_ids.add(stu['id'])
+            for ele in all_electives:
+                if ele.get('grade_id') in grade_set:
+                    mark_cascade_delete('electives', ele)
+                    delete_elective_ids.add(ele['id'])
     elif kind == 'classes':
-        for stu in all_students:
-            if stu.get('class_id') in delete_class_ids:
-                mark_cascade_delete('students', stu)
-                delete_student_ids.add(stu['id'])
+        if mode == 'unlink':
+            for stu in all_students:
+                if stu.get('class_id') in delete_class_ids:
+                    mark_unlink('students', stu, 'clear_class', {True}, '解除行政班关联（保留学生资料）')
+        else:
+            for stu in all_students:
+                if stu.get('class_id') in delete_class_ids:
+                    mark_cascade_delete('students', stu)
+                    delete_student_ids.add(stu['id'])
+    elif kind == 'tags':
+        tag_names = {row['name'] for row in target_rows.values()}
+        direct_sids = {sid for row in target_rows.values() for sid in (row.get('student_ids') or [])}
+        if mode == 'unlink':
+            for cls in all_classes:
+                hit = tag_names & set(cls.get('tags') or [])
+                if hit:
+                    mark_unlink('classes', cls, 'tags', hit, f"从班级移除标签（{'、'.join(sorted(hit))}）")
+            for stu in all_students:
+                hit = tag_names & set(stu.get('tags') or [])
+                if hit:
+                    mark_unlink('students', stu, 'tags', hit, f"从学生移除标签（{'、'.join(sorted(hit))}）")
+        else:
+            for cls in all_classes:
+                if tag_names & set(cls.get('tags') or []):
+                    mark_cascade_delete('classes', cls)
+                    delete_class_ids.add(cls['id'])
+            for stu in all_students:
+                if (
+                    stu['id'] in direct_sids
+                    or (tag_names & set(stu.get('tags') or []))
+                    or stu.get('class_id') in delete_class_ids
+                ):
+                    mark_cascade_delete('students', stu)
+                    delete_student_ids.add(stu['id'])
     elif kind == 'subject-tags':
         tag_names = {row['name'] for row in target_rows.values()}
         tag_ids = set(ids)
@@ -337,8 +395,14 @@ def plan_deletion(db, kind: KINDS, raw_ids: list[str]):
                 if cls and cls.get('grade_id'):
                     student_grade_ids.add(cls['grade_id'])
         for group in all_groups:
-            if group.get('grade_id') in student_grade_ids and group.get('roster_mode') != 'selected':
+            if group.get('grade_id') in student_grade_ids and group.get('roster_mode') == 'grade':
                 add_blocker('groups', group['id'], _describe_object(ctx, 'groups', group), '学生已纳入该题卡的年级全体应考名单')
+        for tag_obj in objects(db, 'tags'):
+            if tag_obj['id'] in target_rows or tag_obj['id'] in cascade_delete_map:
+                continue
+            hit = delete_student_ids & set(tag_obj.get('student_ids') or [])
+            if hit:
+                mark_unlink('tags', tag_obj, 'students', hit, f'从自定义标签移出 {len(hit)} 名学生')
         for ele in all_electives:
             if ele['id'] in delete_elective_ids:
                 continue
@@ -479,22 +543,22 @@ def _public_plan(plan):
 def preview_delete_records(kind: KINDS, body: DeletePreviewRequest, current=Depends(admin)):
     with connect() as db:
         db.execute('BEGIN')
-        plan = plan_deletion(db, kind, body.ids)
-        return _public_plan(plan)
+        plan = plan_deletion(db, kind, body.ids, mode=body.mode)
+        return {**_public_plan(plan), 'mode': body.mode}
 
 
 @router.post('/records/{kind}/delete')
 def batch_delete_records(kind: KINDS, body: DeleteExecuteRequest, current=Depends(admin)):
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
-        plan = plan_deletion(db, kind, body.ids)
-        return _execute_plan(db, plan, current, cascade=body.cascade)
+        plan = plan_deletion(db, kind, body.ids, mode=body.mode)
+        return _execute_plan(db, plan, current, cascade=body.cascade or body.mode == 'unlink')
 
 
 @router.delete('/records/{kind}/{identifier}')
-def delete_record(kind: KINDS, identifier: str, cascade: bool = Query(False), current=Depends(admin)):
+def delete_record(kind: KINDS, identifier: str, cascade: bool = Query(False), mode: Literal['cascade', 'unlink'] = Query('cascade'), current=Depends(admin)):
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
-        plan = plan_deletion(db, kind, [identifier])
-        _execute_plan(db, plan, current, cascade=cascade)
+        plan = plan_deletion(db, kind, [identifier], mode=mode)
+        _execute_plan(db, plan, current, cascade=cascade or mode == 'unlink')
         return {'deleted': True}

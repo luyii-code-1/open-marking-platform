@@ -17,7 +17,14 @@ from .db import connect, find, get, objects, put
 from .dependencies import admin,system_admin, require
 
 router=APIRouter(prefix='/api/v1')
-PUBLIC=('id','name','kind','endpoint','bucket','prefix','region','addressing','media_url','media_enabled','revision','last_test')
+PUBLIC=('id','name','kind','endpoint','bucket','prefix','region','addressing','media_url','media_enabled','is_default','revision','last_test')
+
+
+def default_connection_id(db):
+    for item in objects(db,'storage-connections'):
+        if item.get('is_default'):
+            return item['id']
+    return None
 
 
 def cipher(create=False):
@@ -73,6 +80,8 @@ def validated(body,old=None):
     if value['addressing'] not in ('path','virtual'):raise HTTPException(422,'寻址方式无效')
     if not isinstance(value.get('media_enabled',False),bool):raise HTTPException(422,'媒体开关应为布尔值')
     value['media_enabled']=value.get('media_enabled',False)
+    if not isinstance(value.get('is_default',False),bool):raise HTTPException(422,'默认存储开关应为布尔值')
+    value['is_default']=value.get('is_default',False)
     if value['media_enabled'] and not value['media_url']:raise HTTPException(422,'开启媒体处理前请填写桶的媒体访问地址')
     for field in ('access_key','secret_key'):
         value[field]=str(body.get(field) or (old or {}).get(field) or '')
@@ -89,7 +98,7 @@ def listing(current=Depends(system_admin)):
 
 @router.get('/storage-connections/choices')
 def choices(current=Depends(admin)):
-    with connect() as db:return [{k:v[k] for k in ('id','name','kind','bucket')} for v in objects(db,'storage-connections')]
+    with connect() as db:return [{k:v.get(k) for k in ('id','name','kind','bucket','is_default')} for v in objects(db,'storage-connections')]
 
 
 def save(body,current,identifier=None):
@@ -103,7 +112,29 @@ def save(body,current,identifier=None):
         saved['revision']=(old or {}).get('revision',0)+1
         saved['credentials']=cipher(True).encrypt(json.dumps({k:value[k] for k in ('access_key','secret_key')}).encode()).decode()
         if identifier:saved['id']=identifier
-        return public(put(db,'storage-connections',saved,current['id']))
+        result=put(db,'storage-connections',saved,current['id'])
+        if result.get('is_default'):
+            for other in objects(db,'storage-connections'):
+                if other['id']!=result['id'] and other.get('is_default'):
+                    other['is_default']=False
+                    put(db,'storage-connections',other,current['id'])
+        return public(result)
+
+
+@router.post('/storage-connections/{identifier}/default')
+def set_default(identifier:str,body:dict|None=None,current=Depends(system_admin)):
+    enabled=bool((body or {}).get('is_default',True))
+    with connect() as db:
+        db.execute('BEGIN IMMEDIATE')
+        target=require(db,identifier,'storage-connections')
+        target['is_default']=enabled
+        put(db,'storage-connections',target,current['id'])
+        if enabled:
+            for other in objects(db,'storage-connections'):
+                if other['id']!=identifier and other.get('is_default'):
+                    other['is_default']=False
+                    put(db,'storage-connections',other,current['id'])
+        return public(target)
 
 
 @router.post('/storage-connections',status_code=201)

@@ -28,9 +28,9 @@ const editableCopy=(t:Template):Template=>lockedVersion(t)?structuredClone(t):un
 })
 export function TemplateEditor({ groupId }: { groupId?: string }) {
   const templates = useResource<Template[]>('/templates', []), groups = useResource<Row[]>('/groups', [])
-  const [value, setValue] = useState<Template>(() => emptyTemplate(groupId)), [questionId, setQuestionId] = useState(''), [page, setPage] = useState(1), [draw, setDraw] = useState(true)
-  const [saveAction, setSaveAction] = useState(''), [dirty, setDirty] = useState(false), [pane, setPane] = useState('objective'), [settingsOpen, setSettingsOpen] = useState(false)
-  const [answerMode,setAnswerMode]=useState(true),[forbiddenMode,setForbiddenMode]=useState(false)
+  const [value, setValue] = useState<Template>(() => emptyTemplate(groupId)), [questionId, setQuestionId] = useState(''), [page, setPage] = useState(1), [draw, setDraw] = useState(false)
+  const [saveAction, setSaveAction] = useState(''), [dirty, setDirty] = useState(false), [pane, setPane] = useState('setup'), [settingsOpen, setSettingsOpen] = useState(false)
+  const [answerMode,setAnswerMode]=useState(false),[forbiddenMode,setForbiddenMode]=useState(false)
   const [mergeIds,setMergeIds]=useState<string[]>([])
   const [editing,setEditing]=useState<TextTarget|null>(null)
   useEffect(()=>setEditing(null),[value.id])
@@ -129,7 +129,7 @@ export function TemplateEditor({ groupId }: { groupId?: string }) {
   }
   function load(template: Template) {
     if(saver.saving)return
-    const apply = () => { setDraw(template.questions.some(q=>q.type==='subjective'));saver.load(editableCopy(template)); if(!lockedVersion(template)&&JSON.stringify(template)!==JSON.stringify(saver.value))saver.edit(saver.value); setQuestionId(''); setNoteId('');setMergeIds([]); setPage(1); setSettingsOpen(false); setForbiddenMode(false); setAnswerMode(template.questions.some(q=>q.type!=='subjective')); setPane(template.questions.some(q => q.type !== 'subjective') ? 'objective' : template.questions.length ? 'subjective' : 'setup') }
+    const apply = () => { setDraw(false);saver.load(editableCopy(template)); if(!lockedVersion(template)&&JSON.stringify(template)!==JSON.stringify(saver.value))saver.edit(saver.value); setQuestionId(''); setNoteId('');setMergeIds([]); setPage(1); setSettingsOpen(false); setForbiddenMode(false); setAnswerMode(false); setPane('setup') }
     if (dirty) modal.confirm({ title: '切换题卡前放弃未保存修改？', onOk: apply }); else apply()
   }
   function removeVersion(){

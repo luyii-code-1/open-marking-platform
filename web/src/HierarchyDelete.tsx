@@ -6,7 +6,7 @@ import { MoreOutlined } from '@ant-design/icons'
 import { announceChanges, download, request, send, type Row } from './api'
 
 export function HierarchyDelete({ kind, target, onDeleted }: { kind: 'projects' | 'subjects' | 'groups'; target: Row; onDeleted: () => void | Promise<unknown> }) {
-  const [plan, setPlan] = useState<Row | null>(null), [reason, setReason] = useState(''), [accepted, setAccepted] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState('')
+  const [plan, setPlan] = useState<Row | null>(null), [reason, setReason] = useState(''), [accepted, setAccepted] = useState(false), [skipArchive, setSkipArchive] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState('')
   const { message } = App.useApp(), label = ({ projects: '考试项目', subjects: '科目', groups: '题卡' })[kind]
   const [job, setJob] = useState<Row | null>(null), done = useRef(''), callback = useRef(onDeleted)
   callback.current = onDeleted
@@ -33,7 +33,7 @@ export function HierarchyDelete({ kind, target, onDeleted }: { kind: 'projects' 
     return () => { active = false; clearInterval(timer) }
   }, [jobId, message])
   async function preview() {
-    setBusy(true); setError(''); setAccepted(false); setJob(null)
+    setBusy(true); setError(''); setAccepted(false); setSkipArchive(false); setJob(null)
     try { setPlan(await send<Row>(`/${kind}/${target.id}/deletion-preview`)) }
     catch (e) { message.error((e as Error).message) }
     finally { setBusy(false) }
@@ -42,13 +42,13 @@ export function HierarchyDelete({ kind, target, onDeleted }: { kind: 'projects' 
     if (!plan || !accepted || !reason.trim()) return
     setBusy(true); setError('')
     try {
-      setPlan(await send<Row>(`/deletion-plans/${plan.id}/confirm`, { confirm: true, reason: reason.trim() }))
+      setPlan(await send<Row>(`/deletion-plans/${plan.id}/confirm`, { confirm: true, reason: reason.trim(), skip_archive: skipArchive }))
     } catch (e) { setError((e as Error).message); setAccepted(false) }
     finally { setBusy(false) }
   }
   return <>
     <Dropdown menu={{ items: [{ key: 'delete', label: `删除${label}`, danger: true, onClick: preview }] }}><Button type="text" icon={<MoreOutlined />} loading={busy} aria-label={`${target.name}更多操作`} /></Dropdown>
-    <Modal title={executing ? `删除任务 · ${plan.target.name}` : `删除${label} · ${target.name}`} width={720} styles={{body:{maxHeight:'70vh',overflowY:'auto'}}} open={!!plan} onCancel={() => !busy && setPlan(null)} confirmLoading={busy} onOk={confirm} okText="归档后清理并删除" okButtonProps={{ danger: true, disabled: !accepted || !reason.trim() || !!plan?.blockers?.length || !plan || plan.expires_at < Date.now() / 1000 }} cancelButtonProps={{ disabled: busy }} maskClosable={!busy} footer={executing ? <Button onClick={() => setPlan(null)}>关闭</Button> : undefined}>
+    <Modal title={executing ? `删除任务 · ${plan.target.name}` : `删除${label} · ${target.name}`} width={720} styles={{body:{maxHeight:'70vh',overflowY:'auto'}}} open={!!plan} onCancel={() => !busy && setPlan(null)} confirmLoading={busy} onOk={confirm} okText={skipArchive ? '直接删除（不归档）' : '归档后清理并删除'} okButtonProps={{ danger: true, disabled: !accepted || !reason.trim() || !!plan?.blockers?.length || !plan || plan.expires_at < Date.now() / 1000 }} cancelButtonProps={{ disabled: busy }} maskClosable={!busy} footer={executing ? <Button onClick={() => setPlan(null)}>关闭</Button> : undefined}>
       {plan && <Space direction="vertical" size={20} style={{ width: '100%' }}>
         <Typography.Text type="secondary">{plan.path.join(' / ')}</Typography.Text>
         {executing ? <>
@@ -76,6 +76,7 @@ export function HierarchyDelete({ kind, target, onDeleted }: { kind: 'projects' 
         {plan.expires_at < Date.now() / 1000 && <Alert type="warning" message="预览已过期，请重新预览。" />}
         {error && <Alert type="error" message={error} action={<Button onClick={preview} disabled={busy}>重新预览</Button>} />}
         <div style={{ width: '100%' }}><Typography.Paragraph>删除原因</Typography.Paragraph><Input.TextArea value={reason} onChange={event => setReason(event.target.value)} rows={2} maxLength={1000} /></div>
+        <Checkbox checked={skipArchive} onChange={event => setSkipArchive(event.target.checked)}>不归档，直接删除项目及扫描数据（跳过归档打包，删除后无法通过归档恢复）</Checkbox>
         <Checkbox checked={accepted} onChange={event => setAccepted(event.target.checked)}>已核对以上范围，确认删除“{target.name}”</Checkbox>
         <Typography.Text type="secondary">预览有效期10分钟；数据发生变化时需重新预览。</Typography.Text>
         </>}

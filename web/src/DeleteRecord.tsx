@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Alert, App, Checkbox, Modal, Space, Spin, Tag, Typography } from 'antd'
+import { Alert, App, Checkbox, Modal, Radio, Space, Spin, Tag, Typography } from 'antd'
 import { Button } from './Button'
 import { ErrorNotice } from './EntityTable'
 import { send, type Row } from './api'
@@ -68,17 +68,18 @@ export function DeleteRecordsModal({
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState('')
   const [plan, setPlan] = useState<DeletePlan | null>(null)
+  const [mode, setMode] = useState<'unlink' | 'cascade'>('unlink')
   const [confirmed, setConfirmed] = useState(false)
   const [busy, setBusy] = useState(false)
   const { message } = App.useApp()
 
-  const loadPreview = useCallback(async () => {
+  const loadPreview = useCallback(async (targetMode: 'unlink' | 'cascade' = mode) => {
     if (!open || !ids.length) return
     setLoading(true)
     setLoadError('')
     setConfirmed(false)
     try {
-      const value = await send<DeletePlan>(`/records/${kind}/delete-preview`, { ids })
+      const value = await send<DeletePlan>(`/records/${kind}/delete-preview`, { ids, mode: targetMode })
       setPlan(value)
     } catch (e) {
       setPlan(null)
@@ -86,16 +87,17 @@ export function DeleteRecordsModal({
     } finally {
       setLoading(false)
     }
-  }, [open, kind, ids.join(',')])
+  }, [open, kind, ids.join(','), mode])
 
   useEffect(() => {
-    if (open) void loadPreview()
+    if (open) void loadPreview(mode)
     else {
       setPlan(null)
       setLoadError('')
       setConfirmed(false)
+      setMode('unlink')
     }
-  }, [open, loadPreview])
+  }, [open, mode, loadPreview])
 
   async function execute() {
     if (!plan || !plan.can_delete || busy) return
@@ -105,6 +107,7 @@ export function DeleteRecordsModal({
       const result = await send<{ deleted: number; cascaded_deletes: number; cascaded_unlinks: number }>(`/records/${kind}/delete`, {
         ids,
         cascade: plan.requires_cascade,
+        mode,
       })
       const extras = [
         result.cascaded_deletes ? `连带删除 ${result.cascaded_deletes} 项基础资料` : '',
@@ -117,7 +120,7 @@ export function DeleteRecordsModal({
       await onDeleted()
     } catch (e) {
       message.error(e instanceof Error ? e.message : '删除失败')
-      await loadPreview()
+      await loadPreview(mode)
     } finally {
       setBusy(false)
     }
@@ -138,7 +141,7 @@ export function DeleteRecordsModal({
       width={660}
       onCancel={() => !busy && onClose()}
       onOk={() => void execute()}
-      okText={plan?.requires_cascade ? '确认链式删除' : '确认删除'}
+      okText={plan?.requires_cascade ? (mode === 'unlink' ? '确认解绑并删除' : '确认链式删除') : '确认删除'}
       cancelText="取消"
       confirmLoading={busy}
       okButtonProps={{ danger: true, disabled: okDisabled }}
@@ -148,7 +151,21 @@ export function DeleteRecordsModal({
       destroyOnHidden
     >
       <Space direction="vertical" size={12} style={{ width: '100%' }}>
-        <ErrorNotice error={loadError} retry={loadPreview} />
+        <ErrorNotice error={loadError} retry={() => loadPreview(mode)} />
+        <div>
+          <Typography.Text strong style={{ display: 'block', marginBottom: 6 }}>
+            处理方式
+          </Typography.Text>
+          <Radio.Group
+            value={mode}
+            disabled={loading || busy}
+            onChange={e => setMode(e.target.value)}
+            options={[
+              { value: 'unlink', label: '解绑并删除目标（仅移除关联，保留附属子内容）' },
+              { value: 'cascade', label: '链式删除（连同附属子内容一并删除）' },
+            ]}
+          />
+        </div>
         {loading && (
           <div style={{ padding: '24px 0', textAlign: 'center' }}>
             <Spin tip="正在检查关联引用…" />
@@ -185,8 +202,12 @@ export function DeleteRecordsModal({
                 <Alert
                   type="warning"
                   showIcon
-                  message="检测到关联引用，确认后将执行链式删除"
-                  description="以下基础资料将被连带删除，关联绑定将被自动解除，审计记录保留。"
+                  message={mode === 'unlink' ? '检测到关联引用，确认后将仅解除绑定并删除目标记录' : '检测到关联引用，确认后将执行链式删除'}
+                  description={
+                    mode === 'unlink'
+                      ? '所选目标将被删除，以下关联对象中的绑定/标签将被自动移除，附属子内容保留，审计记录保留。'
+                      : '以下基础资料将被连带删除，关联绑定将被自动解除，审计记录保留。'
+                  }
                 />
                 {plan.cascade_deletes.length > 0 && (
                   <div>
@@ -205,7 +226,7 @@ export function DeleteRecordsModal({
                   </div>
                 )}
                 <Checkbox checked={confirmed} onChange={e => setConfirmed(e.target.checked)}>
-                  我已核对以上关联明细，确认执行链式删除
+                  {mode === 'unlink' ? '我已核对以上影响范围，确认解绑并删除' : '我已核对以上关联明细，确认执行链式删除'}
                 </Checkbox>
               </>
             ) : (

@@ -124,6 +124,9 @@ def edit_student(identifier:str,body:dict,current=Depends(admin)):
         item=require(db,identifier,'students')
         for key in ('name','candidate_number','class_id'):
             if key in body: item[key]=body[key]
+        if 'tags' in body:
+            from .school import clean_class_tags
+            item['tags']=clean_class_tags(body['tags'])
         require(db,item['class_id'],'classes')
         if not item.get('name') or not item.get('candidate_number'): raise HTTPException(422,'姓名及考号不能为空')
         from .candidate_numbers import validate

@@ -37,14 +37,7 @@ def bind(body:dict, current=Depends(system_admin)):
         db.execute('BEGIN IMMEDIATE')
         target = require(db,identifier,kind)
         if mode=='override':
-            from copy import deepcopy
-            config=require(db,cid,'score-conversions')
-            subject=target if kind=='subjects' else get(db,target.get('subject_id'),'subjects') if kind=='groups' else None
-            project_id=target['id'] if kind=='projects' else (subject or {}).get('project_id')
-            if config.get('project_id')!=project_id:
-                copied={k:deepcopy(v) for k,v in config.items() if k not in ('id','revision','change_reason')}
-                copied.update(project_id=project_id,source_template_id=cid,revision=1)
-                cid=put(db,'score-conversions',copied,current['id'])['id']
+            require(db,cid,'score-conversions')
         if kind=='groups' and target.get('frozen'):raise HTTPException(409,'成绩已发布，请先发起成绩复核')
         grade_id = body.get('grade_id')
         if grade_id:

@@ -74,7 +74,16 @@ def student_view(db,student):
 
 
 def group_students(db,group):
-    if group.get('roster_mode')=='selected':
+    mode=group.get('roster_mode')
+    if mode=='open':
+        roster=get(db,group.get('roster_id'),'rosters') or {}
+        students={s['id']:s for s in objects(db,'students')}
+        ids=list(roster.get('student_ids',[]))
+        for sub in find(db,'submissions',group_id=group['id']):
+            if sub.get('student_id') and sub['student_id'] not in ids:
+                ids.append(sub['student_id'])
+        return [student_view(db,students[sid]) for sid in ids if sid in students]
+    if mode=='selected':
         roster=get(db,group.get('roster_id'),'rosters') or {}
         students={s['id']:s for s in objects(db,'students')}
         return [student_view(db,students[sid]) for sid in roster.get('student_ids',[]) if sid in students]

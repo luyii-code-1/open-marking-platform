@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { ArrowLeftOutlined, RightOutlined } from '@ant-design/icons'
-import { Alert, Breadcrumb, Card, Empty, Form, Segmented, Space, Spin, Tabs, Tag, Tooltip, Typography } from 'antd'
+import { Alert, Breadcrumb, Card, Empty, Form, Radio, Segmented, Space, Spin, Tabs, Tag, Tooltip, Typography } from 'antd'
 import { Button } from './Button'
 import { Table } from './DataTable'
 import { CatalogPicker } from './Electives'
@@ -201,7 +201,7 @@ export function Exams({ location, navigate }: { location: ExamLocation; navigate
       render: (_: string, row: Row) => <a href={examPath({ ...base, groupId: row.id })}>{cardName(row, subject)}</a>,
     },
     { title: '版式', render: (_: unknown, row: Row) => (row.template_id ? '已发布' : '待设计') },
-    { title: '应考名单', render: (_: unknown, row: Row) => (row.roster_mode === 'selected' ? '指定名单' : row.grade_id ? '年级全体' : '待设置') },
+    { title: '应考名单', render: (_: unknown, row: Row) => (row.roster_mode === 'selected' ? '指定名单' : row.roster_mode === 'open' ? '开放扫入' : row.grade_id ? '年级全体' : '开放扫入') },
     {
       title: '赋分',
       render: (_: unknown, row: Row) =>
@@ -357,9 +357,19 @@ export function Exams({ location, navigate }: { location: ExamLocation; navigate
                       />
                     }
                     creationFields={
-                      <Form.Item name="catalog_ids" label="同时创建科目">
-                        <CatalogPicker />
-                      </Form.Item>
+                      <>
+                        <Form.Item name="category" label="项目类别" initialValue="exam">
+                          <Radio.Group>
+                            <Radio.Button value="exam">考试</Radio.Button>
+                            <Radio.Button value="statistics" disabled>
+                              统计（开发中，暂不可选）
+                            </Radio.Button>
+                          </Radio.Group>
+                        </Form.Item>
+                        <Form.Item name="catalog_ids" label="同时创建科目">
+                          <CatalogPicker />
+                        </Form.Item>
+                      </>
                     }
                     fields={[{ name: 'name', label: '考试名称' }]}
                     resource={filteredProjects}

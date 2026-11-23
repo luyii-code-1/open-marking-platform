@@ -146,16 +146,17 @@ def initialize_roster(db,group,actor):
 
 @router.post('/groups/{identifier}/roster/add-students')
 def supplement(identifier:str,body:dict,current=Depends(admin)):
-    from .school import group_students
+    from .school import group_students, student_view
     from .db import get
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
         group=require(db,identifier,'groups')
         if group.get('frozen'):raise HTTPException(409,RESULTS_REVIEW_GUIDE)
         ids=body.get('student_ids')
-        if not group.get('grade_id') or not isinstance(ids,list) or not ids or any(not isinstance(i,str) for i in ids):raise HTTPException(422,'请选择同年级学生')
-        added=members(db,group['grade_id'],set(ids))
-        if len(added)!=len(set(ids)):raise HTTPException(422,'请选择同年级学生')
+        if not isinstance(ids,list) or not ids or any(not isinstance(i,str) for i in ids):raise HTTPException(422,'请选择学生')
+        all_students={s['id']:s for s in objects(db,'students')}
+        added=[student_view(db,all_students[sid]) for sid in dict.fromkeys(ids) if sid in all_students]
+        if len(added)!=len(set(ids)):raise HTTPException(422,'包含不存在的学生')
         old=get(db,group.get('roster_id'),'rosters') or {}
         students={s['id']:s for s in group_students(db,group) or []}
         new_ids=set(ids)-students.keys()

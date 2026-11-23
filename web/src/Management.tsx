@@ -8,6 +8,7 @@ const Corrections = loadPage(() => import('./Corrections').then(module => ({ def
 const ScannerDevices = loadPage(() => import('./ScannerDevices').then(module => ({ default: module.ScannerDevices })))
 const AuditLog = loadPage(() => import('./AuditLog').then(module => ({ default: module.AuditLog })))
 const StorageConnections = loadPage(() => import('./StorageConnections').then(module => ({ default: module.StorageConnections })))
+const SystemStorage = loadPage(() => import('./SystemStorage').then(module => ({ default: module.SystemStorage })))
 const LoginPageSettings = loadPage(() => import('./LoginPageSettings').then(module => ({ default: module.LoginPageSettings })))
 const DatabaseBackups = loadPage(() => import('./DatabaseBackups').then(module => ({ default: module.DatabaseBackups })))
 
@@ -28,4 +29,4 @@ export function Scans({groupId,tab,onTab}:{groupId?:string;tab?:string;onTab?:(k
     {key:'correct',label:'纠正与补扫',children:<Corrections groupId={groupId} selectedGroup={group} onGroupChange={changeGroup} selectedBatch={selectedBatch} onBatchChange={setSelectedBatch} onOpenCapture={batchId=>{if(batchId)setSelectedBatch(batchId);changeTab('capture')}}/>},
   ]}/>
 }
-export function Settings({tab,onTab}:{tab?:string;onTab?:(key:string)=>void}={}) {return <Tabs activeKey={tab} onChange={onTab} items={[{key:'login',label:'登录页面',children:<LoginPageSettings/>},{key:'devices',label:'扫描设备',children:<ScannerDevices/>},{key:'storage',label:'存储连接',children:<StorageConnections/>},{key:'backups',label:'数据库备份',children:<DatabaseBackups/>},{key:'audit',label:'操作记录',children:<AuditLog/>}]}/>}
+export function Settings({tab,onTab}:{tab?:string;onTab?:(key:string)=>void}={}) {return <Tabs activeKey={tab} onChange={onTab} items={[{key:'login',label:'登录页面',children:<LoginPageSettings/>},{key:'devices',label:'扫描设备',children:<ScannerDevices/>},{key:'storage',label:'存储连接',children:<StorageConnections/>},{key:'space',label:'存储空间与日志',children:<SystemStorage/>},{key:'backups',label:'数据库备份',children:<DatabaseBackups/>},{key:'audit',label:'操作记录',children:<AuditLog/>}]}/>}

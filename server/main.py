@@ -226,25 +226,22 @@ def create_route(kind):
             if kind in ('projects','subjects','groups','classes','students','templates') and not str(value.get('name','')).strip():
                 raise HTTPException(422,'请填写名称')
             if kind=='projects':
+                category=value.get('category','exam')
+                if category!='exam':raise HTTPException(422,'统计类项目正在开发中，暂不可创建')
+                value['category']='exam'
                 value['status']='draft'
                 for field in STATUS_FIELDS:value.pop(field,None)
                 value['exam_status_mode']='auto'
             if kind=='subjects' and value.get('group_mode','custom') not in ('custom','default'):raise HTTPException(422,'分组方式无效')
             if kind=='groups':
                 value['template_id']=None
+                value.setdefault('roster_mode','open')
                 if value.get('grade_id'):require(db,value['grade_id'],'grades')
                 enabled=bool(value.pop('conversion_enabled',False))
                 cid=value.get('conversion_id') or None
                 if enabled or cid:
                     if not cid:raise HTTPException(422,'启用赋分时请选择赋分方案')
-                    from copy import deepcopy
                     config=require(db,cid,'score-conversions')
-                    subject=require(db,value['subject_id'],'subjects')
-                    if config.get('project_id')!=subject.get('project_id'):
-                        copied={k:deepcopy(v) for k,v in config.items() if k not in ('id','revision','change_reason')}
-                        copied.update(project_id=subject.get('project_id'),source_template_id=cid,revision=1)
-                        config=put(db,'score-conversions',copied,current['id'])
-                        cid=config['id']
                     value['conversion_mode']='override'
                     value['conversion_id']=cid
                     value['conversion_revision']=config.get('revision',1)
@@ -318,10 +315,6 @@ def create_route(kind):
             if kind=='projects' and catalog_ids:
                 from .electives import create_exam_subjects
                 create_exam_subjects(db,result,catalog_ids,current['id'])
-            if kind=='groups' and result.get('grade_id'):
-                from .electives import initialize_roster
-                initialize_roster(db,result,current['id'])
-                result=require(db,result['id'],'groups')
             if kind=='subjects' and value.get('group_mode')=='default':
                 from .templates import default_group
                 group=default_group(db,result['id'],current['id']);result['default_group_id']=group['id']
@@ -532,16 +525,22 @@ def pair(identifier:str,body:dict|None=Body(default=None),current=Depends(scan_a
         group=require(db,batch['group_id'],'groups')
         from .candidate_numbers import by_number,check_scanned_numbers
         from .school import group_students
-        roster_students=group_students(db,group)
-        if group.get('grade_id') or group.get('roster_mode')=='selected':
+        roster_students=group_students(db,group) or []
+        is_open_roster=group.get('roster_mode')=='open' or not roster_students
+        if is_open_roster:
+            check_scanned_numbers(db,numbers)
+            students=by_number(objects(db,'students'))
+        elif group.get('grade_id') or group.get('roster_mode')=='selected':
             check_scanned_numbers(db,numbers)
             students=by_number(roster_students)
         else:
-            students=by_number([*objects(db,'students'),*(roster_students or [])])
+            students=by_number([*objects(db,'students'),*roster_students])
         if any(number not in students for number in numbers): raise HTTPException(409,'考号不在学生名单中')
         if any(students[number] is None for number in numbers):raise HTTPException(409,'准考证号对应多个学生，请先核对学生资料和应考名单')
+        scanned_student_objs=[]
         for index,front in enumerate(fronts):
             student=students[front['candidate_number']]
+            scanned_student_objs.append(student)
             from .student_history import snapshot
             student=snapshot(db,student)
             if any(s['group_id']==batch['group_id'] and s['student_id']==student['id'] for s in objects(db,'submissions')): raise HTTPException(409,'已有该学生答卷，请明确执行补扫替换')
@@ -550,6 +549,16 @@ def pair(identifier:str,body:dict|None=Body(default=None),current=Depends(scan_a
             submission=sync(db,submission,template,current['id'])
             from .anomalies import check_submission
             check_submission(db,submission,current['id'])
+        if is_open_roster and scanned_student_objs:
+            existing_map={s['id']:s for s in roster_students}
+            for stu in scanned_student_objs:
+                existing_map.setdefault(stu['id'],stu)
+            merged_ids=list(existing_map.keys())
+            old_roster=get(db,group.get('roster_id'),'rosters') or {}
+            roster_body={'group_id':group['id'],'source':old_roster.get('source','scan'),'class_ids':[],'students':list(existing_map.values()),'student_ids':merged_ids,'supplemental_ids':old_roster.get('supplemental_ids',[])}
+            if group.get('roster_id'):roster_body['id']=group['roster_id']
+            saved_roster=put(db,'rosters',roster_body,current['id'])
+            put(db,'groups',{**group,'roster_mode':'open','roster_id':saved_roster['id'],'expected_students':len(merged_ids)},current['id'])
         batch['status']='paired'
         return put(db,'scan-batches',batch,current['id'])
 
@@ -580,6 +589,8 @@ from .storage_jobs import router as storage_jobs_router
 app.include_router(storage_jobs_router)
 from .storage_connections import router as storage_connections_router
 app.include_router(storage_connections_router)
+from .system_storage import router as system_storage_router
+app.include_router(system_storage_router)
 from .alignment import router as alignment_router
 app.include_router(alignment_router)
 from .scanner_auth import router as scanner_auth_router
@@ -603,6 +614,8 @@ app.include_router(scanner_workbench_router)
 
 from .school import router as school_router
 app.include_router(school_router)
+from .tags import router as tags_router
+app.include_router(tags_router)
 from .student_import import router as student_import_router
 app.include_router(student_import_router)
 

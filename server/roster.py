@@ -13,15 +13,30 @@ router=APIRouter(prefix='/api/v1')
 @router.get('/groups/{identifier}/roster/candidates')
 def roster_candidates(identifier:str,current=Depends(admin)):
     from .school import group_students,student_view
+    from .tags import student_tag_index
     with connect() as db:
-        db.execute('BEGIN')
+        db.execute('BEGIN IMMEDIATE')
         group=require(db,identifier,'groups')
-        if not group.get('grade_id'):raise HTTPException(422,'请先设置题卡所属年级')
-        classes=[c for c in objects(db,'classes') if c.get('grade_id')==group['grade_id']]
+        all_classes=objects(db,'classes')
+        classes=[c for c in all_classes if not group.get('grade_id') or c.get('grade_id')==group['grade_id']]
         class_ids={c['id'] for c in classes}
         selected={s['id'] for s in group_students(db,group) or []}
-        students=[{**student_view(db,s),'in_roster':s['id'] in selected} for s in objects(db,'students') if s.get('class_id') in class_ids]
-        return {'group_id':identifier,'grade_id':group['grade_id'],'classes':classes,'students':students,'roster_count':len(selected)}
+        catalog, by_student, colors = student_tag_index(db)
+        students=[
+            {**student_view(db,s),'in_roster':s['id'] in selected,'tags':by_student.get(s['id'],[])}
+            for s in objects(db,'students')
+            if not group.get('grade_id') or s.get('class_id') in class_ids
+        ]
+        tag_names=sorted({t for s in students for t in s.get('tags',[])})
+        return {
+            'group_id':identifier,
+            'grade_id':group.get('grade_id'),
+            'classes':classes,
+            'students':students,
+            'roster_count':len(selected),
+            'tag_options':tag_names,
+            'tag_colors':colors,
+        }
 
 
 @router.post('/groups/{identifier}/roster/remove-students')
@@ -40,9 +55,12 @@ def remove_roster_students(identifier:str,body:dict,current=Depends(admin)):
         if retained and body.get('confirm_retained') is not True:raise HTTPException(409,'所选学生已有答卷记录，请确认仅移出应考名单并保留已有答卷、评分和成绩')
         remaining=[s for s in members if s['id'] not in selected]
         old=get(db,group.get('roster_id'),'rosters') or {}
-        if group.get('grade_id') or group.get('roster_mode')=='selected':
+        if group.get('grade_id') or group.get('roster_mode') in ('selected','open'):
             from .electives import save_members
             save_members(db,group,remaining,old.get('source','manual'),set(old.get('supplemental_ids',[]))-selected,current['id'])
+            if not remaining:
+                updated_group=require(db,identifier,'groups')
+                put(db,'groups',{**updated_group,'roster_mode':'open','expected_students':0},current['id'])
         else:
             roster={**old,'group_id':identifier,'class_ids':[],'student_ids':[s['id'] for s in remaining],'students':remaining}
             saved=put(db,'rosters',roster,current['id'])
@@ -52,16 +70,20 @@ def remove_roster_students(identifier:str,body:dict,current=Depends(admin)):
 
 @router.get('/groups/{identifier}/roster')
 def roster(identifier:str,current=Depends(admin)):
+    from .tags import student_tag_index
     with connect() as db:
+        db.execute('BEGIN IMMEDIATE')
         group=require(db,identifier,'groups')
         saved=require(db,group['roster_id'],'rosters') if group.get('roster_id') else None
-        if group.get('grade_id') or group.get('roster_mode')=='selected':
+        _, by_student, colors = student_tag_index(db)
+        if group.get('grade_id') or group.get('roster_mode') in ('selected','open'):
             from .school import group_students
-            students=group_students(db,group);submissions={s['student_id']:s for s in find(db,'submissions',group_id=identifier)}
-            return {'group_id':identifier,'configured':True,'dynamic':True,'mode':group.get('roster_mode','grade'),'grade_id':group.get('grade_id'),'class_ids':[],'student_ids':(saved or {}).get('student_ids',[]),
-                    'students':[{**s,'status':'unscanned' if s['id'] not in submissions else 'absent' if submissions[s['id']]['status']=='absent' else 'scanned'} for s in students]}
+            students=group_students(db,group) or [];submissions={s['student_id']:s for s in find(db,'submissions',group_id=identifier)}
+            mode=group.get('roster_mode','open')
+            return {'group_id':identifier,'configured':bool(students),'dynamic':mode!='selected','mode':mode,'grade_id':group.get('grade_id'),'class_ids':[],'student_ids':(saved or {}).get('student_ids',[]),'tag_colors':colors,
+                    'students':[{**s,'tags':by_student.get(s['id'],[]),'status':'unscanned' if s['id'] not in submissions else 'absent' if submissions[s['id']]['status']=='absent' else 'scanned'} for s in students]}
         submissions={s['student_id']:s for s in find(db,'submissions',group_id=identifier)}
-        return {'group_id':identifier,'configured':bool(saved),'class_ids':(saved or {}).get('class_ids',[]),'student_ids':(saved or {}).get('student_ids',[]),'students':[{**s,'status':'unscanned' if s['id'] not in submissions else 'absent' if submissions[s['id']]['status']=='absent' else 'scanned'} for s in (saved or {}).get('students',[])]}
+        return {'group_id':identifier,'configured':bool(saved),'mode':'open','class_ids':(saved or {}).get('class_ids',[]),'student_ids':(saved or {}).get('student_ids',[]),'tag_colors':colors,'students':[{**s,'tags':by_student.get(s['id'],[]),'status':'unscanned' if s['id'] not in submissions else 'absent' if submissions[s['id']]['status']=='absent' else 'scanned'} for s in (saved or {}).get('students',[])]}
 
 
 @router.put('/groups/{identifier}/roster')

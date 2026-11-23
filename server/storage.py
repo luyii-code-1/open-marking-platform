@@ -47,7 +47,11 @@ class Storage:
             with connect() as db:
                 project=get(db,project_id,'projects') or {}
                 connection_id=project.get('storage_connection_id')
-                if project.get('storage_mode')=='local' and settings is None:settings={'kind':'local'}
+                if project.get('storage_mode')=='local' and settings is None:
+                    settings={'kind':'local'}
+                elif not connection_id and settings is None:
+                    from .storage_connections import default_connection_id
+                    connection_id=default_connection_id(db)
         if connection_id and settings is None:
             from .storage_connections import config
             settings=config(connection_id)

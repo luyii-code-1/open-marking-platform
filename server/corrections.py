@@ -89,9 +89,11 @@ def correct_page(identifier:str,body:dict,current=Depends(admin)):
             if not isinstance(candidate,str) or not candidate.isdigit(): raise HTTPException(422,'考号需为数字字符串')
             known={s['candidate_number'] for s in objects(db,'students')}
             group=require(db,batch['group_id'],'groups')
-            if group.get('grade_id') or group.get('roster_mode')=='selected':
+            if group.get('roster_mode')!='open' and (group.get('grade_id') or group.get('roster_mode')=='selected'):
                 from .school import group_students
-                known={s['candidate_number'] for s in group_students(db,group)}
+                members=group_students(db,group) or []
+                if members:
+                    known={s['candidate_number'] for s in members}
             elif group.get('roster_id'):known.update(s['candidate_number'] for s in require(db,group['roster_id'],'rosters')['students'])
             if candidate not in known: raise HTTPException(422,'考号不在学生名单中')
             page['candidate_number']=candidate

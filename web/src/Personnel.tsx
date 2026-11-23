@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { App, Checkbox, Form, Input, Modal, Radio, Select, Space, Tabs, Tag } from 'antd'
 import { BatchDeleteButton, DeleteRecord } from './DeleteRecord'
 import { ClassTags, DEFAULT_CLASS_TAGS, GradeTag } from './SchoolTags'
+import { TagsManager } from './TagsManager'
 import { Teaching, TeacherImport } from './Teaching'
 import { StudentImport } from './StudentImport'
 import { Grades } from './Grades'
@@ -26,6 +27,10 @@ export function Personnel({
   const grades = useResource<Row[]>('/grades', [])
   const subjects = useResource<Row[]>('/subjects', [])
   const subjectTags = useResource<Row[]>('/subject-tags', [])
+  const tagMap = useResource<{ tags: Row[]; by_student: Record<string, string[]>; colors: Record<string, string> }>(
+    '/tags/student-map',
+    { tags: [], by_student: {}, colors: {} },
+  )
 
   const [selected, setSelected] = useState<Row | null>(null)
   const [kind, setKind] = useState('classes')
@@ -39,10 +44,12 @@ export function Personnel({
   const [teachers, setTeachers] = useState<string[]>([])
   const [roles, setRoles] = useState<Record<string, { subjects: string[]; homeroom: boolean | null }>>({})
   const [classTags, setClassTags] = useState<string[]>([])
+  const [studentTags, setStudentTags] = useState<string[]>([])
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([])
   const [selectedClassIds, setSelectedClassIds] = useState<string[]>([])
   const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([])
   const [batchTagOpen, setBatchTagOpen] = useState(false)
+  const [batchTagTarget, setBatchTagTarget] = useState<'classes' | 'students'>('classes')
   const [batchTagMode, setBatchTagMode] = useState<'replace' | 'add' | 'clear'>('replace')
   const [batchTags, setBatchTags] = useState<string[]>([])
   const { message } = App.useApp()
@@ -50,13 +57,28 @@ export function Personnel({
   const subjectChoices = [...new Set([...subjectTags.data.map(t => t.name), ...subjects.data.map(s => s.name)].filter(Boolean))].map(value => ({
     value,
   }))
-  const classTagOptions = useMemo(
+  const tagColors = tagMap.data.colors || {}
+  const customTagNames = useMemo(
     () =>
-      [...new Set([...DEFAULT_CLASS_TAGS, ...classes.data.flatMap(c => (Array.isArray(c.tags) ? c.tags.map(String) : []))].filter(Boolean))].map(
-        value => ({ value, label: value }),
-      ),
-    [classes.data],
+      [
+        ...new Set([
+          ...DEFAULT_CLASS_TAGS,
+          ...(tagMap.data.tags || []).filter(t => !t.builtin).map(t => String(t.name)),
+          ...classes.data.flatMap(c => (Array.isArray(c.tags) ? c.tags.map(String) : [])),
+        ].filter(Boolean)),
+      ],
+    [tagMap.data.tags, classes.data],
   )
+  const classTagOptions = useMemo(() => customTagNames.map(value => ({ value, label: value })), [customTagNames])
+  const allTagOptions = useMemo(
+    () =>
+      [...new Set([...(tagMap.data.tags || []).map(t => String(t.name)), ...customTagNames].filter(Boolean))].map(value => ({
+        value,
+        label: value,
+      })),
+    [tagMap.data.tags, customTagNames],
+  )
+  const studentAllTags = (s: Row) => tagMap.data.by_student?.[s.id] || [...(classes.data.find(c => c.id === s.class_id)?.tags || []), ...(s.tags || [])]
   const gradeName = (id: string) => grades.data.find(g => g.id === id)?.name
   const classLabel = (id: string) => {
     const c = classes.data.find(item => item.id === id)
@@ -90,7 +112,7 @@ export function Personnel({
   ]
   const studentFields: FilterField<Row>[] = [
     { key: 'grade', label: '年级', options: gradeOptions, values: s => [classes.data.find(c => c.id === s.class_id)?.grade_id || ''] },
-    { key: 'tag', label: '班级标签', options: classTagOptions, values: s => classes.data.find(c => c.id === s.class_id)?.tags || [] },
+    { key: 'tag', label: '标签', options: allTagOptions, values: s => studentAllTags(s) },
     { key: 'class', label: '行政班', options: classes.data.map(c => ({ value: c.id, label: classLabel(c.id) })), values: s => [s.class_id] },
   ]
 
@@ -108,7 +130,7 @@ export function Personnel({
   )
 
   const reloadAll = async () => {
-    await Promise.all([classes.reload(), students.reload(), users.reload(), grades.reload()])
+    await Promise.all([classes.reload(), students.reload(), users.reload(), grades.reload(), tagMap.reload()])
   }
 
   async function save() {
@@ -128,7 +150,7 @@ export function Personnel({
               previous_teacher_ids: selected.teacher_ids || [],
             }
           : kind === 'students'
-            ? { name, candidate_number: candidate, class_id: classId }
+            ? { name, candidate_number: candidate, class_id: classId, tags: studentTags }
             : { name, ...(systemAdmin ? { role } : {}) },
         'PUT',
       )
@@ -144,17 +166,19 @@ export function Personnel({
   }
 
   async function saveBatchTags() {
-    if (!validClassIds.length || busy) return
+    const ids = batchTagTarget === 'classes' ? validClassIds : validStudentIds
+    if (!ids.length || busy) return
     setBusy(true)
     try {
-      const res = await send<{ updated: number }>('/classes/batch-tags', {
-        class_ids: validClassIds,
-        tags: batchTags,
-        mode: batchTagMode,
-      })
-      message.success(`已更新 ${res.updated} 个班级的自定义标签`)
+      const endpoint = batchTagTarget === 'classes' ? '/classes/batch-tags' : '/students/batch-tags'
+      const body =
+        batchTagTarget === 'classes'
+          ? { class_ids: ids, tags: batchTags, mode: batchTagMode }
+          : { student_ids: ids, tags: batchTags, mode: batchTagMode }
+      const res = await send<{ updated: number }>(endpoint, body)
+      message.success(`已更新 ${res.updated} 项标签`)
       setBatchTagOpen(false)
-      await classes.reload()
+      await reloadAll()
     } catch (e) {
       message.error((e as Error).message)
     } finally {
@@ -166,6 +190,7 @@ export function Personnel({
     setTeachers(row.teacher_ids || [])
     setRoles(row.teaching || {})
     setClassTags(Array.isArray(row.tags) ? row.tags.map(String) : [])
+    setStudentTags(Array.isArray(row.tags) ? row.tags.map(String) : [])
     setKind(type)
     setSelected(row)
     setRole(row.role || 'teacher')
@@ -307,6 +332,7 @@ export function Personnel({
                         <Button
                           size="small"
                           onClick={() => {
+                            setBatchTagTarget('classes')
                             setBatchTagMode('replace')
                             setBatchTags([])
                             setBatchTagOpen(true)
@@ -349,8 +375,8 @@ export function Personnel({
                 }
                 columns={[
                   { title: '班级', dataIndex: 'name' },
-                  { title: '年级', dataIndex: 'grade_id', render: id => <GradeTag name={gradeName(id)} /> },
-                  { title: '自定义标签', dataIndex: 'tags', render: (tags: string[]) => <ClassTags tags={tags} /> },
+                  { title: '年级', dataIndex: 'grade_id', render: id => <GradeTag name={gradeName(id)} colorMap={tagColors} /> },
+                  { title: '自定义标签', dataIndex: 'tags', render: (tags: string[]) => <ClassTags tags={tags} colorMap={tagColors} /> },
                   {
                     title: '任教教师',
                     dataIndex: 'teacher_ids',
@@ -404,13 +430,13 @@ export function Personnel({
                 hideTitle
                 filterFields={studentFields}
                 resource={students}
-                searchText={s => classLabel(s.class_id)}
+                searchText={s => [classLabel(s.class_id), ...studentAllTags(s)]}
                 allowImport={false}
                 extra={
                   <StudentImport
                     grades={grades.data}
                     onSaved={async () => {
-                      await Promise.all([students.reload(), classes.reload(), grades.reload()])
+                      await reloadAll()
                     }}
                   />
                 }
@@ -425,6 +451,17 @@ export function Personnel({
                     <div className="selection-action-bar">
                       <span className="selection-action-summary">已选 {validStudentIds.length} 名学生</span>
                       <Space size={8}>
+                        <Button
+                          size="small"
+                          onClick={() => {
+                            setBatchTagTarget('students')
+                            setBatchTagMode('add')
+                            setBatchTags([])
+                            setBatchTagOpen(true)
+                          }}
+                        >
+                          批量设置标签（{validStudentIds.length}）
+                        </Button>
                         <BatchDeleteButton
                           kind="students"
                           ids={validStudentIds}
@@ -456,20 +493,9 @@ export function Personnel({
                 columns={[
                   { title: '姓名', dataIndex: 'name' },
                   { title: '考号', dataIndex: 'candidate_number' },
-                  { title: '年级', dataIndex: 'class_id', render: id => <GradeTag name={gradeName(classes.data.find(c => c.id === id)?.grade_id)} /> },
-                  {
-                    title: '班级',
-                    dataIndex: 'class_id',
-                    render: id => {
-                      const cls = classes.data.find(c => c.id === id)
-                      return (
-                        <Space size={6} wrap>
-                          <span>{cls?.name || id}</span>
-                          <ClassTags tags={cls?.tags} empty={null} />
-                        </Space>
-                      )
-                    },
-                  },
+                  { title: '年级', dataIndex: 'class_id', render: id => <GradeTag name={gradeName(classes.data.find(c => c.id === id)?.grade_id)} colorMap={tagColors} /> },
+                  { title: '班级', dataIndex: 'class_id', render: id => classes.data.find(c => c.id === id)?.name || id },
+                  { title: '标签', render: (_, row) => <ClassTags tags={studentAllTags(row)} colorMap={tagColors} max={6} /> },
                   {
                     title: '操作',
                     render: (_, row) => (
@@ -489,6 +515,11 @@ export function Personnel({
                 ]}
               />
             ),
+          },
+          {
+            key: 'tags',
+            label: '标签',
+            children: <TagsManager classes={classes.data} students={students.data} grades={grades.data} onChanged={reloadAll} />,
           },
         ]}
       />
@@ -579,8 +610,17 @@ export function Personnel({
                   columns={[
                     { title: '班级', dataIndex: 'name' },
                     { title: '年级', render: (_, c) => gradeName(c.grade_id) },
-                    { title: '标签', render: (_, c) => <ClassTags tags={c.tags} /> },
+                    { title: '标签', render: (_, c) => <ClassTags tags={c.tags} colorMap={tagColors} /> },
                   ]}
+                />
+              </Form.Item>
+              <Form.Item label="个人自定义标签（班级/年级/选科标签自动继承）">
+                <Select
+                  mode="tags"
+                  value={studentTags}
+                  onChange={setStudentTags}
+                  placeholder="输入或选择自定义标签"
+                  options={classTagOptions}
                 />
               </Form.Item>
             </>
@@ -606,7 +646,7 @@ export function Personnel({
         </Form>
       </Modal>
       <Modal
-        title={`批量设置班级标签（已选 ${validClassIds.length} 个班级）`}
+        title={`批量设置${batchTagTarget === 'classes' ? '班级' : '学生'}标签（已选 ${batchTagTarget === 'classes' ? validClassIds.length : validStudentIds.length} 项）`}
         open={batchTagOpen}
         onCancel={() => !busy && setBatchTagOpen(false)}
         onOk={() => void saveBatchTags()}
