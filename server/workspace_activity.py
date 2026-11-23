@@ -9,19 +9,28 @@ from .dependencies import user, admin
 router=APIRouter(prefix='/api/v1')
 
 
+_activity_cache = {}
+
+
 @router.get('/workspace/activity')
 def activity(current=Depends(admin)):
+    role = current['role']
+    now = time.monotonic()
+    cached = _activity_cache.get(role)
+    if cached and now - cached[0] < 3:
+        return cached[1]
     with connect() as db:
         projects=objects(db,'projects');subjects={s['id']:s for s in objects(db,'subjects')}
-        groups=objects(db,'groups');templates={t['id']:t for t in objects(db,'templates')}
-        tasks=objects(db,'tasks');progress={}
+        groups=objects(db,'groups')
+        template_to_group={r[0]:r[1] for r in db.execute("SELECT id,json_extract(body,'$.group_id') FROM objects WHERE kind='templates' AND deleted=0")}
         group_map={g['id']:g for g in groups}
-        for task in tasks:
-            group=group_map.get(templates.get(task.get('template_id'),{}).get('group_id'))
+        progress={}
+        for tid, status, cnt in db.execute("SELECT json_extract(body,'$.template_id'),json_extract(body,'$.status'),COUNT(*) FROM objects WHERE kind='tasks' AND deleted=0 GROUP BY 1,2"):
+            group=group_map.get(template_to_group.get(tid))
             if not group:continue
             pid=subjects.get(group.get('subject_id'),{}).get('project_id')
-            counts=progress.setdefault(pid,{'completed':0,'total':0});counts['total']+=1
-            if task.get('status')=='completed':counts['completed']+=1
+            counts=progress.setdefault(pid,{'completed':0,'total':0});counts['total']+=cnt
+            if status=='completed':counts['completed']+=cnt
         exams=[]
         for project in projects:
             cohort=[g for g in groups if subjects.get(g.get('subject_id'),{}).get('project_id')==project['id']]
@@ -30,15 +39,18 @@ def activity(current=Depends(admin)):
                           'cards':len(cohort),'published':sum(bool(g.get('frozen')) for g in cohort),**counts})
         # Only administrators see all users' activity. Summaries omit audit payloads.
         events=[]
-        if current['role']=='admin':
+        if role=='admin':
             for row in db.execute('SELECT a.rowid AS cursor,a.action,a.created,a.body,o.kind,u.name AS actor_name FROM audit a LEFT JOIN objects o ON o.id=a.object_id LEFT JOIN users u ON u.id=a.actor ORDER BY a.rowid DESC LIMIT 30'):
                 item=dict(row);body=json.loads(item.pop('body'))
                 if item.get('kind')=='tasks' and body.get('status')=='completed':
                     amount=body.get('score_cents')
                     item['detail']='评阅 '+str(amount/100)+' 分' if isinstance(amount,(int,float)) else '完成评阅'
                 events.append(item)
-        jobs=[j for j in objects(db,'jobs') if j.get('status') in ('pending','running','failed')]
-        return {'exams':exams,'events':events,'jobs':jobs[-50:]}
+        job_rows=db.execute("SELECT body FROM objects WHERE kind='jobs' AND deleted=0 AND json_extract(body,'$.status') IN ('pending','running','failed') ORDER BY rowid DESC LIMIT 50").fetchall()
+        jobs=[json.loads(r['body']) for r in reversed(job_rows)]
+        payload={'exams':exams,'events':events,'jobs':jobs}
+        _activity_cache[role]=(now,payload)
+        return payload
 
 
 _cached=(0,None)

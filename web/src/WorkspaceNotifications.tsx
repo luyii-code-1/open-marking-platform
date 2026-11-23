@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { Alert, App, Drawer, Empty, Progress, Space, Tag, Typography } from 'antd'
 import { BellOutlined, CloseOutlined, ReloadOutlined, RightOutlined } from '@ant-design/icons'
 import { Button } from './Button'
-import { ErrorNotice } from './EntityTable'
+import { ErrorNotice } from './ErrorNotice'
 import { jobDetailText, jobKindLabel, jobStatusColor, jobStatusLabel } from './jobDisplay'
 import { request, send, type Row } from './api'
 import { serviceIsSlow, setServiceSlow } from './networkPolicy'

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Alert, Card, Empty, List, Progress, Space, Statistic, Tag, Typography } from 'antd'
 import { Button } from './Button'
 import { Table } from './DataTable'
-import { ErrorNotice } from './EntityTable'
+import { ErrorNotice } from './ErrorNotice'
 import { useWorkspaceNotifications } from './WorkspaceNotifications'
 import { useResource } from './api'
 
@@ -21,9 +21,12 @@ export function Dashboard({ onNavigate, admin }: { onNavigate: (value: string) =
   const { exams, events, activityLoaded, activityLoading, activityError, canViewActivity, reloadActivity } = useWorkspaceNotifications()
   const [clock, setClock] = useState(Date.now())
   useEffect(() => {
-    const timer = setInterval(() => setClock(Date.now()), 15000)
+    if (!events.length) return
+    const timer = setInterval(() => {
+      if (document.visibilityState === 'visible') setClock(Date.now())
+    }, 30000)
     return () => clearInterval(timer)
-  }, [])
+  }, [events.length])
   const ago = (value: string) => {
     const seconds = Math.max(0, Math.floor((clock - new Date(value.replace(' ', 'T') + 'Z').getTime()) / 1000))
     return seconds < 60 ? `${seconds}秒前` : seconds < 3600 ? `${Math.floor(seconds / 60)}分钟前` : `${Math.floor(seconds / 3600)}小时前`

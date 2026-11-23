@@ -18,6 +18,11 @@ export function App() {
   useEffect(()=>{
     let active=true
     if(!authToken){setExamContextOwner('');setUser(null);setOfflineAccess(false);setChecking(false);return}
+    // Preload authenticated shell and landing page in parallel with session verification.
+    void import('./AuthenticatedApp')
+    const initialPage = readLocation(window.location.hash).page
+    if (!initialPage || initialPage === 'dashboard') void import('./Dashboard')
+    else if (initialPage === 'exams') void import('./Exams')
     setChecking(true);setUser(null);setOfflineAccess(false)
     void (async()=>{
       try{

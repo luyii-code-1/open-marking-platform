@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import { Alert, App, Card, Dropdown, Form, Input, InputNumber, Modal, Progress, Select, Space, Tag, Typography, Upload } from 'antd'
 import { Table } from './DataTable'
 import { Button } from './Button'
+import { ErrorNotice } from './ErrorNotice'
 import { MoreOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons'
 import type { TableColumnsType, TableProps } from 'antd'
 import { download, request, send, useResource, type Row } from './api'
@@ -11,11 +12,10 @@ import { rowNavigation } from './rowNavigation'
 import {RecordSelect} from './RecordSelect'
 import type {FilterField} from './recordFilters'
 
+export { ErrorNotice }
+
 type Field = { name: string; label: string; type?: 'number' | 'password' | 'select'; options?: { label: string; value: string | number }[]; required?: boolean; initial?: string | number }
 type ListResource = { data: Row[]; loading: boolean; error: string; reload: () => Promise<void> }
-export function ErrorNotice({ error, retry }: { error: string; retry?: () => void }) {
-  return error ? <Alert type="error" showIcon message={error} action={retry && <Button onClick={retry}>重试</Button>} /> : null
-}
 export function EntityTable({ path, title, fields, columns, extra, creationFields, onCreated, scope = {}, searchText, resource: external,onEnter,allowImport=true,filterFields,hideTitle=false,rowSelection,selectionBar }: { path: string; title: string; fields: Field[]; columns?: TableColumnsType<Row>; extra?: ReactNode; creationFields?:ReactNode; onCreated?: (row?: Row) => void | Promise<unknown>; scope?: Record<string, string>; searchText?:(row:Row)=>unknown; resource?: ListResource; onEnter?:(row:Row)=>void; allowImport?:boolean;filterFields?:FilterField<Row>[];hideTitle?:boolean;rowSelection?:TableProps<Row>['rowSelection'];selectionBar?:ReactNode }) {
   const internal = useResource<Row[]>(external ? null : path, []), resource = external || internal, [open, setOpen] = useState(false), [saving, setSaving] = useState(false), [importing, setImporting] = useState(false), [csv, setCsv] = useState(''), [search, setSearch] = useState(''), [progress, setProgress] = useState(0), [form] = Form.useForm()
   const { message } = App.useApp()

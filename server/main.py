@@ -337,10 +337,17 @@ def dashboard(current=Depends(user)):
         if current['role'] not in ('admin','manager'):
             assigned={a['template_id'] for a in objects(db,'assignments') if current['id'] in (a.get('user_ids',[])+a.get('arbitrator_ids',[]))}
             templates=[t for t in objects(db,'templates') if t['id'] in assigned]
-            return {'groups':len({t['group_id'] for t in templates}),'pending_tasks':sum(t['user_id']==current['id'] and t['status']=='claimed' for t in objects(db,'tasks'))}
-        result={k:len(objects(db,k)) for k in ('projects','groups','students','exceptions')}
-        result['pending_tasks']=sum(t.get('status')!='completed' for t in objects(db,'tasks'))
-        return result
+            pending=db.execute("SELECT COUNT(*) FROM objects WHERE kind='tasks' AND deleted=0 AND json_extract(body,'$.user_id')=? AND json_extract(body,'$.status')='claimed'",(current['id'],)).fetchone()[0]
+            return {'groups':len({t['group_id'] for t in templates}),'pending_tasks':pending}
+        counts=dict(db.execute("SELECT kind,COUNT(*) FROM objects WHERE deleted=0 AND kind IN ('projects','groups','students','exceptions') GROUP BY kind").fetchall())
+        pending=db.execute("SELECT COUNT(*) FROM objects WHERE kind='tasks' AND deleted=0 AND COALESCE(json_extract(body,'$.status'),'')!='completed'").fetchone()[0]
+        return {
+            'projects':counts.get('projects',0),
+            'groups':counts.get('groups',0),
+            'students':counts.get('students',0),
+            'exceptions':counts.get('exceptions',0),
+            'pending_tasks':pending,
+        }
 
 
 @app.put('/api/v1/templates/{identifier}')
