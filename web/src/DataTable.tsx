@@ -1,4 +1,4 @@
-import {useState,type ReactNode} from 'react'
+import {useEffect,useRef,useState,type ReactNode} from 'react'
 import {Checkbox,Dropdown,Input,Select,Space,Table as AntTable,Tag,type TableProps} from 'antd'
 import {Button} from './Button'
 import {filterRecords,textMatches,type FilterField,type FilterValues} from './recordFilters'
@@ -11,6 +11,39 @@ function countLabel(total:number){
 type Props<T extends object>=TableProps<T>&{totalRows?:number;searchText?:(row:T)=>unknown;query?:string;filterFields?:FilterField<T>[];columnChooser?:boolean;serverSort?:boolean;toolbar?:ReactNode}
 export function Table<T extends object = any>({totalRows,pagination,footer,searchText,query,filterFields=[],columnChooser=true,serverSort=false,toolbar,...props}:Props<T>){
   const [text,setText]=useState(''),[filters,setFilters]=useState<FilterValues>({}),[searchField,setSearchField]=useState(''),[hidden,setHidden]=useState<string[]>([])
+  const wrapRef=useRef<HTMLDivElement>(null)
+  const [autoY,setAutoY]=useState<number|undefined>(pagination===false?undefined:480)
+  const explicitY=props.scroll?.y
+  const hasPager=pagination!==false
+
+  useEffect(()=>{
+    if(explicitY!==undefined||!hasPager){setAutoY(undefined);return}
+    const compute=()=>{
+      const el=wrapRef.current
+      if(!el)return
+      if(el.closest('.ant-modal, .ant-drawer')){
+        setAutoY(Math.max(220,Math.min(420,Math.floor(window.innerHeight*0.44))))
+        return
+      }
+      const rect=el.getBoundingClientRect()
+      if(rect.width===0&&rect.height===0)return
+      const thead=el.querySelector('.ant-table-thead')
+      const headH=thead?thead.getBoundingClientRect().height:39
+      const reserve=headH+58+34
+      const next=Math.max(220,Math.floor(window.innerHeight-rect.top-reserve))
+      setAutoY(prev=>(prev!==undefined&&Math.abs(prev-next)<=2?prev:next))
+    }
+    compute()
+    const raf=requestAnimationFrame(compute)
+    const timer=setTimeout(compute,120)
+    window.addEventListener('resize',compute)
+    let ro:ResizeObserver|undefined
+    if(typeof ResizeObserver!=='undefined'&&wrapRef.current?.parentElement){
+      ro=new ResizeObserver(compute)
+      ro.observe(wrapRef.current.parentElement)
+    }
+    return ()=>{cancelAnimationFrame(raf);clearTimeout(timer);window.removeEventListener('resize',compute);ro?.disconnect()}
+  },[explicitY,hasPager,filterFields.length,Object.keys(filters).length])
   const options=pagination||{}
   const term=(query??text).trim().toLocaleLowerCase()
   const active=term||Object.values(filters).some(ids=>ids.length)
@@ -32,6 +65,6 @@ export function Table<T extends object = any>({totalRows,pagination,footer,searc
     {Object.values(filters).some(ids=>ids.length>0)&&<div className="record-picker-tags" style={{marginBottom:8}}>{filterFields.flatMap(field=>(filters[field.key]||[]).map(id=><Tag key={field.key+id} closable onClose={()=>setFilters(current=>({...current,[field.key]:current[field.key].filter(v=>v!==id)}))}>{field.label}：{field.options.find(o=>o.value===id)?.label||id}</Tag>))}<Button type="link" size="small" onClick={()=>setFilters({})}>重置过滤器</Button></div>}</>}
     {(toolbar||query===undefined||filterFields.length>0||columnChooser&&choices.length>1)&&<div className="managed-table-toolbar">{query===undefined&&<Space.Compact>{filterFields.length>0&&<Select aria-label="搜索字段" style={{minWidth:120}} value={searchField} onChange={setSearchField} options={[{value:'',label:'全部字段'},...filterFields.map(f=>({value:f.key,label:f.label}))]}/>}<Input.Search className="list-search" placeholder={remote?'搜索当前页':'搜索列表'} aria-label={remote?'搜索当前页':'搜索列表'} allowClear value={text} onChange={e=>setText(e.target.value)}/></Space.Compact>}{query!==undefined&&filterFields.length>0&&<Select aria-label="搜索字段" style={{minWidth:120}} value={searchField} onChange={setSearchField} options={[{value:'',label:'全部字段'},...filterFields.map(f=>({value:f.key,label:f.label}))]}/>}
     {toolbar}{columnChooser&&choices.length>1&&<Dropdown trigger={['click']} popupRender={()=><div style={{padding:12,background:'var(--ant-color-bg-elevated,#fff)',boxShadow:'0 4px 18px #0002',borderRadius:6}}><Space direction="vertical">{choices.map(c=><Checkbox key={c.key} checked={!hidden.includes(c.key)} disabled={!hidden.includes(c.key)&&shown.length===1} onChange={event=>setHidden(current=>event.target.checked?current.filter(key=>key!==c.key):[...current,c.key])}>{c.label}</Checkbox>)}</Space></div>}><Button className="managed-table-columns">显示列</Button></Dropdown>}</div>}
-    <AntTable<T> size="small" showSorterTooltip={{title:remote&&!serverSort?'点击对当前页排序':'点击排序'}} {...props} columns={props.columns?shown.map(c=>c.column):undefined} scroll={{x:'max-content',y:600,...props.scroll}} dataSource={rows} rowSelection={props.rowSelection?{preserveSelectedRowKeys:true,...props.rowSelection}:undefined} pagination={pager}
-      locale={locale} footer={countInFooter?rows=><>{footer?.(rows)}{countLabel(total)}</>:footer}/></>
+    <div ref={wrapRef} className="managed-table-wrap"><AntTable<T> size="small" showSorterTooltip={{title:remote&&!serverSort?'点击对当前页排序':'点击排序'}} {...props} columns={props.columns?shown.map(c=>c.column):undefined} scroll={{x:'max-content',...(autoY!==undefined?{y:autoY}:{}),...props.scroll}} dataSource={rows} rowSelection={props.rowSelection?{preserveSelectedRowKeys:true,...props.rowSelection}:undefined} pagination={pager}
+      locale={locale} footer={countInFooter?rows=><>{footer?.(rows)}{countLabel(total)}</>:footer}/></div></>
 }
