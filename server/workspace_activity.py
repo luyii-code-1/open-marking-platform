@@ -40,7 +40,7 @@ def activity(current=Depends(admin)):
         # Only administrators see all users' activity. Summaries omit audit payloads.
         events=[]
         if role=='admin':
-            for row in db.execute('SELECT a.rowid AS cursor,a.action,a.created,a.body,o.kind,u.name AS actor_name FROM audit a LEFT JOIN objects o ON o.id=a.object_id LEFT JOIN users u ON u.id=a.actor ORDER BY a.rowid DESC LIMIT 30'):
+            for row in db.execute('SELECT a.rowid AS cursor,a.action,a.created,a.body,o.kind,u.name AS actor_name FROM audit a LEFT JOIN objects o ON o.id=a.object_id LEFT JOIN users u ON u.id=a.actor ORDER BY a.rowid DESC LIMIT 10'):
                 item=dict(row);body=json.loads(item.pop('body'))
                 if item.get('kind')=='tasks' and body.get('status')=='completed':
                     amount=body.get('score_cents')

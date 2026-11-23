@@ -93,10 +93,11 @@ export function Dashboard({ onNavigate, admin }: { onNavigate: (value: string) =
               ]}
             />
           </Card>
-          <Card title="最近操作">
+          <Card title="最近操作" extra={<a href="#/settings/audit">查看全部</a>}>
             <List
+              size="small"
               loading={activityLoading && !activityLoaded}
-              dataSource={events}
+              dataSource={events.slice(0, 10)}
               locale={{ emptyText: activityError ? '无法加载操作记录' : '暂无可见操作' }}
               renderItem={(event: any) => (
                 <List.Item>
