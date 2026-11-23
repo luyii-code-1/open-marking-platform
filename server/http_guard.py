@@ -469,9 +469,10 @@ class HttpGuardMiddleware:
                 _, route = guard.routes.match(scope['method'], scope['path'])
             route = route or ('<blocked>' if blocked else '<unmatched>')
             state = scope.get('state', {})
-            guard.offer({'ts': time.time(), 'ip': ip, 'country': country,
-                         'method': scope['method'][:16], 'route': route[:256],
-                         'status': status, 'duration_ms': round((time.monotonic() - started) * 1000, 2),
-                         'bytes_out': bytes_out, 'decision': 'blocked' if blocked else 'observed' if reason else 'pass',
-                         'reason': reason, 'actor': state.get('actor') or '',
-                         'actor_label': state.get('actor_label') or '', 'actor_kind': state.get('actor_kind') or ''})
+            if ip not in ('127.0.0.1', '::1'):
+                guard.offer({'ts': time.time(), 'ip': ip, 'country': country,
+                             'method': scope['method'][:16], 'route': route[:256],
+                             'status': status, 'duration_ms': round((time.monotonic() - started) * 1000, 2),
+                             'bytes_out': bytes_out, 'decision': 'blocked' if blocked else 'observed' if reason else 'pass',
+                             'reason': reason, 'actor': state.get('actor') or '',
+                             'actor_label': state.get('actor_label') or '', 'actor_kind': state.get('actor_kind') or ''})

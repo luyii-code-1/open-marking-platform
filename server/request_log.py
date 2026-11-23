@@ -92,10 +92,13 @@ class RequestLogMiddleware:
             nonlocal logged
             logged=True
             if journal is None:return
+            peer=request.client.host if request.client else None
+            if peer in ('127.0.0.1','::1') and not request.headers.get('x-forwarded-for'):
+                return
             route=getattr(request.scope.get('route'),'path',None) or '<unmatched>'
             value={'id':str(uuid4()),'actor':getattr(request.state,'actor',None),'method':request.method,'route':route,
                 'object_id':target_id(request),'status':status,'duration_ms':round((time.monotonic()-started)*1000,3),
-                'peer':request.client.host if request.client else None,'created':datetime.now(timezone.utc).isoformat(timespec='milliseconds')}
+                'peer':peer,'created':datetime.now(timezone.utc).isoformat(timespec='milliseconds')}
             if not journal.offer(value):
                 await asyncio.to_thread(journal.write,[value])
 

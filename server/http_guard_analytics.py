@@ -71,8 +71,9 @@ async def collect_page_view(request: Request):
             visitor = uuid4_value(body['visitor'])
         except (ValueError, TypeError, UnicodeError, RecursionError) as error:
             raise HTTPException(422, '页面访问事件格式无效') from error
-        guard.offer({'kind': 'page_view', 'ts': time.time(), 'id': str(view_id),
-                     'visitor': hashlib.sha256(visitor.bytes).digest(), 'page': body['page']})
+        if guard.client_ip(request.scope) not in ('127.0.0.1', '::1'):
+            guard.offer({'kind': 'page_view', 'ts': time.time(), 'id': str(view_id),
+                         'visitor': hashlib.sha256(visitor.bytes).digest(), 'page': body['page']})
     return Response(status_code=204, headers={'Cache-Control': 'no-store'})
 
 
