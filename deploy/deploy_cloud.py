@@ -42,7 +42,7 @@ def main():
     args=parser.parse_args()
     revision=subprocess.check_output(['git','rev-parse','HEAD'],cwd=REPO,text=True).strip()
     if not re.fullmatch('[a-f0-9]{40}',revision):raise RuntimeError('Invalid source revision')
-    if subprocess.check_output(['git','status','--porcelain','--untracked-files=normal'],cwd=REPO,text=True).strip():
+    if subprocess.check_output(['git','status','--porcelain','--untracked-files=normal','--','server','web','deploy'],cwd=REPO,text=True).strip():
         raise RuntimeError('Commit the intended source changes before deploying')
     remote=subprocess.check_output(['git','ls-remote','origin','refs/heads/main'],cwd=REPO,text=True).split()[0]
     if remote!=revision:raise RuntimeError('Push or merge the current main revision before deploying')
