@@ -11,7 +11,8 @@
 .managed-table-toolbar .entity-toolbar{flex:1;margin:0!important;padding:0;align-items:center}
 .managed-table-toolbar .ant-space,.managed-table-toolbar .ant-space-compact{display:inline-flex;align-items:center}
 .managed-table-toolbar .ant-space-item{display:inline-flex;align-items:center}
-.managed-table-toolbar .list-search{margin:0;max-width:360px}
+.managed-table-toolbar .list-search,.managed-table-toolbar .list-search.ant-input-search{margin:0!important;max-width:360px}
+.record-picker-search .list-search,.record-picker-search .ant-input-search{margin:0!important}
 .managed-table-columns{margin-left:auto;flex-shrink:0}
 .filter-summary-bar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px 16px;padding-top:4px;border-top:1px dashed #e6ebf2}
 .filter-summary-count{margin-left:auto;font-size:13px;font-variant-numeric:tabular-nums}
