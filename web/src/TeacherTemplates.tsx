@@ -301,30 +301,119 @@ export function TeacherTemplates({
     }
   }
 
+  const adoptModal = (
+    <Modal
+      title={adoptTarget ? `采用「${adoptTarget.name}」到考试题卡` : '采用到考试题卡'}
+      open={!!adoptTarget}
+      onCancel={() => !actionBusy && setAdoptTarget(null)}
+      onOk={() => adoptForm.submit()}
+      confirmLoading={actionBusy}
+      okText="确认采用并生成草稿"
+    >
+      <Form form={adoptForm} layout="vertical" onFinish={confirmAdopt}>
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 14 }}
+          message="将为目标考试题卡创建独立草稿，完整保留所有题型、区域、底图、插图与标准答案，管理员可继续编辑后审查发布。"
+        />
+        <Form.Item label="目标位置">
+          <Radio.Group
+            value={adoptMode}
+            onChange={e => setAdoptMode(e.target.value)}
+            options={[
+              { label: '导入到已有题卡分组', value: 'group' },
+              { label: '按考试科目自动创建默认题卡', value: 'subject' },
+            ]}
+          />
+        </Form.Item>
+        {adoptMode === 'group' ? (
+          <Form.Item name="group_id" label="所属题卡" rules={[{ required: true, message: '请选择目标题卡' }]}>
+            <Select
+              showSearch
+              optionFilterProp="label"
+              options={groups.data
+                .filter(g => !g.frozen)
+                .map(g => {
+                  const s = subjects.data.find(item => item.id === g.subject_id)
+                  const p = projects.data.find(item => item.id === s?.project_id)
+                  return {
+                    value: g.id,
+                    label: `${p?.name || ''} / ${s?.name || ''} / ${g.grade_name || ''} · ${g.name}${g.template_id ? '（已有题卡）' : ''}`,
+                  }
+                })}
+            />
+          </Form.Item>
+        ) : (
+          <Form.Item name="subject_id" label="所属科目" rules={[{ required: true, message: '请选择考试科目' }]}>
+            <Select
+              showSearch
+              optionFilterProp="label"
+              options={subjects.data.map(s => {
+                const p = projects.data.find(item => item.id === s.project_id)
+                return { value: s.id, label: `${p?.name || ''} / ${s.name}` }
+              })}
+            />
+          </Form.Item>
+        )}
+        <Form.Item name="name" label="生成后的题卡标题">
+          <Input maxLength={100} />
+        </Form.Item>
+      </Form>
+    </Modal>
+  )
+
+  const rejectModal = (
+    <Modal
+      title={rejectTarget ? `退回「${rejectTarget.name}」给 ${rejectTarget.owner_name}` : '退回修改'}
+      open={!!rejectTarget}
+      onCancel={() => !actionBusy && setRejectTarget(null)}
+      onOk={() => void confirmReject()}
+      confirmLoading={actionBusy}
+      okText="确认退回"
+    >
+      <Form layout="vertical">
+        <Form.Item label="退回原因或修改建议（选填）">
+          <Input.TextArea
+            rows={3}
+            maxLength={500}
+            value={rejectReason}
+            onChange={e => setRejectReason(e.target.value)}
+            placeholder="例如：请核对第 12 题分值或补齐客观题答案"
+          />
+        </Form.Item>
+      </Form>
+    </Modal>
+  )
+
   if (editingRow) {
     return (
-      <TeacherTemplateWorkbench
-        row={editingRow}
-        management={management}
-        subjectOptions={subjectOptions}
-        onBack={() => {
-          setEditingRow(null)
-          openedRef.current = ''
-          if (initialTemplateId && onNavigate) onNavigate('#/teacher-templates')
-          void list.reload()
-        }}
-        onUpdated={next => {
-          setEditingRow(next)
-          void list.reload()
-        }}
-        onCopyLink={() => void copyLink(editingRow)}
-        onSubmit={() => void submitForReview(editingRow)}
-        onAdopt={() => openAdopt(editingRow)}
-        onReject={() => {
-          setRejectTarget(editingRow)
-          setRejectReason('')
-        }}
-      />
+      <>
+        <TeacherTemplateWorkbench
+          row={editingRow}
+          management={management}
+          subjectOptions={subjectOptions}
+          onBack={() => {
+            setEditingRow(null)
+            openedRef.current = ''
+            if (initialTemplateId && onNavigate) onNavigate('#/teacher-templates')
+            void list.reload()
+          }}
+          onUpdated={next => {
+            setEditingRow(next)
+            void list.reload()
+          }}
+          onCopyLink={() => void copyLink(editingRow)}
+          onSubmit={() => void submitForReview(editingRow)}
+          onAdopt={() => openAdopt(editingRow)}
+          onReject={() => {
+            setRejectTarget(editingRow)
+            setRejectReason('')
+          }}
+        />
+        {adoptModal}
+        {rejectModal}
+      </>
     )
   }
 
@@ -646,86 +735,8 @@ export function TeacherTemplates({
         </Space>
       </Modal>
 
-      <Modal
-        title={adoptTarget ? `采用「${adoptTarget.name}」到考试题卡` : '采用到考试题卡'}
-        open={!!adoptTarget}
-        onCancel={() => !actionBusy && setAdoptTarget(null)}
-        onOk={() => adoptForm.submit()}
-        confirmLoading={actionBusy}
-        okText="确认采用并生成草稿"
-      >
-        <Form form={adoptForm} layout="vertical" onFinish={confirmAdopt}>
-          <Alert
-            type="info"
-            showIcon
-            style={{ marginBottom: 14 }}
-            message="将为目标考试题卡创建独立草稿，完整保留所有题型、区域、底图、插图与标准答案，管理员可继续编辑后审查发布。"
-          />
-          <Form.Item label="目标位置">
-            <Radio.Group
-              value={adoptMode}
-              onChange={e => setAdoptMode(e.target.value)}
-              options={[
-                { label: '导入到已有题卡分组', value: 'group' },
-                { label: '按考试科目自动创建默认题卡', value: 'subject' },
-              ]}
-            />
-          </Form.Item>
-          {adoptMode === 'group' ? (
-            <Form.Item name="group_id" label="所属题卡" rules={[{ required: true, message: '请选择目标题卡' }]}>
-              <Select
-                showSearch
-                optionFilterProp="label"
-                options={groups.data
-                  .filter(g => !g.frozen)
-                  .map(g => {
-                    const s = subjects.data.find(item => item.id === g.subject_id)
-                    const p = projects.data.find(item => item.id === s?.project_id)
-                    return {
-                      value: g.id,
-                      label: `${p?.name || ''} / ${s?.name || ''} / ${g.grade_name || ''} · ${g.name}${g.template_id ? '（已有题卡）' : ''}`,
-                    }
-                  })}
-              />
-            </Form.Item>
-          ) : (
-            <Form.Item name="subject_id" label="所属科目" rules={[{ required: true, message: '请选择考试科目' }]}>
-              <Select
-                showSearch
-                optionFilterProp="label"
-                options={subjects.data.map(s => {
-                  const p = projects.data.find(item => item.id === s.project_id)
-                  return { value: s.id, label: `${p?.name || ''} / ${s.name}` }
-                })}
-              />
-            </Form.Item>
-          )}
-          <Form.Item name="name" label="生成后的题卡标题">
-            <Input maxLength={100} />
-          </Form.Item>
-        </Form>
-      </Modal>
-
-      <Modal
-        title={rejectTarget ? `退回「${rejectTarget.name}」给 ${rejectTarget.owner_name}` : '退回修改'}
-        open={!!rejectTarget}
-        onCancel={() => !actionBusy && setRejectTarget(null)}
-        onOk={() => void confirmReject()}
-        confirmLoading={actionBusy}
-        okText="确认退回"
-      >
-        <Form layout="vertical">
-          <Form.Item label="退回原因或修改建议（选填）">
-            <Input.TextArea
-              rows={3}
-              maxLength={500}
-              value={rejectReason}
-              onChange={e => setRejectReason(e.target.value)}
-              placeholder="例如：请核对第 12 题分值或补齐客观题答案"
-            />
-          </Form.Item>
-        </Form>
-      </Modal>
+      {adoptModal}
+      {rejectModal}
     </Space>
   )
 }
