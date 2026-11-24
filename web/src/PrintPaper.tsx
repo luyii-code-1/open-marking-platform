@@ -1,6 +1,6 @@
 import { ZoomInOutlined, ZoomOutOutlined } from '@ant-design/icons'
 import { useEffect, useRef, useState } from 'react'
-import { Alert, App, Space, Typography } from 'antd'
+import { Alert, App, Space, Tag, Typography } from 'antd'
 import { Button } from './Button'
 import { requestBlob, type ImageBox, type PrintNote, type Region, type Template } from './api'
 import { RichEditor } from './RichEditor'
@@ -8,14 +8,16 @@ import { choiceCenters, compactChoice } from './objectiveLayout'
 import { forbiddenRegion, forbiddenConflict, subjectiveRegion, noteRegion, intersects } from './sheetRegions'
 
 export type TextTarget={kind:'question'|'note';id:string;index:number}
-type Drag = { x:number;y:number;qid:string;index?:number;region?:Region;forbidden?:boolean;note?:boolean;resize?:boolean;qImage?:{region:Region;box:ImageBox};bgImage?:{box:ImageBox} }
+export type RegionUpdate={id:string;index:number;region:Region}
+type GroupItem={qid:string;index:number;region:Region}
+type Drag = { x:number;y:number;qid:string;index?:number;region?:Region;forbidden?:boolean;note?:boolean;resize?:boolean;marquee?:boolean;shift?:boolean;group?:GroupItem[];qImage?:{region:Region;box:ImageBox};bgImage?:{box:ImageBox} }
 function defaultQuestionImageBox(r:Region,imageHeight?:number):ImageBox{
   const h=Math.max(8,Math.min(Math.max(8,r.height-12),imageHeight??25))
   const w=Math.max(8,r.width-6)
   return {x:3,y:Math.max(9,r.height-3-h),width:w,height:h}
 }
 const roundBox=(b:ImageBox):ImageBox=>({x:Math.round(b.x*100)/100,y:Math.round(b.y*100)/100,width:Math.round(b.width*100)/100,height:Math.round(b.height*100)/100})
-export function Paper({value,page,selected,draw,answerMode=false,forbiddenMode=false,readOnly=false,noteMode=false,bgMode=false,selectedNote,editing,onEdit,onTextChange,onNoteSelect,onNoteRegion,onSelect,onRegion,onAnswer,onForbidden,onQuestionImageBox,onBackgroundBox}:{value:Template;page:number;selected?:string;draw:boolean;answerMode?:boolean;forbiddenMode?:boolean;readOnly?:boolean;noteMode?:boolean;bgMode?:boolean;selectedNote?:string;editing?:TextTarget|null;onEdit?:(target:TextTarget|null)=>void;onTextChange?:(target:TextTarget,html:string)=>void;onNoteSelect?:(id:string)=>void;onNoteRegion?:(region:Region,id?:string)=>void;onSelect:(id:string,page?:number)=>void;onRegion:(id:string,region:Region,index?:number)=>void;onAnswer?:(id:string,letter:string)=>void;onForbidden?:(regions:Region[])=>void;onQuestionImageBox?:(id:string,box:ImageBox)=>void;onBackgroundBox?:(page:number,box:ImageBox)=>void}) {
+export function Paper({value,page,selected,draw,answerMode=false,forbiddenMode=false,readOnly=false,noteMode=false,bgMode=false,selectedNote,editing,onEdit,onTextChange,onNoteSelect,onNoteRegion,onSelect,onRegion,onBatchRegions,onAnswer,onForbidden,onQuestionImageBox,onBackgroundBox}:{value:Template;page:number;selected?:string;draw:boolean;answerMode?:boolean;forbiddenMode?:boolean;readOnly?:boolean;noteMode?:boolean;bgMode?:boolean;selectedNote?:string;editing?:TextTarget|null;onEdit?:(target:TextTarget|null)=>void;onTextChange?:(target:TextTarget,html:string)=>void;onNoteSelect?:(id:string)=>void;onNoteRegion?:(region:Region,id?:string)=>void;onSelect:(id:string,page?:number)=>void;onRegion:(id:string,region:Region,index?:number)=>void;onBatchRegions?:(updates:RegionUpdate[])=>void;onAnswer?:(id:string,letter:string)=>void;onForbidden?:(regions:Region[])=>void;onQuestionImageBox?:(id:string,box:ImageBox)=>void;onBackgroundBox?:(page:number,box:ImageBox)=>void}) {
   const width=value.paper==='A3'?420:210,height=297,svg=useRef<SVGSVGElement>(null),start=useRef<Drag|null>(null)
   const [toolsHost,setToolsHost]=useState<HTMLDivElement|null>(null)
   const editQ=editing?.kind==='question'?value.questions.find(q=>q.id===editing.id):undefined
@@ -62,6 +64,8 @@ export function Paper({value,page,selected,draw,answerMode=false,forbiddenMode=f
   },[width,height])
   const scale=zoom??fit
   const [selectedForbidden,setSelectedForbidden]=useState<number|null>(null),{message}=App.useApp()
+  const [multiIds,setMultiIds]=useState<string[]>([])
+  const [groupOffset,setGroupOffset]=useState<{dx:number;dy:number}|null>(null)
   const [draft,setDraft]=useState<Region|null>(null),[preview,setPreview]=useState<{url:string;paper:string;page:number;key:string}|null>(null),[error,setError]=useState(''),[retry,setRetry]=useState(0)
   const previewCache=useRef<Map<string,string>>(new Map())
   const payload=JSON.stringify({...value,questions:value.questions.map(q=>({...q,answer:[]}))}),key=`${page}:${payload}`
@@ -97,7 +101,7 @@ export function Paper({value,page,selected,draw,answerMode=false,forbiddenMode=f
     return()=>{cancelled=true;clearTimeout(timer);abort.abort()}
   },[payload,page,key,retry,value.paper])
   useEffect(()=>()=>{for(const url of previewCache.current.values())URL.revokeObjectURL(url);previewCache.current.clear()},[])
-  useEffect(()=>{start.current=null;setDraft(null);setSelectedForbidden(null)},[page,value.id,forbiddenMode,noteMode,draw,answerMode,readOnly])
+  useEffect(()=>{start.current=null;setDraft(null);setGroupOffset(null);setMultiIds([]);setSelectedForbidden(null)},[page,value.id,forbiddenMode,noteMode,draw,answerMode,readOnly])
   useEffect(()=>{if(answerMode&&selected)svg.current?.querySelector(`[data-question-id="${selected}"]`)?.scrollIntoView({block:'nearest',inline:'nearest'})},[selected,page,answerMode])
   const objective=value.questions.filter(q=>q.type!=='subjective').sort((a,b)=>a.number-b.number)
   function answerKey(event:React.KeyboardEvent){
@@ -125,12 +129,58 @@ export function Paper({value,page,selected,draw,answerMode=false,forbiddenMode=f
     if(s.qImage){const r=s.qImage.region,b=computeImageBox(p,s,r.width,r.height,s.qImage.box);return {page,x:r.x+b.x,y:r.y+b.y,width:b.width,height:b.height}}
     if(s.note)return noteRegion(value,page,s,p,s.region,s.resize);if(!s.forbidden&&value.questions.find(q=>q.id===s.qid)?.type==='subjective')return subjectiveRegion(value,page,s,p,s.region,s.resize);if(s.forbidden)return forbiddenRegion(value,page,s,p,s.region,s.resize);const bottom=value.print_style==='standard-v2'?270:height-8,x=s.region?Math.max(0,Math.min(width-8-s.region.width,s.region.x+p.x-s.x)):Math.min(s.x,p.x);return s.region?{...s.region,x,y:Math.max(minimumY(x),Math.min(bottom-s.region.height,s.region.y+p.y-s.y))}:{page,x,y:Math.max(minimumY(x),Math.min(s.y,p.y)),width:Math.abs(s.x-p.x),height:Math.abs(Math.min(s.y,bottom)-Math.min(p.y,bottom))}
   }
+  function clampGroupDelta(items:GroupItem[],dx:number,dy:number){
+    const bottom=value.print_style==='standard-v2'?270:height-8
+    let minDx=-Infinity,maxDx=Infinity,minDy=-Infinity,maxDy=Infinity
+    for(const {region:r} of items){
+      minDx=Math.max(minDx,-r.x)
+      maxDx=Math.min(maxDx,width-8-r.x-r.width)
+      minDy=Math.max(minDy,8-r.y)
+      maxDy=Math.min(maxDy,bottom-r.y-r.height)
+    }
+    return {dx:Math.max(minDx,Math.min(maxDx,dx)),dy:Math.max(minDy,Math.min(maxDy,dy))}
+  }
   function finish(event:React.PointerEvent){
     const s=start.current
     start.current=null
     setDraft(null)
+    setGroupOffset(null)
     if(!s||readOnly)return
     const p=point(event)
+    if(s.marquee){
+      const box:Region={page,x:Math.min(s.x,p.x),y:Math.min(s.y,p.y),width:Math.abs(p.x-s.x),height:Math.abs(p.y-s.y)}
+      if(box.width<1&&box.height<1){
+        if(!s.shift)setMultiIds([])
+        return
+      }
+      const hits=value.questions.filter(q=>q.regions.some(r=>r.page===page&&intersects(r,box))).map(q=>q.id)
+      const next=s.shift?[...new Set([...multiIds,...hits])]:hits
+      setMultiIds(next)
+      if(hits.length)onSelect(hits[0])
+      return
+    }
+    if(s.group){
+      if(Math.abs(p.x-s.x)+Math.abs(p.y-s.y)<.5)return
+      const {dx,dy}=clampGroupDelta(s.group,p.x-s.x,p.y-s.y)
+      const movedSet=new Set(s.group.map(item=>`${item.qid}:${item.index}`))
+      const updates:RegionUpdate[]=s.group.map(item=>({
+        id:item.qid,
+        index:item.index,
+        region:{
+          ...item.region,
+          x:Math.round((item.region.x+dx)*1000)/1000,
+          y:Math.round((item.region.y+dy)*1000)/1000,
+        },
+      }))
+      const occupied=[...(value.forbidden_regions||[]),...(value.print_notes||[]),...value.questions.flatMap(q=>q.regions.filter((_,i)=>!movedSet.has(`${q.id}:${i}`)))]
+      if(updates.some(u=>occupied.some(r=>intersects(r,u.region)))){
+        message.warning('整体移动后与其它区域重叠，请重新调整位置')
+        return
+      }
+      if(onBatchRegions)onBatchRegions(updates)
+      else for(const u of updates)onRegion(u.id,u.region,u.index)
+      return
+    }
     if((s.region||s.qImage||s.bgImage) && Math.abs(p.x-s.x)+Math.abs(p.y-s.y)<.5)return
     if(s.bgImage){
       const b=roundBox(computeImageBox(p,s,width,height,s.bgImage.box))
@@ -173,11 +223,11 @@ export function Paper({value,page,selected,draw,answerMode=false,forbiddenMode=f
     e.currentTarget.setPointerCapture(e.pointerId)
   }
   return <Space direction="vertical" style={{width:'100%'}}>
-    <Space size={8}><Button size="small" icon={<ZoomOutOutlined />} disabled={scale<=10} onClick={()=>setZoom(Math.max(10,scale-10))}>缩小</Button><Button size="small" type={zoom===null?'primary':'default'} onClick={()=>setZoom(null)}>适合屏幕</Button><Button size="small" title="恢复 100%" onClick={()=>setZoom(100)}>{scale}%</Button><Button size="small" icon={<ZoomInOutlined />} disabled={scale>=300} onClick={()=>setZoom(Math.min(300,scale+10))}>放大</Button></Space>
+    <Space size={8} wrap><Button size="small" icon={<ZoomOutOutlined />} disabled={scale<=10} onClick={()=>setZoom(Math.max(10,scale-10))}>缩小</Button><Button size="small" type={zoom===null?'primary':'default'} onClick={()=>setZoom(null)}>适合屏幕</Button><Button size="small" title="恢复 100%" onClick={()=>setZoom(100)}>{scale}%</Button><Button size="small" icon={<ZoomInOutlined />} disabled={scale>=300} onClick={()=>setZoom(Math.min(300,scale+10))}>放大</Button>{multiIds.length>1&&<><Tag color="blue" style={{marginInlineEnd:0}}>已框选 {multiIds.length} 题（拖动任意选中题可整体移动）</Tag><Button size="small" type="text" onClick={()=>setMultiIds([])}>取消多选</Button></>}</Space>
     {editorBox&&<div className="paper-edit-tools"><strong>{editNote?'版面文字':`第 ${prompt?.number} 题题干`}</strong><div ref={setToolsHost}/><Button size="small" type="primary" onClick={()=>onEdit?.(null)}>完成</Button></div>}
     {forbiddenMode&&<Space wrap><Typography.Text type="secondary">拖动空白处添加禁答区；拖动区域移动，拖动右下角调整大小。</Typography.Text><Button size="small" danger disabled={readOnly||selectedForbidden===null} onClick={()=>{onForbidden?.((value.forbidden_regions||[]).filter((_,i)=>i!==selectedForbidden));setSelectedForbidden(null)}}>删除选中禁答区</Button></Space>}
     {error?<Alert type="warning" showIcon message="打印预览尚未更新" description={error} action={<Button size="small" onClick={()=>setRetry(v=>v+1)}>重试</Button>}/>:<Typography.Text type="secondary" role="status">{pending?'正在更新打印预览…':'预览已更新'}{pending&&visible?'，下方暂显示上次生成的打印稿。':''}{value.status!=='published'&&value.status!=='superseded'?' · 草稿预览，发布后可导出打印稿。':''}</Typography.Text>}
-    <div ref={scroll} className="paper-scroll"><svg ref={svg} tabIndex={answerMode?0:undefined} onDoubleClick={editAt} onKeyDown={e=>{if(!editorBox)answerKey(e)}} style={{width:`${scale}%`,minWidth:0,marginInline:'auto'}} className={`paper-svg ${draw||forbiddenMode||noteMode?'drawing':''}`} viewBox={`0 0 ${width} ${height}`} aria-label={answerMode?'点击选项或使用数字键设置标准答案':'题卡打印预览与答题区域编辑'} onPointerDown={e=>{if(editorBox){onEdit?.(null);return}if(answerMode){e.currentTarget.focus();return}if(readOnly||(!noteMode&&!forbiddenMode&&(!draw||!selected)))return;start.current={...point(e),qid:selected||'',forbidden:forbiddenMode,note:noteMode};setDraft(null);e.currentTarget.setPointerCapture(e.pointerId)}} onPointerMove={e=>{if(start.current)setDraft(regionAt(point(e),start.current))}} onPointerUp={finish} onPointerCancel={()=>{start.current=null;setDraft(null)}}>
+    <div ref={scroll} className="paper-scroll"><svg ref={svg} tabIndex={answerMode?0:undefined} onDoubleClick={editAt} onKeyDown={e=>{if(!editorBox)answerKey(e)}} style={{width:`${scale}%`,minWidth:0,marginInline:'auto'}} className={`paper-svg ${draw||forbiddenMode||noteMode?'drawing':''}`} viewBox={`0 0 ${width} ${height}`} aria-label={answerMode?'点击选项或使用数字键设置标准答案':'题卡打印预览与答题区域编辑'} onPointerDown={e=>{if(editorBox){onEdit?.(null);return}if(answerMode){e.currentTarget.focus();return}if(readOnly)return;if(!noteMode&&!forbiddenMode&&!draw){start.current={...point(e),qid:'',marquee:true,shift:e.shiftKey};setDraft(null);setGroupOffset(null);e.currentTarget.setPointerCapture(e.pointerId);return}if(!noteMode&&!forbiddenMode&&(!draw||!selected))return;start.current={...point(e),qid:selected||'',forbidden:forbiddenMode,note:noteMode};setDraft(null);e.currentTarget.setPointerCapture(e.pointerId)}} onPointerMove={e=>{const s=start.current;if(!s)return;const p=point(e);if(s.marquee){setDraft({page,x:Math.min(s.x,p.x),y:Math.min(s.y,p.y),width:Math.abs(p.x-s.x),height:Math.abs(p.y-s.y)});return}if(s.group){setGroupOffset(clampGroupDelta(s.group,p.x-s.x,p.y-s.y));return}setDraft(regionAt(p,s))}} onPointerUp={finish} onPointerCancel={()=>{start.current=null;setDraft(null);setGroupOffset(null)}}>
       <rect width={width} height={height} fill="white"/>
       {visible&&<image href={visible.url} x={0} y={0} width={width} height={height} preserveAspectRatio="none" pointerEvents="none"/>}
       {bgMode&&!readOnly&&!forbiddenMode&&!noteMode&&!editorBox&&value.background_assets?.[String(page)]&&(()=>{
@@ -188,7 +238,7 @@ export function Paper({value,page,selected,draw,answerMode=false,forbiddenMode=f
         </g>
       })()}
       {value.questions.flatMap(q=>q.regions.map((r,index)=>r.page!==page?null:<g key={`${q.id}-${index}`} pointerEvents={forbiddenMode||noteMode||draw&&!readOnly?'none':undefined}>
-        <rect data-question-id={q.id} x={r.x} y={r.y} width={r.width} height={r.height} fill={selected===q.id?'#0866ff12':'transparent'} stroke={selected===q.id?'#0866ff':'transparent'} strokeWidth={.4} onPointerDown={e=>{e.stopPropagation();onSelect(q.id);svg.current?.focus();if(!editorBox&&!readOnly&&!draw&&!answerMode){start.current={...point(e),qid:q.id,index,region:r};svg.current!.setPointerCapture(e.pointerId)}}}><title>第{q.number}题 · 区域{index+1}</title></rect>
+        <rect data-question-id={q.id} x={r.x} y={r.y} width={r.width} height={r.height} fill={multiIds.includes(q.id)?'#0866ff1c':selected===q.id?'#0866ff12':'transparent'} stroke={multiIds.includes(q.id)||selected===q.id?'#0866ff':'transparent'} strokeWidth={multiIds.includes(q.id)?.55:.4} style={!readOnly&&!draw&&!answerMode&&!editorBox?{cursor:'move'}:undefined} onPointerDown={e=>{e.stopPropagation();svg.current?.focus();if(!editorBox&&!readOnly&&!draw&&!answerMode){if(e.shiftKey){setMultiIds(prev=>{const base=prev.length?prev:(selected?[selected]:[]);return base.includes(q.id)?base.filter(id=>id!==q.id):[...base,q.id]});onSelect(q.id);return}if(multiIds.length>1&&multiIds.includes(q.id)){const items:GroupItem[]=value.questions.filter(item=>multiIds.includes(item.id)).flatMap(item=>item.regions.map((reg,idx)=>reg.page===page?{qid:item.id,index:idx,region:reg}:null).filter((x):x is GroupItem=>!!x));start.current={...point(e),qid:q.id,group:items};setGroupOffset({dx:0,dy:0});svg.current!.setPointerCapture(e.pointerId);return}setMultiIds([]);onSelect(q.id);start.current={...point(e),qid:q.id,index,region:r};svg.current!.setPointerCapture(e.pointerId);return}onSelect(q.id)}}><title>第{q.number}题 · 区域{index+1}</title></rect>
         {selected===q.id&&q.type==='subjective'&&!readOnly&&!draw&&!answerMode&&!editorBox&&<rect aria-label={`调整第${q.number}题区域高度`} x={r.x+r.width/2-8} y={r.y+r.height-1.5} width={16} height={3} rx={1} fill="#0866ff" style={{cursor:'ns-resize'}} onPointerDown={event=>{event.stopPropagation();start.current={...point(event),qid:q.id,index,region:r,resize:true};svg.current!.setPointerCapture(event.pointerId)}}><title>上下拖动调整题区高度</title></rect>}
         {selected===q.id&&q.type==='subjective'&&q.image_asset_id&&!readOnly&&!draw&&!answerMode&&!editorBox&&(()=>{
           const box=q.image_box||defaultQuestionImageBox(r,q.image_height)
@@ -217,6 +267,7 @@ export function Paper({value,page,selected,draw,answerMode=false,forbiddenMode=f
           <RichEditor textStyle={{fontFamily:"OMP Sans",fontSize:(value.font_size??9)+"pt",lineHeight:(value.leading??13)+"pt"}} autoFocus toolbarHost={toolsHost} value={editNote?.html??prompt?.content_html??''} onChange={html=>onTextChange?.(editing,html)}/>
         </div>
       </foreignObject>}
+      {groupOffset&&start.current?.group&&start.current.group.map(item=><rect key={`ghost-${item.qid}-${item.index}`} x={item.region.x+groupOffset.dx} y={item.region.y+groupOffset.dy} width={item.region.width} height={item.region.height} stroke="#0866ff" fill="#0866ff24" strokeDasharray="2 1" strokeWidth={.6} pointerEvents="none"/>)}
       {draft&&<rect x={draft.x} y={draft.y} width={draft.width} height={draft.height} stroke="#0866ff" fill="#0866ff20" strokeDasharray="2 1" strokeWidth={.6} pointerEvents="none"/>}
     </svg></div>
   </Space>

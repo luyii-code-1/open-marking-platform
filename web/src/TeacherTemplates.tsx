@@ -1558,6 +1558,20 @@ function TeacherTemplateWorkbench({
                 ),
               })
             }
+            onBatchRegions={updates => {
+              const byId = new Map<string, Map<number, typeof updates[number]['region']>>()
+              for (const u of updates) {
+                const m = byId.get(u.id) || new Map()
+                m.set(u.index, u.region)
+                byId.set(u.id, m)
+              }
+              change({
+                questions: value.questions.map(q => {
+                  const m = byId.get(q.id)
+                  return m ? { ...q, regions: q.regions.map((r, i) => m.get(i) ?? r) } : q
+                }),
+              })
+            }}
           />
         </Card>
       </div>
