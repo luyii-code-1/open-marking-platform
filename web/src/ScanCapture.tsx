@@ -1,8 +1,9 @@
 import {useEffect,useState} from 'react'
-import {Alert,App,Card,Empty,Form,Input,InputNumber,Modal,Popconfirm,Select,Space,Statistic,Tag,Typography,Upload} from 'antd'
+import {Alert,App,Card,Empty,Form,Input,InputNumber,Modal,Popconfirm,Space,Statistic,Tag,Typography,Upload} from 'antd'
 import { Table } from './DataTable'
 import {ArrowLeftOutlined,PlusOutlined,ReloadOutlined,UploadOutlined} from '@ant-design/icons'
 import {Button} from './Button'
+import {TagPicker} from './TagPicker'
 import {describeStatus,download,request,send,useResource,type Row} from './api'
 import {HierarchyPicker} from './HierarchyPicker'
 import {ErrorNotice} from './EntityTable'
@@ -60,7 +61,7 @@ export function ScanCapture({groupId,selectedGroup:externalGroup,onGroupChange,s
   return <Space direction="vertical" size={24} style={{width:'100%'}}>
     <ErrorNotice error={projects.error||groups.error||subjects.error||batches.error} retry={batches.reload}/>
     {!selected?<Card title="扫描批次" extra={<Space wrap><Button onClick={()=>download(`/exports/scans?${new URLSearchParams({...group?{group_id:group}:{}})}`,'扫描记录.csv').catch(e=>message.error(e.message))}>导出记录</Button><Button icon={<ReloadOutlined/>} onClick={batches.reload}>刷新</Button><Button type="primary" icon={<PlusOutlined/>} disabled={saving||!group||!!currentGroup?.frozen} onClick={()=>{newForm.setFieldsValue({name:`第 ${rows.length+1} 批`,expected_count:undefined,back_order:'same'});setNewOpen(true)}}>新建批次</Button></Space>}>
-      <div className="scan-filters">{!groupId&&<HierarchyPicker value={group} allowClear onChange={setGroup}/>}<Select allowClear placeholder="全部状态" value={status} onChange={setStatus} style={{width:150}} options={['front','frozen','paired'].map(value=>({value,label:describeStatus(value)}))}/></div>
+      <div className="scan-filters">{!groupId&&<HierarchyPicker value={group} allowClear onChange={setGroup}/>}<TagPicker compact allowClear clearLabel="全部状态" value={status} onChange={setStatus} options={['front','frozen','paired'].map(value=>({value,label:describeStatus(value)}))}/></div>
       <Table rowKey="id" dataSource={rows} loading={batches.loading} onRow={row=>rowNavigation(()=>setSelected(row.id),batchTitle(row))} pagination={{defaultPageSize:50,showSizeChanger:true}} scroll={{x:'max-content'}} columns={[
         {title:'批次名称',dataIndex:'id',render:(_,row:Row)=><Button type="link" onClick={()=>setSelected(row.id)}>{batchTitle(row)}</Button>},
         ...!groupId?[{title:'题卡',dataIndex:'group_id',render:label}]:[],
@@ -89,7 +90,7 @@ export function ScanCapture({groupId,selectedGroup:externalGroup,onGroupChange,s
         {selectedGroup?.frozen&&<Alert type="info" showIcon message="该题卡成绩已发布，当前批次只读。如需更正页面或补扫，请先发起成绩复核。" action={selectedSubject&&<Button href={examPath({projectId:selectedSubject.project_id,subjectId:selectedSubject.id,gradeId:selectedGroup.grade_id||unassignedGrade,groupId:selectedGroup.id,section:'results'})}>前往成绩复核</Button>}/>}
         {!selectedGroup?.frozen&&(selected.status==='frozen'||hasPageExceptions)&&<Alert type="warning" showIcon message="本批次存在异常页面或处于待核查状态" description="请在「纠正与补扫」中核对考号、执行人工四点定位或排除异常页，恢复批次后再确认配对入库。" action={onOpenCorrection&&<Button type="primary" onClick={()=>onOpenCorrection(selected.id)}>前往纠正与补扫处理本批次</Button>}/>}
         <div className="stat-grid"><Statistic title="本批计数" value={targetCount?`${frontCount} / ${targetCount} 张`:`${frontCount} 张`}/><Statistic title="正面页数" value={frontCount}/><Statistic title="背面页数" value={backCount}/><Statistic title="异常页面" value={pageRows.filter(p=>['error','exception','quarantined'].includes(p.status)).length}/></div>
-        {!readOnly&&<div className="scan-filters"><Typography.Text strong>导入扫描图片</Typography.Text><Select value={side} disabled={saving} onChange={setSide} options={[{label:'正面',value:'front'},{label:'背面',value:'back'}]}/><InputNumber disabled={saving} min={1} value={sequence} onChange={v=>setSequence(v||1)} addonBefore="序号"/><Upload accept="image/*" disabled={saving} showUploadList={false} beforeUpload={upload}><Button icon={<UploadOutlined/>} loading={saving}>上传页面</Button></Upload></div>}
+        {!readOnly&&<div className="scan-filters"><Typography.Text strong>导入扫描图片</Typography.Text><TagPicker compact value={side} disabled={saving} onChange={v=>v&&setSide(v)} options={[{label:'正面',value:'front'},{label:'背面',value:'back'}]}/><InputNumber disabled={saving} min={1} value={sequence} onChange={v=>setSequence(v||1)} addonBefore="序号"/><Upload accept="image/*" disabled={saving} showUploadList={false} beforeUpload={upload}><Button icon={<UploadOutlined/>} loading={saving}>上传页面</Button></Upload></div>}
         <Table rowKey="id" dataSource={pageRows} loading={pages.loading} columns={[{title:'面',dataIndex:'side',render:v=>v==='back'?'背面':'正面'},{title:'序号',dataIndex:'sequence'},{title:'准考证号',dataIndex:'candidate_number',render:v=>v||'未识别'},{title:'状态',dataIndex:'status',render:v=><Tag color={['error','exception','quarantined'].includes(v)?'orange':v==='recognized'?'green':undefined}>{describeStatus(v)}</Tag>},{title:'操作',render:(_,row)=><Space><Button onClick={()=>setPreview(row)}>查看原图</Button>{!selectedGroup?.frozen&&onOpenCorrection&&<Button type="link" onClick={()=>onOpenCorrection(selected.id)}>核对与更正</Button>}</Space>}]}/>
       </Space>
     </Card>}
@@ -101,7 +102,7 @@ export function ScanCapture({groupId,selectedGroup:externalGroup,onGroupChange,s
           <InputNumber min={1} max={10000} precision={0} style={{width:'100%'}} placeholder="例如：37" addonAfter="张"/>
         </Form.Item>
         <Form.Item name="back_order" label="双面扫描背面顺序" initialValue="same">
-          <Select options={[{value:'same',label:'同序（双面扫描仪或正反顺序一致）'},{value:'reverse',label:'逆序（单面翻页后背面倒序）'}]}/>
+          <TagPicker options={[{value:'same',label:'同序（正反顺序一致）'},{value:'reverse',label:'逆序（翻页后倒序）'}]}/>
         </Form.Item>
       </Form>
     </Modal>

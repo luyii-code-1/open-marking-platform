@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { App, Card, ColorPicker, Divider, Form, Input, Modal, Radio, Segmented, Select, Space, Tag, Typography } from 'antd'
+import { App, Card, ColorPicker, Divider, Form, Input, Modal, Segmented, Space, Tag, Typography } from 'antd'
 import { PlusOutlined } from '@ant-design/icons'
 import { Table } from './DataTable'
 import { Button } from './Button'
@@ -7,7 +7,8 @@ import { BatchDeleteButton, DeleteRecord } from './DeleteRecord'
 import { ErrorNotice } from './ErrorNotice'
 import { RecordPicker } from './RecordPicker'
 import { MultipleRecordSelect } from './RecordSelect'
-import { ClassTags, TAG_COLOR_CHOICES } from './SchoolTags'
+import { ClassTags, DEFAULT_CLASS_TAGS, TAG_COLOR_CHOICES, classTagColor, gradeColor } from './SchoolTags'
+import { TagPicker } from './TagPicker'
 import { request, send, useResource, type Row } from './api'
 
 type CategoryFilter = 'all' | 'custom' | 'grade' | 'elective'
@@ -350,35 +351,41 @@ export function TagsManager({
             label="标签名称"
             extra={editing?.category === 'grade' ? '修改内置年级标签名称将同步更新全校对应年级名称，便于学年升级。' : undefined}
           >
-            <Input value={name} maxLength={30} onChange={e => setName(e.target.value)} placeholder="如：直卓、卓越、重点、实验、普通、竞赛班" />
+            {!editing ? (
+              <TagPicker
+                allowCustom
+                maxLength={30}
+                value={name}
+                onChange={v => setName(v || '')}
+                options={DEFAULT_CLASS_TAGS.map(t => ({ label: t, value: t, color: classTagColor(t) }))}
+                customPlaceholder="点击上方标签快速填充，或输入自定义标签名称"
+              />
+            ) : (
+              <Input value={name} maxLength={30} onChange={e => setName(e.target.value)} placeholder="如：直卓、卓越、重点、实验、普通、竞赛班" />
+            )}
           </Form.Item>
           <Form.Item label="标签颜色">
-            <Space wrap align="center">
-              <Select
-                style={{ width: 150 }}
+            <Space direction="vertical" size={8} style={{ width: '100%' }}>
+              <TagPicker
+                compact
                 value={isHex ? undefined : color}
-                placeholder="预设色"
-                allowClear
                 onChange={v => setColor(v || 'blue')}
                 options={TAG_COLOR_CHOICES.map(item => ({
                   value: item.value,
-                  label: (
-                    <Space size={6}>
-                      <Tag color={item.value} style={{ marginInlineEnd: 0 }}>
-                        {item.label}
-                      </Tag>
-                    </Space>
-                  ),
+                  label: item.label,
+                  color: item.value,
                 }))}
               />
-              <ColorPicker
-                value={isHex ? color : '#1677ff'}
-                showText
-                onChange={c => setColor(c.toHexString())}
-              />
-              <Tag color={color} style={{ marginInlineEnd: 0 }}>
-                {name.trim() || '预览标签'}
-              </Tag>
+              <Space wrap align="center">
+                <ColorPicker
+                  value={isHex ? color : '#1677ff'}
+                  showText
+                  onChange={c => setColor(c.toHexString())}
+                />
+                <Tag color={color} style={{ marginInlineEnd: 0 }}>
+                  {name.trim() || '预览标签'}
+                </Tag>
+              </Space>
             </Space>
           </Form.Item>
 
@@ -389,23 +396,19 @@ export function TagsManager({
                 各年级选科成员维护（原「选科管理」已整合至此）
               </Typography.Text>
               <Space direction="vertical" size={10} style={{ width: '100%' }}>
-                <Space wrap align="center">
-                  <Select
-                    style={{ width: 140 }}
-                    placeholder="选择年级"
-                    value={electiveGrade || undefined}
-                    onChange={gid => loadElectiveGrade(editing.name, gid)}
-                    options={activeGrades.map(g => ({ value: g.id, label: g.name }))}
-                  />
-                  <Radio.Group
-                    value={electiveKind}
-                    onChange={e => setElectiveKind(e.target.value)}
-                    options={[
-                      { value: 'required', label: '必考（年级全体）' },
-                      { value: 'elective', label: '选考（指定学生）' },
-                    ]}
-                  />
-                </Space>
+                <TagPicker
+                  value={electiveGrade || undefined}
+                  onChange={gid => gid && loadElectiveGrade(editing.name, gid)}
+                  options={activeGrades.map(g => ({ value: g.id, label: g.name, color: gradeColor(g.name) }))}
+                />
+                <TagPicker
+                  value={electiveKind}
+                  onChange={v => v && setElectiveKind(v)}
+                  options={[
+                    { value: 'required', label: '必考（年级全体）' },
+                    { value: 'elective', label: '选考（指定学生）' },
+                  ]}
+                />
                 <Space wrap align="center">
                   {electiveKind === 'elective' && (
                     <Button disabled={!electiveGrade || savingElective} onClick={() => setElectivePickerOpen(true)}>

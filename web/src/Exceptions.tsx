@@ -1,8 +1,8 @@
 import { Button } from './Button'
-import { RoomTagBadges, RoomTagPicker } from './RoomTags'
 import { useEffect, useState } from 'react'
-import { Alert, App, Card, Descriptions, Form, Input, InputNumber, Modal, Select, Space, Spin, Switch, Tabs, Tag, Typography } from 'antd'
+import { Alert, App, Card, Descriptions, Form, Input, InputNumber, Modal, Space, Spin, Switch, Tabs, Tag, Typography } from 'antd'
 import { Table } from './DataTable'
+import { TagPicker } from './TagPicker'
 import { download, send, useResource, type Row } from './api'
 import { AssetImage } from './components'
 import { ErrorNotice } from './EntityTable'
@@ -14,9 +14,8 @@ const rules:Record<string,string>={blank_answers:'客观题留空数量',same_an
 
 export function Exceptions({groupId}:{groupId?:string}) {
   const [selectedGroup,setGroup]=useState(groupId || ''),group=groupId || selectedGroup,[status,setStatus]=useState<string|undefined>('open'),[selected,setSelected]=useState<string[]>([]),[detailId,setDetailId]=useState(''),[resolution,setResolution]=useState(''),[bulk,setBulk]=useState(false),[busy,setBusy]=useState(false),[savingRules,setSavingRules]=useState(false),[form]=Form.useForm()
-  const [roomTag,setRoomTag]=useState<string|undefined>()
   const projects=useResource<Row[]>('/projects',[]),subjects=useResource<Row[]>('/subjects',[]),groups=useResource<Row[]>('/groups',[])
-  const list=useResource<Row[]>(`/exceptions?${new URLSearchParams({...group?{group_id:group}:{},...status?{status}:{},...roomTag?{room_tag_id:roomTag}:{}})}`,[])
+  const list=useResource<Row[]>(`/exceptions?${new URLSearchParams({...group?{group_id:group}:{},...status?{status}:{}})}`,[])
   const configuration=useResource<Record<string,any>>(group?`/groups/${group}/anomaly-rules`:null,{},{live:false})
   const details=useResource<any>(detailId?`/exceptions/${detailId}`:null,null)
   const {message}=App.useApp()
@@ -30,7 +29,7 @@ export function Exceptions({groupId}:{groupId?:string}) {
   const correctionPath=scope?.project_id&&scope.subject_id&&scope.group_id?examPath({projectId:scope.project_id,subjectId:scope.subject_id,gradeId:scope.grade_id||unassignedGrade,groupId:scope.group_id,section:'scans',scanTab:'correct',correction:{batchId:scope.batch_id,pageId:scope.page_id,submissionId:scope.submission_id}}):undefined
   return <Space direction="vertical" size={16} style={{width:'100%'}}>
     <Card title="异常与优秀卷" extra={<Button onClick={list.reload} loading={list.loading}>刷新</Button>}>
-      <Space wrap style={{marginBottom:16}}>{!groupId && <HierarchyPicker allowClear placeholder="全部题卡" value={group} onChange={value=>{setGroup(value);setSelected([])}}/>}<Select allowClear placeholder="全部状态" value={status} style={{width:150}} options={[{label:'待核查',value:'open'},{label:'已处理',value:'resolved'}]} onChange={value=>{setStatus(value);setSelected([])}}/><RoomTagPicker groupId={group} value={roomTag} onChange={value=>{setRoomTag(value);setSelected([])}}/><Button onClick={()=>download(`/exports/exceptions?${new URLSearchParams({...group?{group_id:group}:{},...status?{status}:{},...roomTag?{room_tag_id:roomTag}:{}})}`,'异常核查.csv').catch(e=>message.error(e.message))}>导出</Button><Button disabled={!selected.length} onClick={()=>{setBulk(true);setResolution('')}}>批量处理（{selected.length}）</Button></Space>
+      <Space wrap style={{marginBottom:16}}>{!groupId && <HierarchyPicker allowClear placeholder="全部题卡" value={group} onChange={value=>{setGroup(value);setSelected([])}}/>}<TagPicker compact allowClear clearLabel="全部状态" value={status} options={[{label:'待核查',value:'open',color:'orange'},{label:'已处理',value:'resolved',color:'green'}]} onChange={value=>{setStatus(value);setSelected([])}}/><Button onClick={()=>download(`/exports/exceptions?${new URLSearchParams({...group?{group_id:group}:{},...status?{status}:{}})}`,'异常核查.csv').catch(e=>message.error(e.message))}>导出</Button><Button disabled={!selected.length} onClick={()=>{setBulk(true);setResolution('')}}>批量处理（{selected.length}）</Button></Space>
       <ErrorNotice error={list.error||projects.error||subjects.error||groups.error} retry={list.reload}/>
       <Table rowKey="id" loading={list.loading} dataSource={list.data} rowSelection={{selectedRowKeys:selected,onChange:keys=>setSelected(keys.map(String))}} columns={[
         {title:'类型',dataIndex:'kind',render:value=>kinds[value]||value},
@@ -40,7 +39,6 @@ export function Exceptions({groupId}:{groupId?:string}) {
           return g&&s?<a href={examPath({projectId:s.project_id,subjectId:s.id,gradeId:g.grade_id||unassignedGrade,groupId:g.id,section:'exceptions'})}>{label}</a>:label
         }}]:[],
         {title:'准考证号',dataIndex:'candidate_number',render:v=>v||'—'},
-        {title:'考场标签',render:(_,row)=><RoomTagBadges tags={row.room_tags}/>},
         {title:'说明',dataIndex:'reason',render:v=>v||'—'},
         {title:'状态',dataIndex:'status',render:value=><Tag color={value==='open'?'orange':'green'}>{value==='open'?'待核查':'已处理'}</Tag>},
         {title:'操作',render:(_,row)=><Button onClick={()=>{setDetailId(row.id);setResolution(row.resolution||'')}}>查看与处理</Button>},

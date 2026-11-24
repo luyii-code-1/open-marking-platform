@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Alert, App, Card, Checkbox, Form, Modal, Popconfirm, Select, Space, Statistic, Tag, Typography, Upload } from 'antd'
+import { Alert, App, Card, Checkbox, Modal, Popconfirm, Space, Statistic, Tag, Typography, Upload } from 'antd'
 import { DownloadOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons'
 import { Table } from './DataTable'
 import { Button } from './Button'
@@ -7,7 +7,8 @@ import { download, request, send, useResource, type Row } from './api'
 import { HierarchyPicker } from './HierarchyPicker'
 import { ErrorNotice } from './EntityTable'
 import { RecordPicker } from './RecordPicker'
-import { ClassTags } from './SchoolTags'
+import { ClassTags, gradeColor } from './SchoolTags'
+import { TagPicker } from './TagPicker'
 import type { FilterValues } from './recordFilters'
 
 type CandidateList = {
@@ -208,22 +209,22 @@ export function Roster({ groupId }: { groupId?: string }) {
           </Card>
 
           <Card title="所属年级">
-            <Form layout="inline" style={{ rowGap: 12 }}>
-              <Form.Item label="全局年级" style={{ minWidth: 260 }}>
-                <Select
-                  disabled={busy || frozen}
-                  value={gradeId}
-                  placeholder="选择年级"
-                  onChange={setGrade}
-                  options={grades.data.filter(g => !g.archived || g.id === current?.grade_id).map(g => ({ label: g.name, value: g.id }))}
-                />
-              </Form.Item>
-              <Form.Item>
+            <Space direction="vertical" size={12} style={{ width: '100%' }}>
+              <TagPicker
+                disabled={busy || frozen}
+                value={gradeId}
+                onChange={setGrade}
+                aria-label="全局年级"
+                options={grades.data
+                  .filter(g => !g.archived || g.id === current?.grade_id)
+                  .map(g => ({ label: g.name, value: g.id, color: gradeColor(g.name) }))}
+              />
+              <div>
                 <Button disabled={busy || frozen || !gradeId || gradeId === current?.grade_id} loading={busy} onClick={saveGrade}>
                   保存所属年级
                 </Button>
-              </Form.Item>
-            </Form>
+              </div>
+            </Space>
           </Card>
 
           <Card

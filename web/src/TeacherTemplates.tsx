@@ -7,6 +7,7 @@ import { ErrorNotice } from './EntityTable'
 import { ObjectiveEditor } from './ObjectiveEditor'
 import { Paper, type TextTarget } from './PrintPaper'
 import { QuestionSettings } from './QuestionSettings'
+import { SUBJECT_PRESETS, TagPicker } from './TagPicker'
 import { download, newQuestion, request, send, useResource, type Question, type Row, type Template } from './api'
 import { examPath } from './examNavigation'
 import { mergeQuestions, questionLabel, questionNumbers, splitQuestions } from './mergeQuestions'
@@ -91,6 +92,11 @@ export function TeacherTemplates({
   onNavigate?: (hash: string) => void
 }) {
   const list = useResource<TeacherTemplateRow[]>('/teacher-templates', [])
+  const subjectTags = useResource<Row[]>('/subject-tags', [])
+  const subjectOptions = [...new Set([...subjectTags.data.map(t => String(t.name)), ...SUBJECT_PRESETS].filter(Boolean))].map(name => ({
+    label: name,
+    value: name,
+  }))
   const projects = useResource<Row[]>(management ? '/projects' : null, [])
   const subjects = useResource<Row[]>(management ? '/subjects' : null, [])
   const groups = useResource<Row[]>(management ? '/groups' : null, [])
@@ -277,6 +283,7 @@ export function TeacherTemplates({
       <TeacherTemplateWorkbench
         row={editingRow}
         management={management}
+        subjectOptions={subjectOptions}
         onBack={() => {
           setEditingRow(null)
           openedRef.current = ''
@@ -483,7 +490,13 @@ export function TeacherTemplates({
             <Input maxLength={100} placeholder="例如：高一数学周测答题卡" />
           </Form.Item>
           <Form.Item name="subject_name" label="学科（选填）">
-            <Input maxLength={40} placeholder="例如：数学、语文、物理" />
+            <TagPicker
+              allowCustom
+              allowClear
+              maxLength={40}
+              options={subjectOptions}
+              customPlaceholder="点击上方学科标签快速填充，或输入自定义学科"
+            />
           </Form.Item>
           <Form.Item name="description" label="制作说明（选填）">
             <Input.TextArea rows={3} maxLength={2000} placeholder="可备注适用年级、试卷结构或审核提示" />
@@ -632,6 +645,7 @@ export function TeacherTemplates({
 function TeacherTemplateWorkbench({
   row,
   management,
+  subjectOptions,
   onBack,
   onUpdated,
   onCopyLink,
@@ -641,6 +655,7 @@ function TeacherTemplateWorkbench({
 }: {
   row: TeacherTemplateRow
   management: boolean
+  subjectOptions: { label: string; value: string }[]
   onBack: () => void
   onUpdated: (next: TeacherTemplateRow) => void
   onCopyLink: () => void
@@ -889,27 +904,30 @@ function TeacherTemplateWorkbench({
         <Form.Item label="题卡标题">
           <Input value={value.name} onChange={e => change({ name: e.target.value })} />
         </Form.Item>
-        <div className="editor-form-grid">
-          <Form.Item label="学科">
-            <Input
-              value={subjectName}
-              maxLength={40}
-              onChange={e => {
-                setSubjectName(e.target.value)
-                setDirty(true)
-              }}
-              placeholder="如：数学、物理"
-            />
-          </Form.Item>
-          <Form.Item label="内部链接">
-            <Space.Compact style={{ width: '100%' }}>
-              <Input readOnly value={row.internal_link} />
-              <Button icon={<CopyOutlined />} onClick={onCopyLink}>
-                复制
-              </Button>
-            </Space.Compact>
-          </Form.Item>
-        </div>
+        <Form.Item label="学科">
+          <TagPicker
+            compact
+            allowCustom
+            allowClear
+            disabled={readOnly || saving}
+            value={subjectName}
+            maxLength={40}
+            options={subjectOptions}
+            customPlaceholder="点击学科标签快速填充或自定义输入"
+            onChange={v => {
+              setSubjectName(v || '')
+              setDirty(true)
+            }}
+          />
+        </Form.Item>
+        <Form.Item label="内部链接">
+          <Space.Compact style={{ width: '100%' }}>
+            <Input readOnly value={row.internal_link} />
+            <Button icon={<CopyOutlined />} onClick={onCopyLink}>
+              复制
+            </Button>
+          </Space.Compact>
+        </Form.Item>
         <Form.Item label="制卡说明">
           <Input.TextArea
             rows={2}
@@ -926,17 +944,20 @@ function TeacherTemplateWorkbench({
         </Form.Item>
         <div className="editor-form-grid">
           <Form.Item label="纸张">
-            <Select
+            <TagPicker
+              disabled={readOnly || saving}
               value={value.paper}
               options={[{ label: 'A4 纵向', value: 'A4' }, { label: 'A3 横向', value: 'A3' }]}
-              onChange={paper => change({ paper, sheet_columns: paper === 'A3' ? 2 : 1, layout_version: 3 })}
+              onChange={paper => paper && change({ paper, sheet_columns: paper === 'A3' ? 2 : 1, layout_version: 3 })}
             />
           </Form.Item>
           <Form.Item label="面数">
-            <Select
+            <TagPicker
+              disabled={readOnly || saving}
               value={value.sides}
               options={[{ label: '单面', value: 1 }, { label: '双面', value: 2 }]}
               onChange={sides => {
+                if (!sides) return
                 if (sides === 1 && (value.questions.some(q => q.regions.some(r => r.page === 2)) || notes.some(n => n.page === 2) || (value.forbidden_regions || []).some(r => r.page === 2))) {
                   message.warning('背面已有答题区域，请先调整后再改为单面')
                   return
@@ -949,10 +970,11 @@ function TeacherTemplateWorkbench({
         </div>
         {value.paper === 'A3' && (
           <Form.Item label="题卡分栏模板">
-            <Select
+            <TagPicker
+              disabled={readOnly || saving}
               value={value.sheet_columns || 2}
               options={[{ label: '2×2 · 正反面各2栏', value: 2 }, { label: '3×3 · 正反面各3栏', value: 3 }]}
-              onChange={sheet_columns => change({ sheet_columns, layout_version: 3 })}
+              onChange={sheet_columns => sheet_columns && change({ sheet_columns, layout_version: 3 })}
             />
           </Form.Item>
         )}
@@ -979,20 +1001,22 @@ function TeacherTemplateWorkbench({
           </Form.Item>
         </div>
         <Form.Item label="分栏底版">
-          <Select
+          <TagPicker
+            disabled={readOnly || saving}
             value={value.column_frame ? 'framed' : 'classic'}
             options={[{ label: '整栏圆角框与边缘提示', value: 'framed' }, { label: '逐题圆角框', value: 'classic' }]}
-            onChange={v => change({ column_frame: v === 'framed' })}
+            onChange={v => v && change({ column_frame: v === 'framed' })}
           />
         </Form.Item>
         <Form.Item label="准考证号位数">
           <InputNumber min={1} max={11} value={value.candidate_length} onChange={length => change({ candidate_length: length || 9 })} />
         </Form.Item>
         <Form.Item label="内置须知">
-          <Select
+          <TagPicker
+            disabled={readOnly || saving}
             value={value.notice_template || 'none'}
             options={[{ label: '标准模板 · 考生禁填、注意事项与填涂样例', value: 'standard-v1' }, { label: '不添加', value: 'none' }]}
-            onChange={notice_template => change({ notice_template })}
+            onChange={notice_template => notice_template && change({ notice_template })}
           />
         </Form.Item>
         <Space wrap>

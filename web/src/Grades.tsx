@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
-import { App, Input, Modal, Space, Tag } from 'antd'
+import { App, Modal, Space, Tag } from 'antd'
 import { BatchDeleteButton, DeleteRecord } from './DeleteRecord'
-import { GradeTag } from './SchoolTags'
+import { GradeTag, gradeColor } from './SchoolTags'
+import { GRADE_PRESETS, TagPicker } from './TagPicker'
 import { Button } from './Button'
 import { EntityTable } from './EntityTable'
 import { send, useResource, type Row } from './api'
@@ -44,7 +45,7 @@ export function Grades({ onChanged }: { onChanged?: () => Promise<unknown> }) {
         title="年级"
         hideTitle
         resource={grades}
-        fields={[{ name: 'name', label: '年级名称' }]}
+        fields={[{ name: 'name', label: '年级名称', type: 'tag-input', presets: GRADE_PRESETS }]}
         onCreated={reloadAll}
         rowSelection={{
           selectedRowKeys: validSelected,
@@ -110,7 +111,14 @@ export function Grades({ onChanged }: { onChanged?: () => Promise<unknown> }) {
         okButtonProps={{ disabled: !name.trim() }}
         onOk={() => editing && update(editing, { name: name.trim() })}
       >
-        <Input value={name} maxLength={60} onChange={event => setName(event.target.value)} />
+        <TagPicker
+          allowCustom
+          maxLength={60}
+          value={name}
+          onChange={v => setName(v || '')}
+          options={GRADE_PRESETS.map(g => ({ label: g, value: g, color: gradeColor(g) }))}
+          customPlaceholder="点击标签快速填充或输入年级名称"
+        />
       </Modal>
     </>
   )

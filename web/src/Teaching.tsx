@@ -4,6 +4,7 @@ import { Table } from './DataTable'
 import { Button } from './Button'
 import { RecordSelect } from './RecordSelect'
 import { ClassTags, DEFAULT_CLASS_TAGS } from './SchoolTags'
+import { MultiTagPicker, SUBJECT_PRESETS } from './TagPicker'
 import type { FilterValues } from './recordFilters'
 import { download, request, send, useResource, type Row } from './api'
 
@@ -47,8 +48,11 @@ export function Teaching({
 
   const subjects = useResource<Row[]>('/subjects', [])
   const subjectTags = useResource<Row[]>('/subject-tags', [])
-  const subjectChoices = [...new Set([...subjectTags.data.map(t => t.name), ...subjects.data.map(s => s.name)].filter(Boolean))].map(value => ({
-    value,
+  const subjectChoices = [
+    ...new Set([...subjectTags.data.map(t => t.name), ...subjects.data.map(s => s.name), ...SUBJECT_PRESETS].filter(Boolean)),
+  ].map(value => ({
+    label: String(value),
+    value: String(value),
   }))
   const classTagOptions = useMemo(
     () =>
@@ -300,7 +304,7 @@ export function Teaching({
             />
           </Form.Item>
           <Form.Item name="subjects" label="任教学科">
-            <Select mode="tags" options={subjectChoices} />
+            <MultiTagPicker allowCustom options={subjectChoices} customPlaceholder="输入自定义学科后按回车添加" />
           </Form.Item>
           <Form.Item name="homeroom" label="担任该班班主任" valuePropName="checked">
             <Switch />

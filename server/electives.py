@@ -3,7 +3,7 @@ from typing import Literal
 from pydantic import BaseModel
 from .lifecycle import RESULTS_REVIEW_GUIDE
 from .db import connect, objects, find, put, get
-from .dependencies import admin, require
+from .dependencies import admin, require, user
 from .roster_import import read_rows, match_rows
 
 router=APIRouter(prefix='/api/v1')
@@ -179,7 +179,7 @@ def subject_tag(db, name, actor=None):
 
 
 @router.get('/subject-tags')
-def list_tags(current=Depends(admin)):
+def list_tags(current=Depends(user)):
     with connect() as db:
         return sorted(objects(db, 'subject-tags'), key=lambda tag: tag['name'])
 

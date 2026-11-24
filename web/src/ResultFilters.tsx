@@ -1,6 +1,7 @@
-import {Input,Select,Space,Typography} from 'antd'
+import {Input,Space,Typography} from 'antd'
 import {Button} from './Button'
 import {MultipleRecordSelect} from './RecordSelect'
+import {MultiTagPicker} from './TagPicker'
 import {useResource,type Row} from './api'
 import {emptyResultFilters,type ResultFilterValue} from './resultFilterParams'
 
@@ -27,10 +28,10 @@ export function ResultFilters({value,onChange,options,disabled=false,loading=fal
         label={row=>`${row.name}（${row.candidate_number}）`}
         columns={[{title:'姓名',dataIndex:'name'},{title:'准考证号',dataIndex:'candidate_number'},{title:'班级',render:(_,row)=>classes.get(row.class_id)?classLabel(classes.get(row.class_id)!):row.class_id}]}
         fields={[{key:'class',label:'班级',options:options.classes.map(row=>({value:row.id,label:classLabel(row)})),values:row=>[row.class_id]},{key:'number',label:'准考证号',options:[],values:row=>[row.candidate_number]},{key:'name',label:'姓名',options:[],values:row=>[row.name]}]}/>
-      <Select mode="multiple" allowClear maxTagCount="responsive" aria-label="成绩状态" placeholder="全部成绩状态" style={{minWidth:190,maxWidth:'100%'}} disabled={disabled} value={value.statuses} options={options.statuses.map(row=>({value:row.id,label:row.name}))} onChange={statuses=>onChange({...value,statuses})}/>
       <Input.Search aria-label="搜索姓名或准考证号" placeholder="姓名或准考证号" allowClear style={{width:220,maxWidth:'100%'}} disabled={disabled} value={value.q} onChange={event=>onChange({...value,q:event.target.value})}/>
       <Button disabled={disabled} onClick={()=>onChange(emptyResultFilters())}>重置过滤器</Button>
     </Space>
+    {options.statuses.length>0&&<Space wrap align="center"><Typography.Text type="secondary">成绩状态</Typography.Text><MultiTagPicker compact aria-label="成绩状态" disabled={disabled} value={value.statuses} options={options.statuses.map(row=>({value:row.id,label:row.name}))} onChange={statuses=>onChange({...value,statuses})}/></Space>}
     <Typography.Text type="secondary">{loading?'正在加载可选范围…':matched===undefined?'设置班级、学生和成绩状态筛选范围':`匹配 ${matched} 名学生`}</Typography.Text>
   </Space>
 }

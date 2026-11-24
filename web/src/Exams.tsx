@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react'
 import { ArrowLeftOutlined, PlusOutlined, RightOutlined, SearchOutlined } from '@ant-design/icons'
-import { Alert, App, Breadcrumb, Card, Collapse, Empty, Form, Input, Modal, Popconfirm, Radio, Segmented, Select, Space, Spin, Tabs, Tag, Tooltip, Typography } from 'antd'
+import { Alert, App, Breadcrumb, Card, Collapse, Empty, Form, Input, Modal, Popconfirm, Radio, Segmented, Space, Spin, Tabs, Tag, Tooltip, Typography } from 'antd'
 import { Button } from './Button'
 import { Table } from './DataTable'
 import { CatalogPicker } from './Electives'
 import { EntityTable, ErrorNotice } from './EntityTable'
 import { ExamCatalog } from './ExamCatalog'
+import { gradeColor } from './SchoolTags'
+import { SUBJECT_PRESETS, TagPicker } from './TagPicker'
 import {
   CardGrade,
   ExamStatusMenu,
@@ -77,6 +79,8 @@ function ProjectCollapsibleTree({
   const [busy, setBusy] = useState(false)
   const [subjectForm] = Form.useForm()
   const [cardForm] = Form.useForm()
+  const subjectTags = useResource<Row[]>('/subject-tags', [])
+  const subjectPresets = [...new Set([...subjectTags.data.map(t => String(t.name)), ...SUBJECT_PRESETS].filter(Boolean))]
   const availableGrades = grades.filter(g => !g.archived)
 
   useEffect(() => {
@@ -392,8 +396,17 @@ function ProjectCollapsibleTree({
         confirmLoading={busy}
       >
         <Form form={subjectForm} layout="vertical" onFinish={createSubject}>
-          <Form.Item name="name" label="科目名称" rules={[{ required: true, whitespace: true, message: '请填写科目名称' }]}>
-            <Input maxLength={100} placeholder="如：语文、数学、英语" />
+          <Form.Item name="name" label="科目名称" rules={[{ required: true, whitespace: true, message: '请选择或填写科目名称' }]}>
+            <TagPicker
+              allowCustom
+              maxLength={100}
+              options={subjectPresets.map(name => ({
+                label: name,
+                value: name,
+                disabled: projectSubjects.some(s => s.name === name),
+              }))}
+              customPlaceholder="点击上方标签快速填充，或输入自定义科目"
+            />
           </Form.Item>
         </Form>
       </Modal>
@@ -410,10 +423,9 @@ function ProjectCollapsibleTree({
             <Input maxLength={100} placeholder="如：高一数学答题卡" />
           </Form.Item>
           <Form.Item name="grade_id" label="所属年级" rules={[{ required: true, message: '请选择所属年级' }]}>
-            <Select
-              showSearch
-              optionFilterProp="label"
-              options={availableGrades.map(g => ({ label: g.name, value: g.id }))}
+            <TagPicker
+              options={availableGrades.map(g => ({ label: g.name, value: g.id, color: gradeColor(g.name) }))}
+              emptyText={<a href="#/people/grades">请先创建年级</a>}
             />
           </Form.Item>
           <CardConversionFields projectId={project.id} />

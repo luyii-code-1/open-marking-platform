@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
-import { App, Checkbox, Form, Input, Modal, Radio, Select, Space, Tabs, Tag } from 'antd'
+import { App, Checkbox, Form, Input, Modal, Space, Tabs, Tag } from 'antd'
 import { BatchDeleteButton, DeleteRecord } from './DeleteRecord'
-import { ClassTags, DEFAULT_CLASS_TAGS, GradeTag } from './SchoolTags'
+import { ClassTags, DEFAULT_CLASS_TAGS, GradeTag, classTagColor, gradeColor } from './SchoolTags'
+import { MultiTagPicker, SUBJECT_PRESETS, TagPicker } from './TagPicker'
 import { TagsManager } from './TagsManager'
 import { Teaching, TeacherImport } from './Teaching'
 import { StudentImport } from './StudentImport'
@@ -94,8 +95,11 @@ export function Personnel({
     onTab?.('classes')
   }
 
-  const subjectChoices = [...new Set([...subjectTags.data.map(t => t.name), ...subjects.data.map(s => s.name)].filter(Boolean))].map(value => ({
-    value,
+  const subjectChoices = [
+    ...new Set([...subjectTags.data.map(t => t.name), ...subjects.data.map(s => s.name), ...SUBJECT_PRESETS].filter(Boolean)),
+  ].map(value => ({
+    label: String(value),
+    value: String(value),
   }))
   const tagColors = tagMap.data.colors || {}
   const customTagNames = useMemo(
@@ -650,10 +654,10 @@ export function Personnel({
                 ]}
                 creationFields={
                   <Form.Item name="tags" label="自定义标签（可选）">
-                    <Select
-                      mode="tags"
-                      placeholder="输入或选择标签，如：直卓、卓越、重点、实验、普通"
-                      options={classTagOptions}
+                    <MultiTagPicker
+                      allowCustom
+                      options={classTagOptions.map(o => ({ ...o, color: classTagColor(o.value, tagColors) }))}
+                      customPlaceholder="输入自定义标签后按回车添加"
                     />
                   </Form.Item>
                 }
@@ -853,21 +857,21 @@ export function Personnel({
           {kind === 'classes' && (
             <>
               <Form.Item label="年级">
-                <RecordSelect
-                  title="年级"
-                  kind="grades"
-                  value={grade}
-                  onChange={setGrade}
-                  records={grades.data.filter(g => !g.archived || g.id === grade)}
+                <TagPicker
+                  value={grade || undefined}
+                  onChange={v => setGrade(v || '')}
+                  options={grades.data
+                    .filter(g => !g.archived || g.id === grade)
+                    .map(g => ({ label: g.name, value: g.id, color: gradeColor(g.name, tagColors) }))}
                 />
               </Form.Item>
               <Form.Item label="自定义标签">
-                <Select
-                  mode="tags"
+                <MultiTagPicker
+                  allowCustom
                   value={classTags}
                   onChange={setClassTags}
-                  placeholder="输入或选择标签，如：直卓、卓越、重点、实验、普通"
-                  options={classTagOptions}
+                  options={classTagOptions.map(o => ({ ...o, color: classTagColor(o.value, tagColors) }))}
+                  customPlaceholder="输入自定义标签后按回车添加"
                 />
               </Form.Item>
               <Form.Item label="任教教师">
@@ -888,21 +892,23 @@ export function Personnel({
                 const teacherRole = roles[id] || { subjects: [], homeroom: null }
                 return (
                   <Form.Item key={id} label={<Tag color="cyan">{teacherName(id)}</Tag>}>
-                    <Select
-                      mode="tags"
-                      aria-label="任教学科"
-                      placeholder="任教学科"
-                      style={{ width: '100%' }}
-                      value={teacherRole.subjects}
-                      options={subjectChoices}
-                      onChange={v => setRoles({ ...roles, [id]: { ...teacherRole, subjects: v } })}
-                    />
-                    <Checkbox
-                      checked={teacherRole.homeroom === true}
-                      onChange={e => setRoles({ ...roles, [id]: { ...teacherRole, homeroom: e.target.checked } })}
-                    >
-                      班主任
-                    </Checkbox>
+                    <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                      <MultiTagPicker
+                        compact
+                        allowCustom
+                        aria-label="任教学科"
+                        value={teacherRole.subjects}
+                        options={subjectChoices}
+                        customPlaceholder="输入自定义学科后按回车"
+                        onChange={v => setRoles({ ...roles, [id]: { ...teacherRole, subjects: v } })}
+                      />
+                      <Checkbox
+                        checked={teacherRole.homeroom === true}
+                        onChange={e => setRoles({ ...roles, [id]: { ...teacherRole, homeroom: e.target.checked } })}
+                      >
+                        班主任
+                      </Checkbox>
+                    </Space>
                   </Form.Item>
                 )
               })}
@@ -930,25 +936,25 @@ export function Personnel({
                 />
               </Form.Item>
               <Form.Item label="个人自定义标签（班级/年级/选科标签自动继承）">
-                <Select
-                  mode="tags"
+                <MultiTagPicker
+                  allowCustom
                   value={studentTags}
                   onChange={setStudentTags}
-                  placeholder="输入或选择自定义标签"
-                  options={classTagOptions}
+                  options={classTagOptions.map(o => ({ ...o, color: classTagColor(o.value, tagColors) }))}
+                  customPlaceholder="输入自定义标签后按回车添加"
                 />
               </Form.Item>
             </>
           )}
           {kind === 'users' && systemAdmin && (
             <Form.Item label="角色">
-              <Select
+              <TagPicker
                 value={role}
-                onChange={setRole}
+                onChange={v => v && setRole(v)}
                 options={[
-                  { value: 'teacher', label: '阅卷教师' },
-                  { value: 'manager', label: '管理教师' },
-                  { value: 'admin', label: '系统管理员' },
+                  { value: 'teacher', label: '阅卷教师', color: 'default' },
+                  { value: 'manager', label: '管理教师', color: 'purple' },
+                  { value: 'admin', label: '系统管理员', color: 'red' },
                 ]}
               />
             </Form.Item>
@@ -970,20 +976,24 @@ export function Personnel({
       >
         <Form layout="vertical">
           <Form.Item label="设置方式">
-            <Radio.Group value={batchTagMode} onChange={e => setBatchTagMode(e.target.value)}>
-              <Radio.Button value="replace">覆盖原标签</Radio.Button>
-              <Radio.Button value="add">追加标签</Radio.Button>
-              <Radio.Button value="clear">清空标签</Radio.Button>
-            </Radio.Group>
+            <TagPicker
+              value={batchTagMode}
+              onChange={v => v && setBatchTagMode(v)}
+              options={[
+                { value: 'replace', label: '覆盖原标签' },
+                { value: 'add', label: '追加标签' },
+                { value: 'clear', label: '清空标签' },
+              ]}
+            />
           </Form.Item>
           {batchTagMode !== 'clear' && (
             <Form.Item label="自定义标签">
-              <Select
-                mode="tags"
+              <MultiTagPicker
+                allowCustom
                 value={batchTags}
                 onChange={setBatchTags}
-                placeholder="输入或选择标签，如：直卓、卓越、重点、实验、普通"
-                options={classTagOptions}
+                options={classTagOptions.map(o => ({ ...o, color: classTagColor(o.value, tagColors) }))}
+                customPlaceholder="输入自定义标签后按回车添加"
               />
             </Form.Item>
           )}
@@ -1022,12 +1032,12 @@ export function Personnel({
       >
         <Form layout="vertical">
           <Form.Item label="目标角色">
-            <Select
+            <TagPicker
               value={batchRole}
-              onChange={v => setBatchRole(v)}
+              onChange={v => v && setBatchRole(v)}
               options={[
-                { value: 'teacher', label: '阅卷教师' },
-                { value: 'manager', label: '管理教师' },
+                { value: 'teacher', label: '阅卷教师', color: 'default' },
+                { value: 'manager', label: '管理教师', color: 'purple' },
               ]}
             />
           </Form.Item>

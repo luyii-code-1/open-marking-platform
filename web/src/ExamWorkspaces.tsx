@@ -1,11 +1,13 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { PlusOutlined, RightOutlined } from '@ant-design/icons'
-import { Alert, App, Card, Dropdown, Empty, Form, Input, Modal, Popconfirm, Progress, Select, Space, Tabs, Tag, Tooltip, Typography } from 'antd'
+import { Alert, App, Card, Dropdown, Empty, Form, Input, Modal, Popconfirm, Progress, Space, Tabs, Tag, Tooltip, Typography } from 'antd'
 import { Button } from './Button'
 import { CardConversionFields, ConversionWorkspace } from './ConversionWorkspace'
 import { Table } from './DataTable'
 import { ErrorNotice } from './EntityTable'
 import { HierarchyDelete } from './HierarchyDelete'
+import { gradeColor } from './SchoolTags'
+import { GRADE_PRESETS, TagPicker } from './TagPicker'
 import { announceChanges, send, useResource, type Row, type Template } from './api'
 import { examPath, subjectGrades, unassignedGrade } from './examNavigation'
 import { loadPage } from './loadPage'
@@ -164,10 +166,10 @@ export function CardGrade({ group, grades, onSaved }: { group: Row; grades: Row[
       >
         <Form form={form} layout="vertical" onFinish={save}>
           <Form.Item name="grade_id" label="全局年级" rules={[{ required: true, message: '请选择年级' }]}>
-            <Select
-              showSearch
-              optionFilterProp="label"
-              options={grades.filter(g => !g.archived || g.id === group.grade_id).map(g => ({ label: g.name, value: g.id }))}
+            <TagPicker
+              options={grades
+                .filter(g => !g.archived || g.id === group.grade_id)
+                .map(g => ({ label: g.name, value: g.id, color: gradeColor(g.name) }))}
             />
           </Form.Item>
         </Form>
@@ -308,7 +310,12 @@ export function SubjectGrades({
         </Typography.Paragraph>
         <Form form={editForm} layout="vertical" onFinish={edit}>
           <Form.Item name="name" label="年级名称" rules={[{ required: true, whitespace: true, message: '请填写年级名称' }]}>
-            <Input maxLength={60} />
+            <TagPicker
+              allowCustom
+              maxLength={60}
+              options={GRADE_PRESETS.map(g => ({ label: g, value: g, color: gradeColor(g) }))}
+              customPlaceholder="点击标签快速填充或输入年级名称"
+            />
           </Form.Item>
         </Form>
       </Modal>
@@ -318,7 +325,7 @@ export function SubjectGrades({
             <Input />
           </Form.Item>
           <Form.Item name="grade_id" label="所属年级" rules={[{ required: true, message: '请选择年级' }]}>
-            <Select showSearch optionFilterProp="label" options={available.map(g => ({ label: g.name, value: g.id }))} />
+            <TagPicker options={available.map(g => ({ label: g.name, value: g.id, color: gradeColor(g.name) }))} />
           </Form.Item>
           <CardConversionFields projectId={subject.project_id} />
         </Form>

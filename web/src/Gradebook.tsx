@@ -1,12 +1,13 @@
 import { useMemo, useState } from 'react'
 import { ArrowRightOutlined } from '@ant-design/icons'
-import { Card, Empty, Input, Segmented, Select, Space, Tabs, Tag, Typography } from 'antd'
+import { Card, Empty, Input, Segmented, Space, Tabs, Tag, Typography } from 'antd'
 import { Table } from './DataTable'
 import { Button } from './Button'
 import { ErrorNotice } from './EntityTable'
 import { MultipleRecordSelect, RecordSelect } from './RecordSelect'
 import { ExportPreviewModal, FilterSummaryBar, type FilterChip, type ReportColumn } from './ReportToolkit'
-import { ClassTags, DEFAULT_CLASS_TAGS } from './SchoolTags'
+import { ClassTags, DEFAULT_CLASS_TAGS, gradeColor } from './SchoolTags'
+import { MultiTagPicker } from './TagPicker'
 import { useResource, type Row } from './api'
 
 type Scope = { projectId?: string; subjectId?: string; gradeId?: string; groupId?: string }
@@ -199,23 +200,44 @@ function GradebookScope({ projectId, subjectId, gradeId, groupId }: Scope) {
     <Space direction="vertical" size={12} style={{ width: '100%' }}>
       <Card size="small">
         <Space direction="vertical" size={10} style={{ width: '100%' }}>
-          <Space wrap align="start">
-            {!subjectId && (
-              <MultipleRecordSelect
-                title="科目"
-                records={data.data.options.subjects || []}
-                value={filters.subject_ids}
-                onChange={ids => change('subject_ids', ids)}
-              />
-            )}
-            {!gradeId && (
-              <MultipleRecordSelect
-                title="年级"
-                records={data.data.options.grades || []}
+          {!gradeId && (data.data.options.grades || []).length > 0 && (
+            <Space wrap align="center">
+              <Typography.Text type="secondary">年级</Typography.Text>
+              <MultiTagPicker
+                compact
+                aria-label="年级"
+                options={(data.data.options.grades || []).map(g => ({ value: g.id, label: g.name, color: gradeColor(g.name) }))}
                 value={filters.grade_ids}
                 onChange={ids => change('grade_ids', ids)}
               />
-            )}
+            </Space>
+          )}
+          {!subjectId && (data.data.options.subjects || []).length > 0 && (
+            <Space wrap align="center">
+              <Typography.Text type="secondary">科目</Typography.Text>
+              <MultiTagPicker
+                compact
+                showSelectAll
+                aria-label="科目"
+                options={(data.data.options.subjects || []).map(s => ({ value: s.id, label: s.name }))}
+                value={filters.subject_ids}
+                onChange={ids => change('subject_ids', ids)}
+              />
+            </Space>
+          )}
+          {(data.data.options.statuses || []).length > 0 && (
+            <Space wrap align="center">
+              <Typography.Text type="secondary">成绩状态</Typography.Text>
+              <MultiTagPicker
+                compact
+                aria-label="成绩状态"
+                options={(data.data.options.statuses || []).map(r => ({ value: r.id, label: r.name }))}
+                value={filters.statuses || []}
+                onChange={ids => change('statuses', ids)}
+              />
+            </Space>
+          )}
+          <Space wrap align="start">
             <MultipleRecordSelect
               title="班级"
               records={data.data.options.classes || []}
@@ -264,17 +286,6 @@ function GradebookScope({ projectId, subjectId, gradeId, groupId }: Scope) {
                 onChange={ids => change('group_ids', ids)}
               />
             )}
-            <Select
-              mode="multiple"
-              allowClear
-              maxTagCount="responsive"
-              aria-label="成绩状态"
-              placeholder="成绩状态"
-              style={{ minWidth: 160 }}
-              value={filters.statuses || []}
-              onChange={ids => change('statuses', ids)}
-              options={(data.data.options.statuses || []).map(r => ({ value: r.id, label: r.name }))}
-            />
             <Input.Search
               aria-label="搜索考生"
               placeholder="姓名或准考证号"

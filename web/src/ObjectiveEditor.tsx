@@ -5,6 +5,7 @@ import { Button } from './Button'
 import { PlusOutlined } from '@ant-design/icons'
 import {AnswerEntry} from './AnswerEntry'
 import {questionNumbers} from './mergeQuestions'
+import {TagPicker} from './TagPicker'
 import type { Question, Template } from './api'
 import { addObjective, arrangeObjective, parseAnswer } from './objectiveLayout'
 
@@ -20,7 +21,7 @@ export function ObjectiveEditor({ value, page, readOnly, selected, onChange, onE
     try { const answer = parseAnswer(q, text); onChange(value.questions.map(item => item.id === q.id ? { ...item, answer } : item)) }
     catch (e) { message.warning((e as Error).message) }
   }
-  const layoutFields = <div className="editor-form-grid"><Form.Item name="columns" label="每栏客观题列数" rules={[{ required: true }]}><Select options={[{label:'自动适配栏宽',value:0},...Array.from({length:10},(_,i)=>({label:(i+1)+' 列',value:i+1}))]} /></Form.Item><Form.Item name="order" label="题号顺序"><Select options={[{label:'从左到右，逐行排列',value:'row'},{label:'每组五行，逐列排列',value:'column'}]} /></Form.Item><Form.Item name="startPage" label="从哪一面开始" rules={[{ required: true }]}><Select options={Array.from({ length: value.sides }, (_, i) => ({ label: i === 0 ? '正面' : '背面', value: i + 1 }))} /></Form.Item></div>
+  const layoutFields = <><Form.Item name="columns" label="每栏客观题列数" rules={[{ required: true }]}><TagPicker compact options={[{label:'自动适配栏宽',value:0},...Array.from({length:10},(_,i)=>({label:(i+1)+' 列',value:i+1}))]} /></Form.Item><div className="editor-form-grid"><Form.Item name="order" label="题号顺序"><TagPicker compact options={[{label:'逐行排列',value:'row'},{label:'每组五行逐列',value:'column'}]} /></Form.Item><Form.Item name="startPage" label="从哪一面开始" rules={[{ required: true }]}><TagPicker compact options={Array.from({ length: value.sides }, (_, i) => ({ label: i === 0 ? '正面' : '背面', value: i + 1 }))} /></Form.Item></div></>
   return <div className="editor-section">
     <div className="section-actions"><Button type="primary" icon={<PlusOutlined />} disabled={readOnly} onClick={() => { batchForm.setFieldsValue({ ...defaults, numbers: `${nextNumber}-${nextNumber + 19}`, type: 'single', options: 4, points: 2 }); setBatchOpen(true) }}>添加并排版</Button><Button disabled={!rows.length || readOnly} onClick={() => setAnswerOpen(true)}>集中录入答案</Button><Button disabled={!rows.length || readOnly} onClick={() => { layoutForm.setFieldsValue(defaults); setLayoutOpen(true) }}>重新排布</Button></div>
     {!!rows.length && <Text type="secondary">{rows.length} 题 · {rows.reduce((sum, q) => sum + q.points, 0)} 分 · 已录入 {rows.filter(q => q.answer.length).length} 题答案</Text>}
@@ -36,7 +37,7 @@ export function ObjectiveEditor({ value, page, readOnly, selected, onChange, onE
     <Modal title="批量添加客观题" open={batchOpen} onCancel={() => setBatchOpen(false)} onOk={() => batchForm.submit()} okText="添加并自动排布" width={620}>
       <Form form={batchForm} layout="vertical" onFinish={values => { try { const questions = addObjective(value, values); const first = questions.find(q => !value.questions.some(old => old.id === q.id)); onChange(questions); if (first) onSelect(first.id); setBatchOpen(false); message.success('客观题已添加，可继续录入答案') } catch (e) { message.error((e as Error).message) } }}>
         <Form.Item name="numbers" label="题号" extra="支持连续和跳号，例如 1-20,23,25-30" rules={[{ required: true }]}><Input autoFocus /></Form.Item>
-        <div className="editor-form-grid"><Form.Item name="type" label="题型" rules={[{ required: true }]}><Select options={[{ label: '单选题', value: 'single' }, { label: '多选题', value: 'multiple' }]} /></Form.Item><Form.Item name="options" label="选项数" rules={[{ required: true }]}><Select options={[3, 4, 5].map(n => ({ label: `${n} 项`, value: n }))} /></Form.Item></div>
+        <div className="editor-form-grid"><Form.Item name="type" label="题型" rules={[{ required: true }]}><TagPicker options={[{ label: '单选题', value: 'single' }, { label: '多选题', value: 'multiple' }]} /></Form.Item><Form.Item name="options" label="选项数" rules={[{ required: true }]}><TagPicker options={[3, 4, 5].map(n => ({ label: `${n} 项`, value: n }))} /></Form.Item></div>
         <Form.Item name="points" label="每题分值" rules={[{ required: true }]}><InputNumber min={0.01} max={1000} precision={2} /></Form.Item>
         {layoutFields}<Text type="secondary">排布会避让已有答题区域，当前面不足时接续背面；空间不足时请调整题数或列数。</Text>
       </Form>
