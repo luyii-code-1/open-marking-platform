@@ -1,5 +1,6 @@
 @import './base.css';
 @import "./fluent-icons.css";
+@import './dark.css';
 .ant-btn{white-space:nowrap}
 .omp-button{transition:transform 120ms cubic-bezier(0.23,1,0.32,1),background-color 150ms ease,border-color 150ms ease,color 150ms ease}
 .omp-button:active:not(:disabled){transform:scale(0.98)}

@@ -148,7 +148,8 @@ def me(current=Depends(user)):
 @app.get('/api/v1/users')
 def users(current=Depends(admin)):
     with connect() as db:
-        return [dict(r) for r in db.execute('SELECT id,username,name,role FROM users')]
+        profiles={p['id']:p for p in objects(db,'teacher-profiles')}
+        return [{**dict(r),'subjects':profiles.get(r['id'],{}).get('subjects',[]),'grade_ids':profiles.get(r['id'],{}).get('grade_ids',[]),'tags':profiles.get(r['id'],{}).get('tags',[])} for r in db.execute('SELECT id,username,name,role FROM users')]
 
 
 @app.post('/api/v1/users')
@@ -674,6 +675,9 @@ app.include_router(workspace_activity_router)
 
 from .comparison import router as comparison_router
 app.include_router(comparison_router)
+
+from .ai_admin import router as ai_admin_router
+app.include_router(ai_admin_router)
 
 
 if web_files is not None:

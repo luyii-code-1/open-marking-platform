@@ -3,6 +3,7 @@ import { ApiError, request, send, setToken, type User, type AuthSession } from '
 import { loginPasskey } from './passkeys'
 import { Brand } from './Brand'
 import { LoginFooter } from './LoginFooter'
+import { THEME_MODE_LABELS, useThemeMode } from './themeMode'
 
 export type Portal = 'marking' | 'admin'
 type Mode = 'password' | 'passkey' | 'forgot' | 'bootstrap'
@@ -94,9 +95,10 @@ export function Login({ portal, onPortal, onLogin }: Props) {
     } finally { setLoading(false) }
   }
 
+  const { mode: themeMode, cycle: cycleTheme } = useThemeMode()
   const recovery = mode === 'forgot', bootstrap = mode === 'bootstrap'
   const title = recovery ? '重置密码' : bootstrap ? '创建管理员' : role === 'admin' ? '管理员登录' : '教师端登录'
-  return <div className="login-screen"><main className="login-content"><section className="login-card">
+  return <div className="login-screen"><div className="login-theme-bar"><button type="button" className="login-theme-btn" onClick={cycleTheme}>{THEME_MODE_LABELS[themeMode]}</button></div><main className="login-content"><section className="login-card">
     {(recovery || bootstrap) && <button type="button" className="login-back" disabled={loading} onClick={() => selectMode('password')}>
       <span className="login-glyph glyph-back" aria-hidden="true"/>返回登录</button>}
     <Brand login/><h3>{title}</h3>

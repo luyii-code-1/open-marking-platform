@@ -4,7 +4,7 @@ import { BatchDeleteButton, DeleteRecord } from './DeleteRecord'
 import { ClassTags, DEFAULT_CLASS_TAGS, GradeTag, classTagColor, gradeColor } from './SchoolTags'
 import { MultiTagPicker, SUBJECT_PRESETS, TagPicker } from './TagPicker'
 import { TagsManager } from './TagsManager'
-import { Teaching, TeacherImport } from './Teaching'
+import { TeacherImport } from './Teaching'
 import { StudentImport } from './StudentImport'
 import { Grades } from './Grades'
 import { Button } from './Button'
@@ -46,6 +46,12 @@ export function Personnel({
   const [roles, setRoles] = useState<Record<string, { subjects: string[]; homeroom: boolean | null }>>({})
   const [classTags, setClassTags] = useState<string[]>([])
   const [studentTags, setStudentTags] = useState<string[]>([])
+  const [teacherSubjects, setTeacherSubjects] = useState<string[]>([])
+  const [teacherGradeIds, setTeacherGradeIds] = useState<string[]>([])
+  const [teacherCustomTags, setTeacherCustomTags] = useState<string[]>([])
+  const [teacherClassIds, setTeacherClassIds] = useState<string[]>([])
+  const [teacherIsHomeroom, setTeacherIsHomeroom] = useState(false)
+  const [teacherHomeroomClassIds, setTeacherHomeroomClassIds] = useState<string[]>([])
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([])
   const [selectedClassIds, setSelectedClassIds] = useState<string[]>([])
   const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([])
@@ -145,15 +151,28 @@ export function Personnel({
         gradeIds: string[]
         tags: string[]
         classes: { id: string; label: string; homeroom: boolean }[]
+        homeroomClasses: { id: string; label: string }[]
       }
     >()
     const ensure = (uid: string) => {
       let item = map.get(uid)
       if (!item) {
-        item = { subjects: [], gradeIds: [], tags: [], classes: [] }
+        item = { subjects: [], gradeIds: [], tags: [], classes: [], homeroomClasses: [] }
         map.set(uid, item)
       }
       return item
+    }
+    for (const u of users.data) {
+      const meta = ensure(u.id)
+      for (const s of (u.subjects || []) as string[]) {
+        if (s && !meta.subjects.includes(s)) meta.subjects.push(s)
+      }
+      for (const gid of (u.grade_ids || []) as string[]) {
+        if (gid && !meta.gradeIds.includes(gid)) meta.gradeIds.push(gid)
+      }
+      for (const t of (u.tags || []) as string[]) {
+        if (t && !meta.tags.includes(t)) meta.tags.push(t)
+      }
     }
     for (const c of classes.data) {
       const gName = gradeById.get(c.grade_id) || ''
@@ -173,10 +192,13 @@ export function Personnel({
         if (!meta.classes.some(item => item.id === c.id)) {
           meta.classes.push({ id: c.id, label, homeroom: roleInfo.homeroom === true })
         }
+        if (roleInfo.homeroom === true && !meta.homeroomClasses.some(item => item.id === c.id)) {
+          meta.homeroomClasses.push({ id: c.id, label })
+        }
       }
     }
     return map
-  }, [classes.data, grades.data])
+  }, [classes.data, grades.data, users.data])
 
   const taughtSubjectOptions = useMemo(() => {
     const names = new Set<string>()
@@ -217,8 +239,17 @@ export function Personnel({
       values: u => teacherMetaById.get(u.id)?.tags || [],
     },
     {
+      key: 'homeroom',
+      label: '班主任',
+      options: [
+        { value: 'yes', label: '班主任' },
+        { value: 'no', label: '非班主任' },
+      ],
+      values: u => [(teacherMetaById.get(u.id)?.homeroomClasses.length || 0) > 0 ? 'yes' : 'no'],
+    },
+    {
       key: 'class',
-      label: '关联班级',
+      label: '任教班级',
       options: classes.data.map(c => ({ value: c.id, label: classLabel(c.id) })),
       values: u => (teacherMetaById.get(u.id)?.classes || []).map(c => c.id),
     },
@@ -268,6 +299,19 @@ export function Personnel({
         'PUT',
       )
       if (kind === 'users' && password) await send(`/users/${selected.id}/reset-password`, { password })
+      if (kind === 'users' && (role === 'teacher' || selected.role === 'teacher')) {
+        await send(
+          `/teaching/teacher/${selected.id}`,
+          {
+            subjects: teacherSubjects,
+            grade_ids: teacherGradeIds,
+            tags: teacherCustomTags,
+            class_ids: teacherClassIds,
+            homeroom_class_ids: teacherIsHomeroom ? teacherHomeroomClassIds : [],
+          },
+          'PUT',
+        )
+      }
       message.success('已保存')
       setSelected(null)
       await reloadAll()
@@ -361,6 +405,17 @@ export function Personnel({
     setRoles(row.teaching || {})
     setClassTags(Array.isArray(row.tags) ? row.tags.map(String) : [])
     setStudentTags(Array.isArray(row.tags) ? row.tags.map(String) : [])
+    if (type === 'users') {
+      const meta = teacherMetaById.get(row.id)
+      const taughtIds = (meta?.classes || []).map(c => c.id)
+      const hrIds = (meta?.homeroomClasses || []).map(c => c.id)
+      setTeacherSubjects(meta?.subjects || [])
+      setTeacherGradeIds(meta?.gradeIds || [])
+      setTeacherCustomTags(Array.isArray(row.tags) ? row.tags.map(String) : [])
+      setTeacherClassIds(taughtIds)
+      setTeacherIsHomeroom(hrIds.length > 0)
+      setTeacherHomeroomClassIds(hrIds)
+    }
     setKind(type)
     setSelected(row)
     setRole(row.role || 'teacher')
@@ -375,7 +430,7 @@ export function Personnel({
     <>
       <ErrorNotice error={classes.error || students.error || users.error || grades.error} retry={reloadAll} />
       <Tabs
-        activeKey={tab}
+        activeKey={tab === 'teaching' ? 'users' : tab}
         onChange={onTab}
         items={[
           {
@@ -486,11 +541,19 @@ export function Personnel({
                     dataIndex: 'name',
                     render: (value: string, row: Row) => {
                       const meta = teacherMetaById.get(row.id)
-                      const isHomeroom = meta?.classes.some(c => c.homeroom)
+                      const hrList = meta?.homeroomClasses || []
                       return (
                         <Space size={6} wrap>
                           <span>{value}</span>
-                          {isHomeroom && <Tag color="gold" style={{ marginInlineEnd: 0 }}>班主任</Tag>}
+                          {hrList.length > 0 && (
+                            <Tag
+                              color="gold"
+                              style={{ marginInlineEnd: 0, cursor: 'pointer' }}
+                              onClick={() => applyTeacherFilter('homeroom', 'yes')}
+                            >
+                              班主任
+                            </Tag>
+                          )}
                         </Space>
                       )
                     },
@@ -549,7 +612,28 @@ export function Personnel({
                     },
                   },
                   {
-                    title: '关联班级',
+                    title: '班主任班级',
+                    render: (_, row) => {
+                      const hrList = teacherMetaById.get(row.id)?.homeroomClasses || []
+                      if (!hrList.length) return '—'
+                      return (
+                        <Space size={4} wrap>
+                          {hrList.map(c => (
+                            <Tag
+                              key={c.id}
+                              color="gold"
+                              style={{ cursor: 'pointer', marginInlineEnd: 0 }}
+                              onClick={() => applyTeacherFilter('class', c.id)}
+                            >
+                              {c.label}
+                            </Tag>
+                          ))}
+                        </Space>
+                      )
+                    },
+                  },
+                  {
+                    title: '任教班级',
                     render: (_, row) => {
                       const cls = teacherMetaById.get(row.id)?.classes || []
                       if (!cls.length) return '—'
@@ -571,7 +655,7 @@ export function Personnel({
                     render: (_, row) => (
                       <Space>
                         <Button disabled={!systemAdmin && row.role !== 'teacher'} onClick={() => edit('users', row)}>
-                          资料 / 重置密码
+                          编辑 / 任教设置
                         </Button>
                         {row.role === 'teacher' && (
                           <DeleteRecord
@@ -712,18 +796,6 @@ export function Personnel({
             ),
           },
           {
-            key: 'teaching',
-            label: '任教关系',
-            children: (
-              <Teaching
-                classes={classes.data}
-                users={users.data}
-                grades={grades.data}
-                reload={async () => Promise.all([users.reload(), classes.reload()])}
-              />
-            ),
-          },
-          {
             key: 'students',
             label: '学生',
             children: (
@@ -843,7 +915,8 @@ export function Personnel({
         ]}
       />
       <Modal
-        title="编辑信息"
+        title={kind === 'users' ? '编辑教师与任教设置' : '编辑信息'}
+        width={640}
         open={!!selected}
         onCancel={() => setSelected(null)}
         onOk={save}
@@ -958,6 +1031,80 @@ export function Personnel({
                 ]}
               />
             </Form.Item>
+          )}
+          {kind === 'users' && (role === 'teacher' || selected?.role === 'teacher') && (
+            <>
+              <Form.Item label="任课科目">
+                <MultiTagPicker
+                  allowCustom
+                  value={teacherSubjects}
+                  onChange={setTeacherSubjects}
+                  options={subjectChoices}
+                  customPlaceholder="输入自定义科目后按回车添加"
+                />
+              </Form.Item>
+              <Form.Item label="任教年级（未绑定行政班时也可单独归属年级）">
+                <MultiTagPicker
+                  value={teacherGradeIds}
+                  onChange={setTeacherGradeIds}
+                  options={grades.data
+                    .filter(g => !g.archived || teacherGradeIds.includes(g.id))
+                    .map(g => ({ label: g.name, value: g.id, color: gradeColor(g.name, tagColors) }))}
+                />
+              </Form.Item>
+              <Form.Item label="任教班级">
+                <MultipleRecordSelect
+                  title="任教班级"
+                  kind="classes"
+                  value={teacherClassIds}
+                  onChange={setTeacherClassIds}
+                  records={classes.data}
+                  fields={classFields}
+                  columns={[
+                    { title: '年级', render: (_, c) => gradeName(c.grade_id) },
+                    { title: '班级', dataIndex: 'name' },
+                    { title: '标签', render: (_, c) => <ClassTags tags={c.tags} colorMap={tagColors} /> },
+                  ]}
+                />
+              </Form.Item>
+              <Form.Item label="班主任设置">
+                <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                  <Checkbox
+                    checked={teacherIsHomeroom}
+                    onChange={e => {
+                      setTeacherIsHomeroom(e.target.checked)
+                      if (!e.target.checked) setTeacherHomeroomClassIds([])
+                    }}
+                  >
+                    设为班主任
+                  </Checkbox>
+                  {teacherIsHomeroom && (
+                    <MultipleRecordSelect
+                      title="班主任班级"
+                      kind="classes"
+                      value={teacherHomeroomClassIds}
+                      onChange={setTeacherHomeroomClassIds}
+                      records={classes.data}
+                      fields={classFields}
+                      columns={[
+                        { title: '年级', render: (_, c) => gradeName(c.grade_id) },
+                        { title: '班级', dataIndex: 'name' },
+                        { title: '标签', render: (_, c) => <ClassTags tags={c.tags} colorMap={tagColors} /> },
+                      ]}
+                    />
+                  )}
+                </Space>
+              </Form.Item>
+              <Form.Item label="教师自定义标签（如 2+4、产假、走班等）">
+                <MultiTagPicker
+                  allowCustom
+                  value={teacherCustomTags}
+                  onChange={setTeacherCustomTags}
+                  options={classTagOptions.map(o => ({ ...o, color: classTagColor(o.value, tagColors) }))}
+                  customPlaceholder="输入标签后按回车添加"
+                />
+              </Form.Item>
+            </>
           )}
           {kind === 'users' && (
             <Form.Item label="重置密码（不修改时留空）">

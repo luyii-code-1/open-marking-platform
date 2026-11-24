@@ -1,6 +1,6 @@
 import { WorkspaceNotificationButton, WorkspaceNotificationsProvider } from './WorkspaceNotifications'
 import { useState } from 'react'
-import { Alert, App as AntApp, Avatar, ConfigProvider, Layout, Menu, Space, Tag, Typography } from 'antd'
+import { Alert, App as AntApp, Avatar, ConfigProvider, Dropdown, Layout, Menu, Space, Tag, Typography } from 'antd'
 import zhCN from 'antd/locale/zh_CN'
 import { ScanOutlined, ApartmentOutlined, AuditOutlined, BookOutlined, FileSearchOutlined, LogoutOutlined, ReadOutlined, SettingOutlined, TeamOutlined, MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons'
 import { Button } from './Button'
@@ -14,7 +14,8 @@ import { SessionActivity } from './SessionActivity'
 import { settleReviewWrites } from './reviewStore'
 import type { Portal } from './Login'
 import type { ProjectFilter } from './reviewProjects'
-import { uiTheme } from './uiTheme'
+import { getUiTheme } from './uiTheme'
+import { THEME_MODE_LABELS, useThemeMode, type ThemeMode } from './themeMode'
 import { loadPage } from './loadPage'
 import './styles.css'
 
@@ -41,12 +42,14 @@ type Props = ReturnType<typeof useNavigation> & {
 }
 
 export default function AuthenticatedApp(props: Props) {
-  return <ConfigProvider locale={zhCN} theme={uiTheme}><AntApp><WorkspaceNotificationsProvider isAdmin={props.user.role === 'admin'}><Workspace {...props}/></WorkspaceNotificationsProvider></AntApp></ConfigProvider>
+  const { resolved } = useThemeMode()
+  return <ConfigProvider locale={zhCN} theme={getUiTheme(resolved)}><AntApp><WorkspaceNotificationsProvider isAdmin={props.user.role === 'admin'}><Workspace {...props}/></WorkspaceNotificationsProvider></AntApp></ConfigProvider>
 }
 
 function Workspace({ user, authToken, offlineAccess, management, page, location, navigate, setPortal, acceptUser, endSession }: Props) {
   const [collapsed, setCollapsed] = useState(false)
   const [reviewFilter, setReviewFilter] = useState<ProjectFilter>('in_progress')
+  const { mode: themeMode, resolved: resolvedTheme, setMode: setThemeMode } = useThemeMode()
   const setPage = (page: string) => navigate('#/' + page)
   if (location.page === 'http-guard') {
     if (user.role !== 'admin' || offlineAccess) return <main className="screen-center"><Alert type="warning" showIcon message="仅系统管理员可访问 HTTP 防护工作台" action={<Button onClick={() => setPage(management ? 'scanner' : 'marking')}>返回工作台</Button>} /></main>
@@ -74,10 +77,10 @@ function Workspace({ user, authToken, offlineAccess, management, page, location,
   return <><SessionActivity token={authToken}/><RealtimeStatus key={authToken} user={user} onProfile={acceptUser} onExpired={endSession}/><ReviewWorkspace key={`${user.id}:${authToken}`} user={user} offline={offlineAccess} onVerified={acceptUser} onLoginRequired={endSession}>{page === 'marking' && location.templateId && location.questionId ? <main className="review-fullscreen"><Marking key={`${location.templateId}:${location.questionId}`} admin={false} initialProjectId={location.projectId} initialTemplateId={location.templateId} initialQuestionId={location.questionId} onExit={id => navigate(markingPath(id||location.projectId))} /></main> : page==='exams'&&location.groupId&&location.section==='template' ? <main className="template-fullscreen"><Exams location={location} navigate={navigate}/></main> : <Layout className="app-shell">
     <Layout.Sider width={200} collapsedWidth={64} collapsed={collapsed} className="sidebar" breakpoint="lg" onBreakpoint={broken => setCollapsed(broken)}>
       <Brand compact={collapsed} />
-      <Menu theme="light" mode="inline" items={items} selectedKeys={[page]} onClick={({ key }) => setPage(key)} />
+      <Menu theme={resolvedTheme} mode="inline" items={items} selectedKeys={[page]} onClick={({ key }) => setPage(key)} />
     </Layout.Sider>
     <Layout>
-      <Layout.Header className="topbar"><Space className="topbar-left"><Button type="text" aria-label={collapsed?'展开导航':'收起导航'} icon={collapsed?<MenuUnfoldOutlined />:<MenuFoldOutlined />} onClick={() => setCollapsed(!collapsed)} /><span className="breadcrumb"><span className="breadcrumb-root">{management ? '管理后台' : '教师端'}</span><span className="breadcrumb-sep">/</span><strong className="breadcrumb-current">{title}</strong></span></Space><Space size={8} className="topbar-actions"><WorkspaceNotificationButton/>{user.role==='manager' && <Button type="text" onClick={()=>{if(!confirmLeaving())return;const next:Portal=management?'marking':'admin';setPortal(next);sessionStorage.setItem('omp-portal',next);navigate(next==='admin'?'#/scanner':'#/marking')}}>{management?'进入教师端':'进入管理后台'}</Button>}<Tag className="account-tag">{user.role==='admin'?'系统管理员':user.role==='manager'?'管理教师':'阅卷教师'}</Tag><Avatar size="small">{user.name.slice(0, 1)}</Avatar><Text className="account-name" ellipsis title={`${user.name}（${user.username}）`}>{user.name}</Text><Button type="text" icon={<LogoutOutlined />} onClick={async () => { if(!confirmLeaving())return; const signedToken=authToken;await settleReviewWrites();await request('/auth/logout',{method:'POST',headers:{Authorization:'Bearer '+signedToken}}).catch(()=>{});endSession() }}>退出</Button></Space></Layout.Header>
+      <Layout.Header className="topbar"><Space className="topbar-left"><Button type="text" aria-label={collapsed?'展开导航':'收起导航'} icon={collapsed?<MenuUnfoldOutlined />:<MenuFoldOutlined />} onClick={() => setCollapsed(!collapsed)} /><span className="breadcrumb"><span className="breadcrumb-root">{management ? '管理后台' : '教师端'}</span><span className="breadcrumb-sep">/</span><strong className="breadcrumb-current">{title}</strong></span></Space><Space size={8} className="topbar-actions"><Dropdown trigger={['click']} menu={{ selectedKeys: [themeMode], onClick: ({ key }) => setThemeMode(key as ThemeMode), items: [{ key: 'light', label: '浅色模式' }, { key: 'dark', label: '深色模式' }, { key: 'system', label: '跟随系统' }] }}><Button size="small" type="text">{THEME_MODE_LABELS[themeMode]}</Button></Dropdown><WorkspaceNotificationButton/>{user.role==='manager' && <Button type="text" onClick={()=>{if(!confirmLeaving())return;const next:Portal=management?'marking':'admin';setPortal(next);sessionStorage.setItem('omp-portal',next);navigate(next==='admin'?'#/scanner':'#/marking')}}>{management?'进入教师端':'进入管理后台'}</Button>}<Tag className="account-tag">{user.role==='admin'?'系统管理员':user.role==='manager'?'管理教师':'阅卷教师'}</Tag><Avatar size="small">{user.name.slice(0, 1)}</Avatar><Text className="account-name" ellipsis title={`${user.name}（${user.username}）`}>{user.name}</Text><Button type="text" icon={<LogoutOutlined />} onClick={async () => { if(!confirmLeaving())return; const signedToken=authToken;await settleReviewWrites();await request('/auth/logout',{method:'POST',headers:{Authorization:'Bearer '+signedToken}}).catch(()=>{});endSession() }}>退出</Button></Space></Layout.Header>
       <Layout.Content className={page==='marking'?'page-content marking-content':'page-content'}>
         {page === 'dashboard' && <Dashboard onNavigate={setPage} admin={management} />}
         {page === 'subject-catalog'&&management&&<SubjectCatalog/>}

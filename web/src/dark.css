@@ -1,0 +1,189 @@
+/* Dark mode surface and component overrides */
+:root[data-theme='dark'] {
+  --bg: #0b0f16;
+  --surface: #141a24;
+  --surface-elevated: #1b2330;
+  --surface-hover: #212c3c;
+  --border-subtle: #253042;
+  --text-primary: #e6edf3;
+  --text-secondary: #9fb0c3;
+  --text-muted: #7d8fa3;
+  --accent: #3b82f6;
+}
+
+:root[data-theme='dark'] .sidebar {
+  background: var(--surface) !important;
+  border-right-color: var(--border-subtle);
+}
+
+:root[data-theme='dark'] .topbar {
+  background: var(--surface);
+  border-bottom-color: var(--border-subtle);
+}
+
+:root[data-theme='dark'] .breadcrumb-root {
+  color: var(--text-secondary);
+}
+
+:root[data-theme='dark'] .breadcrumb-sep {
+  color: #46556a;
+}
+
+:root[data-theme='dark'] .breadcrumb-current,
+:root[data-theme='dark'] .recent-exam-card-name,
+:root[data-theme='dark'] .notification-card-title,
+:root[data-theme='dark'] .marking-score-heading strong {
+  color: var(--text-primary);
+}
+
+:root[data-theme='dark'] .help-text,
+:root[data-theme='dark'] .workspace-heading-meta,
+:root[data-theme='dark'] .workspace-entry-detail,
+:root[data-theme='dark'] .workspace-entry-title .anticon,
+:root[data-theme='dark'] .recent-exams-title,
+:root[data-theme='dark'] .recent-exam-card-meta,
+:root[data-theme='dark'] .recent-exam-card-arrow,
+:root[data-theme='dark'] .notification-card-time,
+:root[data-theme='dark'] .notification-card-scope,
+:root[data-theme='dark'] .marking-context,
+:root[data-theme='dark'] .marking-score-heading,
+:root[data-theme='dark'] .marking-score-entry label span,
+:root[data-theme='dark'] .marking-score-hint,
+:root[data-theme='dark'] .marking-session,
+:root[data-theme='dark'] .region-grid label,
+:root[data-theme='dark'] .table-total {
+  color: var(--text-secondary);
+}
+
+:root[data-theme='dark'] .workflow-item,
+:root[data-theme='dark'] .workspace-entry,
+:root[data-theme='dark'] .recent-exam-card,
+:root[data-theme='dark'] .notification-card,
+:root[data-theme='dark'] .marking-image-panel,
+:root[data-theme='dark'] .marking-score-panel,
+:root[data-theme='dark'] .marking-progress-footer,
+:root[data-theme='dark'] .review-queue-status,
+:root[data-theme='dark'] .rich-editor,
+:root[data-theme='dark'] .selection-action-bar,
+:root[data-theme='dark'] .tag-picker-group,
+:root[data-theme='dark'] .filter-panel,
+:root[data-theme='dark'] .result-summary-card,
+:root[data-theme='dark'] .lesson-card,
+:root[data-theme='dark'] .lesson-panel,
+:root[data-theme='dark'] .lesson-toolbar {
+  background: var(--surface);
+  border-color: var(--border-subtle);
+  color: var(--text-primary);
+}
+
+:root[data-theme='dark'] .workflow-item:hover,
+:root[data-theme='dark'] .workspace-entry:hover,
+:root[data-theme='dark'] .recent-exam-card:hover {
+  border-color: #3b82f6;
+  background: var(--surface-hover);
+}
+
+:root[data-theme='dark'] .notification-card.is-failed {
+  background: #28161a;
+  border-left-color: #ef4444;
+}
+
+:root[data-theme='dark'] .notification-card.is-running {
+  background: #142136;
+  border-left-color: #3b82f6;
+}
+
+:root[data-theme='dark'] .notification-card-actions,
+:root[data-theme='dark'] .exam-tree,
+:root[data-theme='dark'] .region-editor,
+:root[data-theme='dark'] .library-actions,
+:root[data-theme='dark'] .marking-image-toolbar,
+:root[data-theme='dark'] .marking-score-heading,
+:root[data-theme='dark'] .marking-report-actions,
+:root[data-theme='dark'] .marking-queue-slot .review-queue-status {
+  border-color: var(--border-subtle);
+}
+
+:root[data-theme='dark'] .topbar-notify-btn.has-count {
+  border-color: #6b2428;
+  background: #2b1619;
+}
+
+:root[data-theme='dark'] .login-footer-preview,
+:root[data-theme='dark'] .review-fullscreen,
+:root[data-theme='dark'] .template-fullscreen {
+  background: var(--bg);
+  border-color: var(--border-subtle);
+}
+
+:root[data-theme='dark'] .paper-scroll,
+:root[data-theme='dark'] .answer-viewport {
+  background: #0d121a;
+}
+
+:root[data-theme='dark'] .question-list .selected,
+:root[data-theme='dark'] .selected-question-row > td {
+  background: rgba(59, 130, 246, 0.18) !important;
+}
+
+:root[data-theme='dark'] .question-batch-bar {
+  background: #142338;
+  border-color: #264873;
+}
+
+:root[data-theme='dark'] .workspace-heading .hierarchy-back {
+  color: var(--text-secondary);
+}
+
+:root[data-theme='dark'] .workspace-heading .hierarchy-back:hover {
+  background: var(--surface-hover);
+}
+
+:root[data-theme='dark'] .rich-tools select {
+  background: var(--surface-elevated);
+  border-color: var(--border-subtle);
+  color: var(--text-primary);
+}
+
+:root[data-theme='dark'] .marking-score-hint.error {
+  color: #f87171;
+}
+
+:root[data-theme='dark'] .marking-progress-summary b,
+:root[data-theme='dark'] .notification-card-link {
+  color: #60a5fa;
+}
+
+:root[data-theme='dark'] .score-osd {
+  color: #f87171;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.85), 0 -1px 6px rgba(0, 0, 0, 0.85);
+}
+
+:root[data-theme='dark'] .tag-picker-pill,
+:root[data-theme='dark'] .tag-picker-btn {
+  background: var(--surface-elevated);
+  border-color: var(--border-subtle);
+  color: var(--text-primary);
+}
+
+:root[data-theme='dark'] .tag-picker-pill:hover,
+:root[data-theme='dark'] .tag-picker-btn:hover {
+  border-color: #3b82f6;
+}
+
+:root[data-theme='dark'] .tag-picker-pill.is-selected,
+:root[data-theme='dark'] .tag-picker-btn.is-selected {
+  background: rgba(59, 130, 246, 0.22);
+  border-color: #3b82f6;
+  color: #93c5fd;
+}
+
+:root[data-theme='dark'] .ant-layout,
+:root[data-theme='dark'] .ant-layout-content {
+  background: var(--bg);
+}
+
+:root[data-theme='dark'] .ant-layout-sider,
+:root[data-theme='dark'] .ant-layout-header {
+  background: var(--surface);
+}

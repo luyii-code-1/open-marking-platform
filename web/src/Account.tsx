@@ -1,14 +1,16 @@
 import { useState } from 'react'
-import { App, Card, Form, Input, Modal, Space, Typography } from 'antd'
+import { App, Card, Form, Input, Modal, Segmented, Space, Typography } from 'antd'
 import { Table } from './DataTable'
 import { Button } from './Button'
 import { ErrorNotice } from './EntityTable'
 import { send, useResource, type Row, type User } from './api'
 import { registerPasskey } from './passkeys'
 import { useAction } from './useAction'
+import { useThemeMode, type ThemeMode } from './themeMode'
 
 export function Account({user,onProfile,onLogout}:{user:User;onProfile:(user:User)=>void;onLogout:()=>void}) {
   const [password,setPassword]=useState(''),[codes,setCodes]=useState<string[]>([])
+  const { mode: themeMode, setMode: setThemeMode } = useThemeMode()
   const teaching=useResource<Row[]>(user.role==='teacher'?'/teaching/mine':null,[])
   const passkeys=useResource<Row[]>('/auth/passkeys',[]),profileAction=useAction(),passwordAction=useAction(),action=useAction(),{message}=App.useApp()
   async function act(key:string,callback:()=>Promise<void>) {
@@ -19,7 +21,7 @@ export function Account({user,onProfile,onLogout}:{user:User;onProfile:(user:Use
     <Card title="个人资料"><Form layout="vertical" disabled={profileAction.busy||passwordAction.busy} initialValues={{name:user.name}} onFinish={values=>act('profile',async()=>{const current=await send<User>('/auth/profile',values,'PUT');onProfile(current);message.success('姓名已更新')})}>
       <Form.Item name="name" label="姓名" rules={[{required:true}]}><Input maxLength={100}/></Form.Item>
       <Button htmlType="submit" loading={profileAction.pending==='profile'}>保存资料</Button>
-    </Form></Card>
+    </Form><div style={{marginTop:16,paddingTop:12,borderTop:'1px solid var(--border-subtle, #e8e8e8)'}}><Typography.Text type="secondary" style={{display:'block',marginBottom:8}}>界面外观</Typography.Text><Segmented value={themeMode} onChange={value=>setThemeMode(value as ThemeMode)} options={[{label:'浅色模式',value:'light'},{label:'深色模式',value:'dark'},{label:'跟随系统',value:'system'}]}/></div></Card>
     {user.role==='teacher'&&<Card title="我的任教关系"><ErrorNotice error={teaching.error} retry={teaching.reload}/><Table rowKey={r=>r.class_id} dataSource={teaching.data} loading={teaching.loading} columns={[{title:'年级',dataIndex:'grade'},{title:'行政班',dataIndex:'class_name'},{title:'任教学科',render:(_,r)=>r.subjects?.join('、')||(r.homeroom?'—':'待补全')},{title:'班主任',render:(_,r)=>r.homeroom?'是':'—'}]}/></Card>}
     <Card title="账号安全"><Form layout="vertical" disabled={passwordAction.busy||action.busy} onFinish={values=>act('password',async()=>{await send('/auth/password',values);message.success('密码已修改，请重新登录');onLogout()})}>
       <Form.Item name="password" label="当前密码" rules={[{required:true}]}><Input.Password autoComplete="current-password"/></Form.Item>

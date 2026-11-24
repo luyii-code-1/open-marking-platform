@@ -18,6 +18,94 @@ class Relation(BaseModel):
     homeroom: bool | None = None
 
 
+class TeacherClassAssignment(BaseModel):
+    class_id: str
+    subjects: list[str] = Field(default_factory=list, max_length=100)
+    homeroom: bool = False
+
+
+class TeacherProfileConfig(BaseModel):
+    subjects: list[str] = Field(default_factory=list, max_length=100)
+    grade_ids: list[str] = Field(default_factory=list, max_length=20)
+    tags: list[str] = Field(default_factory=list, max_length=20)
+    class_ids: list[str] | None = None
+    homeroom_class_ids: list[str] | None = None
+    assignments: list[TeacherClassAssignment] | None = None
+
+
+def save_teacher_profile(db, teacher_id: str, config: TeacherProfileConfig, actor: str) -> dict:
+    row = db.execute("SELECT id, username, name, role FROM users WHERE id=?", (teacher_id,)).fetchone()
+    if not row:
+        raise HTTPException(404, '教师账号不存在')
+    clean_subjects = sorted({s.strip() for s in config.subjects if s and s.strip()})
+    valid_grades = {g['id'] for g in objects(db, 'grades')}
+    clean_grade_ids = [gid for gid in dict.fromkeys(config.grade_ids) if gid in valid_grades]
+    clean_tags = sorted({t.strip() for t in config.tags if t and t.strip()})[:20]
+
+    profile = {
+        'id': teacher_id,
+        'subjects': clean_subjects,
+        'grade_ids': clean_grade_ids,
+        'tags': clean_tags,
+    }
+    put(db, 'teacher-profiles', profile, actor)
+
+    updated_classes = 0
+    if config.assignments is not None or config.class_ids is not None or config.homeroom_class_ids is not None:
+        all_classes = objects(db, 'classes')
+        class_by_id = {c['id']: c for c in all_classes}
+        target: dict[str, dict] = {}
+        if config.assignments is not None:
+            for item in config.assignments:
+                if item.class_id not in class_by_id:
+                    raise HTTPException(422, f'班级不存在：{item.class_id}')
+                subs = sorted({s.strip() for s in item.subjects if s and s.strip()})
+                if not subs and not item.homeroom:
+                    continue
+                target[item.class_id] = {'subjects': subs, 'homeroom': bool(item.homeroom)}
+        else:
+            taught_set = set(config.class_ids or [])
+            homeroom_set = set(config.homeroom_class_ids or [])
+            for cid in taught_set | homeroom_set:
+                if cid not in class_by_id:
+                    raise HTTPException(422, f'班级不存在：{cid}')
+                existing_role = (class_by_id[cid].get('teaching') or {}).get(teacher_id) or {}
+                if cid in taught_set:
+                    subs = clean_subjects or sorted({s.strip() for s in existing_role.get('subjects', []) if s and s.strip()})
+                else:
+                    subs = sorted({s.strip() for s in existing_role.get('subjects', []) if s and s.strip()})
+                is_homeroom = cid in homeroom_set
+                if not subs and not is_homeroom:
+                    continue
+                target[cid] = {'subjects': subs, 'homeroom': is_homeroom}
+
+        for cls in all_classes:
+            cid = cls['id']
+            roles = dict(cls.get('teaching') or {})
+            ids = set(cls.get('teacher_ids') or [])
+            old_role = roles.get(teacher_id)
+            old_in = teacher_id in ids
+            if cid in target:
+                new_role = target[cid]
+                if old_role != new_role or not old_in:
+                    roles[teacher_id] = new_role
+                    ids.add(teacher_id)
+                    cls['teaching'] = roles
+                    cls['teacher_ids'] = sorted(ids)
+                    put(db, 'classes', cls, actor)
+                    updated_classes += 1
+            else:
+                if teacher_id in roles or old_in:
+                    roles.pop(teacher_id, None)
+                    ids.discard(teacher_id)
+                    cls['teaching'] = roles
+                    cls['teacher_ids'] = sorted(ids)
+                    put(db, 'classes', cls, actor)
+                    updated_classes += 1
+
+    return {'teacher_id': teacher_id, 'profile': profile, 'updated_classes': updated_classes}
+
+
 def save(db, relation, actor, remove=False):
     cls = get(db, relation.class_id, 'classes')
     if not cls or not db.execute("SELECT 1 FROM users WHERE id=? AND role='teacher'", (relation.teacher_id,)).fetchone():
@@ -52,6 +140,14 @@ def edit(relation: Relation, current=Depends(admin)):
         db.execute('BEGIN IMMEDIATE')
         save(db, relation, current['id'])
     return {'saved': True}
+
+
+@router.put('/teacher/{teacher_id}')
+def configure_teacher(teacher_id: str, body: TeacherProfileConfig, current=Depends(admin)):
+    with connect() as db:
+        db.execute('BEGIN IMMEDIATE')
+        result = save_teacher_profile(db, teacher_id, body, current['id'])
+    return {'saved': True, **result}
 
 
 class RelationRef(BaseModel):

@@ -1,4 +1,15 @@
 :root{font-family:'Segoe UI','Microsoft YaHei UI','Microsoft YaHei',sans-serif;color:#141414;background:#f5f7fa;font-size:14px;line-height:1.5714285714;color-scheme:light}
+:root[data-theme='dark']{color:#e6edf3;background:#0b0f16;color-scheme:dark}
+:root[data-theme='dark'] .brand-commit{color:#9fb0c3}
+:root[data-theme='dark'] .brand-name{color:#e6edf3}
+:root[data-theme='dark'] .pwa-updating-mask{background:rgba(11,15,22,.88)}
+:root[data-theme='dark'] .pwa-updating-card,:root[data-theme='dark'] .pwa-update-toast{background:#141a24;border-color:#253042;box-shadow:0 12px 32px rgba(0,0,0,.45)}
+:root[data-theme='dark'] .pwa-updating-card strong,:root[data-theme='dark'] .pwa-update-toast-body strong{color:#f0f6fc}
+:root[data-theme='dark'] .pwa-updating-card p,:root[data-theme='dark'] .pwa-update-toast-body span{color:#9fb0c3}
+:root[data-theme='dark'] .pwa-updating-spinner{border-color:#253042;border-top-color:#3b82f6}
+:root[data-theme='dark'] .pwa-update-btn{background:#1b2330;border-color:#2a3444;color:#e6edf3}
+:root[data-theme='dark'] .pwa-update-btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+:root[data-theme='dark'] .pwa-update-btn.ghost{color:#9fb0c3}
 *{box-sizing:border-box}body{margin:0}button,input{font:inherit}
 :focus-visible{outline:2px solid #0866ff;outline-offset:2px}
 .brand{height:72px;padding:0 12px;display:flex;align-items:center;gap:8px;flex-shrink:0;overflow:hidden;white-space:nowrap}
