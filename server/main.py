@@ -221,7 +221,7 @@ def create_route(kind):
                 if not isinstance(body.get(parent[0]),str):raise HTTPException(422,'所属记录编号无效')
                 require(db,body.get(parent[0]),parent[1])
             value=dict(body)
-            if kind=='scan-batches':value={k:body[k] for k in ('group_id','room','back_order','room_tag_ids') if k in body}
+            if kind=='scan-batches':value={k:body[k] for k in ('group_id','room','name','expected_count','back_order','room_tag_ids') if k in body}
             value.pop('id',None)
             if kind in ('projects','subjects','groups','classes','students','templates') and not str(value.get('name','')).strip():
                 raise HTTPException(422,'请填写名称')
@@ -291,7 +291,13 @@ def create_route(kind):
                 except (ValueError,KeyError,TypeError) as error: raise HTTPException(422,str(error))
                 value['revision']=1
             if kind=='scan-batches':
-                if value.get('back_order','same') not in ('same','reverse') or not isinstance(value.get('room',''),str) or len(value.get('room',''))>100:raise HTTPException(422,'背面顺序或考场备注无效')
+                if value.get('back_order','same') not in ('same','reverse') or not isinstance(value.get('room',''),str) or len(value.get('room',''))>100:raise HTTPException(422,'背面顺序或批次备注无效')
+                if 'name' in value:
+                    if not isinstance(value['name'],str) or len(value['name'])>100:raise HTTPException(422,'批次名称无效')
+                    value['name']=value['name'].strip()
+                if 'expected_count' in value and value['expected_count'] is not None:
+                    ec=value['expected_count']
+                    if type(ec) is not int or not 1<=ec<=10000:raise HTTPException(422,'预计张数应为 1 至 10000 的整数')
                 value.setdefault('back_order','same')
                 value.pop('scanner_device_id',None)
                 if current['role']=='scanner':value['scanner_device_id']=current['id']

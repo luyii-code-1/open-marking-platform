@@ -105,10 +105,14 @@ export function readLocation(hash: string): Location {
     if (page==='http-guard') return {page,section:guardView(parts[1])}
     if (page==='settings' && parts[1]==='http-guard') return {page:'http-guard',section:'overview'}
     if (page==='settings' && ['login','devices','storage','space','backups','audit'].includes(parts[1])) return {page,section:parts[1]}
+    if (page === 'teacher-templates') {
+      const openId = parts[1] || new URLSearchParams(query).get('open') || undefined
+      return { page, templateId: openId }
+    }
     if (page !== 'exams') return { page }
     if (!parts[1]) return { page }
     const location: Location = { page, projectId: parts[1] }
-    if (parts[2] !== 'subjects') return { ...location, section: ['archives', 'summary', 'conversions', 'storage', 'rooms', 'sheets'].includes(parts[2]) ? parts[2] : undefined }
+    if (parts[2] !== 'subjects') return { ...location, section: ['archives', 'summary', 'conversions', 'storage', 'sheets'].includes(parts[2]) ? parts[2] : undefined }
     if (!parts[3]) return location
     location.subjectId = parts[3]
     if(parts[4]==='grades'&&parts[5]){

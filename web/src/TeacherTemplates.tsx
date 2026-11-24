@@ -81,14 +81,23 @@ const editableDef = (def: Template): Template =>
     forbidden_regions: def.forbidden_regions || [],
   })
 
-export function TeacherTemplates({ management, onNavigate }: { management: boolean; onNavigate?: (hash: string) => void }) {
+export function TeacherTemplates({
+  management,
+  initialTemplateId,
+  onNavigate,
+}: {
+  management: boolean
+  initialTemplateId?: string
+  onNavigate?: (hash: string) => void
+}) {
   const list = useResource<TeacherTemplateRow[]>('/teacher-templates', [])
   const projects = useResource<Row[]>(management ? '/projects' : null, [])
   const subjects = useResource<Row[]>(management ? '/subjects' : null, [])
   const groups = useResource<Row[]>(management ? '/groups' : null, [])
 
-  const [statusFilter, setStatusFilter] = useState<string>(management ? 'all' : 'all')
+  const [statusFilter, setStatusFilter] = useState<string>('all')
   const [editingRow, setEditingRow] = useState<TeacherTemplateRow | null>(null)
+  const openedRef = useRef('')
   const [createOpen, setCreateOpen] = useState(false)
   const [createForm] = Form.useForm()
   const [linkOpen, setLinkOpen] = useState(false)
@@ -102,6 +111,15 @@ export function TeacherTemplates({ management, onNavigate }: { management: boole
   const [rejectReason, setRejectReason] = useState('')
   const [actionBusy, setActionBusy] = useState(false)
   const { message, modal } = App.useApp()
+
+  useEffect(() => {
+    if (!initialTemplateId || !list.loaded || openedRef.current === initialTemplateId) return
+    const found = list.data.find(r => r.id === initialTemplateId)
+    if (found) {
+      openedRef.current = initialTemplateId
+      setEditingRow(found)
+    }
+  }, [initialTemplateId, list.loaded, list.data])
 
   const copyLink = async (row: TeacherTemplateRow) => {
     const tokenLink = row.internal_link || `omp-tpl:${row.share_token}`
@@ -154,7 +172,7 @@ export function TeacherTemplates({ management, onNavigate }: { management: boole
   function openAdopt(row: TeacherTemplateRow) {
     setAdoptTarget(row)
     setAdoptMode('group')
-    adoptForm.setFieldsValue({ name: row.name, group_id: undefined, subject_id: undefined })
+    adoptForm.setFieldsValue({ name: row.name, group_id: row.target_group_id || undefined, subject_id: undefined })
     void projects.reload()
     void subjects.reload()
     void groups.reload()
@@ -213,7 +231,7 @@ export function TeacherTemplates({ management, onNavigate }: { management: boole
       const updated = await send<TeacherTemplateRow>(`/teacher-templates/${row.id}/submit`, {})
       await list.reload()
       if (editingRow?.id === updated.id) setEditingRow(updated)
-      message.success('已提交管理员审核')
+      message.success('已推送给管理员审核')
     } catch (e) {
       message.error((e as Error).message)
     } finally {
@@ -261,6 +279,8 @@ export function TeacherTemplates({ management, onNavigate }: { management: boole
         management={management}
         onBack={() => {
           setEditingRow(null)
+          openedRef.current = ''
+          if (initialTemplateId && onNavigate) onNavigate('#/teacher-templates')
           void list.reload()
         }}
         onUpdated={next => {
@@ -408,7 +428,7 @@ export function TeacherTemplates({ management, onNavigate }: { management: boole
                     </Button>
                     {canTeacherSubmit && (
                       <Button size="small" type="primary" loading={actionBusy} onClick={() => void submitForReview(row)}>
-                        提交管理员
+                        推送给管理员
                       </Button>
                     )}
                     {management && (
@@ -1066,7 +1086,7 @@ function TeacherTemplateWorkbench({
             )}
             {!management && (row.status === 'draft' || row.status === 'rejected') && (
               <Button type="primary" loading={saving} onClick={() => void handleSaveAndSubmit()}>
-                提交管理员审核
+                推送给管理员
               </Button>
             )}
             {management && (
@@ -1085,6 +1105,14 @@ function TeacherTemplateWorkbench({
         </div>
       </Card>
 
+      {row.target_project_name && (
+        <Alert
+          type="info"
+          showIcon
+          message={`管理员 ${row.assigned_by_name || ''} 下发的制卡任务：${[row.target_project_name, row.target_grade_name, row.target_subject_name, row.target_group_name].filter(Boolean).join(' · ')}`}
+          description={row.description || '完成制卡后点击「保存」，即可复制内部链接或点击「推送给管理员」。'}
+        />
+      )}
       {row.status === 'rejected' && row.review_note && (
         <Alert type="warning" showIcon message={`管理员退回意见：${row.review_note}`} />
       )}

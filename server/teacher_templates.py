@@ -127,6 +127,109 @@ def list_teacher_templates(status: str = '', current=Depends(user)):
         return [_serialize(r) for r in rows]
 
 
+@router.get('/teacher-templates/notifications')
+def template_notifications(current=Depends(user)):
+    with connect() as db:
+        rows = objects(db, 'teacher-templates')
+    items = []
+    is_admin = current['role'] in ('admin', 'manager')
+    for r in rows:
+        if r.get('owner_id') == current['id'] and r.get('assigned_by') and r.get('status') in ('draft', 'rejected'):
+            scope = ' · '.join(v for v in (r.get('target_project_name'), r.get('target_subject_name'), r.get('target_grade_name'), r.get('target_group_name')) if v)
+            detail = r.get('review_note') if r.get('status') == 'rejected' else (r.get('description') or f"管理员 {r.get('assigned_by_name', '')} 已下发制卡任务，完成后可保存并推送给管理员。")
+            items.append({
+                'id': r['id'],
+                'kind': 'assigned_template',
+                'status': r['status'],
+                'title': f"制卡任务：{r.get('name', '未命名题卡')}",
+                'scope': scope,
+                'detail': detail,
+                'created_at': r.get('updated_at') or r.get('assigned_at') or r.get('created_at'),
+                'href': f"#/teacher-templates/{r['id']}",
+                'action_label': '一键进入制卡',
+            })
+        elif is_admin and r.get('status') == 'submitted':
+            scope = ' · '.join(v for v in (r.get('target_project_name'), r.get('target_subject_name') or r.get('subject_name'), r.get('target_grade_name')) if v)
+            items.append({
+                'id': r['id'],
+                'kind': 'submitted_template',
+                'status': 'submitted',
+                'title': f"教师推送题卡：{r.get('name', '未命名题卡')}",
+                'scope': scope or f"制作教师：{r.get('owner_name', '')}",
+                'detail': f"{r.get('owner_name', '教师')} 已推送题卡待审核，可编辑所有内容（含答案）后采用。",
+                'created_at': r.get('submitted_at') or r.get('updated_at') or r.get('created_at'),
+                'href': f"#/teacher-templates/{r['id']}",
+                'action_label': '一键进入审核',
+            })
+    items.sort(key=lambda item: item.get('created_at') or 0, reverse=True)
+    return items
+
+
+@router.post('/teacher-templates/assign', status_code=201)
+def assign_teacher_template(body: dict, current=Depends(admin)):
+    teacher_id = body.get('teacher_id')
+    group_id = body.get('group_id')
+    description = str(body.get('description') or '').strip()
+    if not isinstance(teacher_id, str) or not teacher_id:
+        raise HTTPException(422, '请选择接收制卡任务的教师账号')
+    if not isinstance(group_id, str) or not group_id:
+        raise HTTPException(422, '请选择要制卡的考试题卡')
+    if len(description) > 2000:
+        raise HTTPException(422, '任务说明不能超过2000字')
+    with connect() as db:
+        db.execute('BEGIN IMMEDIATE')
+        teacher = db.execute('SELECT id, username, name, role FROM users WHERE id=?', (teacher_id,)).fetchone()
+        if not teacher:
+            raise HTTPException(404, '教师账号不存在')
+        group = require(db, group_id, 'groups')
+        if group.get('frozen'):
+            raise HTTPException(409, RESULTS_REVIEW_GUIDE)
+        subject = require(db, group['subject_id'], 'subjects')
+        project = require(db, subject['project_id'], 'projects')
+        grade = get(db, group.get('grade_id'), 'grades') if group.get('grade_id') else None
+        grade_name = grade['name'] if grade else ''
+        card_label = f"{subject['name']}题卡" if (group.get('is_default') or group.get('name') == 'Default') else group['name']
+        default_title = ' · '.join(v for v in (project['name'], grade_name, subject['name'], card_label) if v)[:100]
+        name = str(body.get('name') or default_title).strip()[:100] or default_title
+        existing_tpl = get(db, group.get('template_id'), 'templates') if group.get('template_id') else None
+        if existing_tpl:
+            definition = _clean_definition(existing_tpl, name)
+            for q in definition.get('questions', []):
+                q.pop('id', None)
+            prepare_questions(definition)
+        else:
+            definition = _default_definition(name)
+        now = time.time()
+        record = {
+            'id': str(uuid4()),
+            'owner_id': teacher['id'],
+            'owner_name': teacher['name'],
+            'owner_username': teacher['username'],
+            'assigned_by': current['id'],
+            'assigned_by_name': current['name'],
+            'assigned_at': now,
+            'target_group_id': group['id'],
+            'target_project_id': project['id'],
+            'target_project_name': project['name'],
+            'target_subject_name': subject['name'],
+            'target_grade_name': grade_name,
+            'target_group_name': card_label,
+            'name': definition['name'],
+            'subject_name': subject['name'],
+            'description': description,
+            'status': 'draft',
+            'share_token': secrets.token_urlsafe(12),
+            'review_note': '',
+            'submitted_at': None,
+            'created_at': now,
+            'updated_at': now,
+            'adopted_template_id': None,
+            'adopted_group_id': None,
+            'definition': definition,
+        }
+        return _serialize(put(db, 'teacher-templates', record, current['id']))
+
+
 @router.get('/teacher-templates/by-link')
 def lookup_by_link(link: str = Query(..., min_length=1, max_length=500), current=Depends(admin)):
     token = _extract_token(link)

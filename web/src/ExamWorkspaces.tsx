@@ -413,8 +413,8 @@ function GroupOverview({ group, projectId, onSection }: { group: Row; projectId:
       key: 'scans',
       label: '扫描与补扫',
       detail: workflow.data.group_id
-        ? `考场预期 ${workflow.data.room_expected} 人 · 已入库实考 ${workflow.data.scanned} 人 · ${workflow.data.open_batches} 个批次待完成`
-        : '按考场查看批次、页面与配对情况',
+        ? `已入库实考 ${workflow.data.scanned} 人 · ${workflow.data.open_batches} 个批次待完成`
+        : '按批次查看扫描计数、页面与配对情况',
     },
     {
       key: 'marking',
@@ -571,7 +571,6 @@ export function GroupWorkspace({
   project,
   section,
   onSection,
-  onRooms,
   scanTab,
   onScanTab,
   sections,
@@ -581,7 +580,6 @@ export function GroupWorkspace({
   project: Row
   section: string
   onSection: (section: string) => void
-  onRooms: () => void
   scanTab: string
   onScanTab: (tab: string) => void
   sections: readonly (readonly [string, string])[]
@@ -626,12 +624,7 @@ export function GroupWorkspace({
               ) : key === 'roster' ? (
                 <Roster groupId={group.id} />
               ) : key === 'scans' ? (
-                <Space direction="vertical" size={24} style={{ width: '100%' }}>
-                  <div>
-                    <Button onClick={onRooms}>考场设置</Button>
-                  </div>
-                  <Scans groupId={group.id} tab={scanTab} onTab={onScanTab} />
-                </Space>
+                <Scans groupId={group.id} tab={scanTab} onTab={onScanTab} />
               ) : key === 'marking' ? (
                 <Tabs
                   defaultActiveKey="teachers"

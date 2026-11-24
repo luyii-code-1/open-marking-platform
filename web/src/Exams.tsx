@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { ArrowLeftOutlined, RightOutlined } from '@ant-design/icons'
-import { Alert, Breadcrumb, Card, Empty, Form, Radio, Segmented, Space, Spin, Tabs, Tag, Tooltip, Typography } from 'antd'
+import { ArrowLeftOutlined, PlusOutlined, RightOutlined, SearchOutlined } from '@ant-design/icons'
+import { Alert, App, Breadcrumb, Card, Collapse, Empty, Form, Input, Modal, Popconfirm, Radio, Segmented, Select, Space, Spin, Tabs, Tag, Tooltip, Typography } from 'antd'
 import { Button } from './Button'
 import { Table } from './DataTable'
 import { CatalogPicker } from './Electives'
@@ -17,11 +17,10 @@ import {
 } from './ExamWorkspaces'
 import { CardConversionFields } from './ConversionWorkspace'
 import { HierarchyDelete } from './HierarchyDelete'
-import { RoomTagManager } from './RoomTags'
 import { useReviewWorkspace } from './ReviewWorkspace'
 import { WorkspaceNotificationButton } from './WorkspaceNotifications'
 import { jobDetailText, jobKindLabel, jobStatusColor, jobStatusLabel } from './jobDisplay'
-import { useResource, type Row } from './api'
+import { send, useResource, type Row } from './api'
 import {
   cardName,
   examPath,
@@ -45,6 +44,384 @@ const SheetLookup = loadPage(() => import('./SheetLookup').then(module => ({ def
 const TemplateEditor = loadPage(() => import('./TemplateEditor').then(module => ({ default: module.TemplateEditor })))
 
 const { Title, Text } = Typography
+
+function ProjectCollapsibleTree({
+  project,
+  subjects,
+  groups,
+  grades,
+  go,
+  refresh,
+}: {
+  project: Row
+  subjects: Row[]
+  groups: Row[]
+  grades: Row[]
+  go: (value: ExamLocation) => void
+  refresh: () => Promise<void>
+}) {
+  const { message } = App.useApp()
+  const projectSubjects = subjects.filter(s => s.project_id === project.id)
+  const storageKey = `omp-exam-tree-open:${project.id}`
+  const [keyword, setKeyword] = useState('')
+  const [openSubjects, setOpenSubjects] = useState<string[]>(() => {
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(storageKey) || 'null')
+      if (Array.isArray(saved)) return saved.filter((id: unknown) => typeof id === 'string')
+    } catch {}
+    return projectSubjects.length <= 4 ? projectSubjects.map(s => s.id) : projectSubjects.slice(0, 1).map(s => s.id)
+  })
+  const [closedGrades, setClosedGrades] = useState<Record<string, boolean>>({})
+  const [createSubjectOpen, setCreateSubjectOpen] = useState(false)
+  const [createCardTarget, setCreateCardTarget] = useState<{ subject: Row; gradeId?: string } | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [subjectForm] = Form.useForm()
+  const [cardForm] = Form.useForm()
+  const availableGrades = grades.filter(g => !g.archived)
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(storageKey, JSON.stringify(openSubjects))
+    } catch {}
+  }, [storageKey, openSubjects])
+
+  const q = keyword.trim().toLowerCase()
+  const visibleSubjects = projectSubjects
+    .map(subject => {
+      const subjectMatch = !q || String(subject.name || '').toLowerCase().includes(q)
+      const gradeRows = subjectGrades(subject, groups, grades)
+      const filteredGrades = gradeRows
+        .map(grade => {
+          const cards = groups.filter(g => g.subject_id === subject.id && (g.grade_id || unassignedGrade) === grade.id)
+          const gradeMatch = subjectMatch || String(grade.name || '').toLowerCase().includes(q)
+          const matchedCards = gradeMatch
+            ? cards
+            : cards.filter(c => cardName(c, subject).toLowerCase().includes(q))
+          return { grade, cards: matchedCards, keep: gradeMatch || matchedCards.length > 0 }
+        })
+        .filter(item => item.keep)
+      const totalCards = groups.filter(g => g.subject_id === subject.id).length
+      return {
+        subject,
+        gradeRows: filteredGrades,
+        gradeCount: gradeRows.length,
+        totalCards,
+        keep: subjectMatch || filteredGrades.length > 0,
+      }
+    })
+    .filter(item => item.keep)
+
+  const allSubjectIds = visibleSubjects.map(item => item.subject.id)
+  const effectiveOpenSubjects = q ? allSubjectIds : openSubjects
+  const allExpanded = allSubjectIds.length > 0 && allSubjectIds.every(id => effectiveOpenSubjects.includes(id))
+
+  async function createSubject(values: { name: string }) {
+    if (busy) return
+    setBusy(true)
+    try {
+      const created = (await send('/subjects', { project_id: project.id, name: values.name.trim() })) as Row
+      await refresh()
+      setCreateSubjectOpen(false)
+      subjectForm.resetFields()
+      if (created?.id) setOpenSubjects(prev => (prev.includes(created.id) ? prev : [...prev, created.id]))
+      message.success('科目已创建')
+    } catch (e) {
+      message.error((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function createCard(values: Record<string, unknown>) {
+    if (!createCardTarget || busy) return
+    setBusy(true)
+    try {
+      const created = (await send('/groups', { subject_id: createCardTarget.subject.id, ...values })) as Row
+      await refresh()
+      setOpenSubjects(prev => (prev.includes(createCardTarget.subject.id) ? prev : [...prev, createCardTarget.subject.id]))
+      setCreateCardTarget(null)
+      cardForm.resetFields()
+      message.success('题卡已创建')
+      if (created?.id) {
+        go({
+          projectId: project.id,
+          subjectId: createCardTarget.subject.id,
+          gradeId: created.grade_id || unassignedGrade,
+          groupId: created.id,
+        })
+      }
+    } catch (e) {
+      message.error((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function removeSubjectGrade(subjectId: string, gradeId: string) {
+    try {
+      await send(`/subjects/${subjectId}/grades/${gradeId}`, undefined, 'DELETE')
+      await refresh()
+      message.success('已移除该科目的年级关联')
+    } catch (e) {
+      message.error((e as Error).message)
+    }
+  }
+
+  function openCreateCard(subject: Row, gradeId?: string) {
+    setCreateCardTarget({ subject, gradeId })
+    cardForm.resetFields()
+    cardForm.setFieldsValue({
+      grade_id: gradeId && gradeId !== unassignedGrade ? gradeId : availableGrades[0]?.id,
+    })
+  }
+
+  return (
+    <div>
+      <div className="exam-tree-toolbar">
+        <Space wrap>
+          <Input
+            allowClear
+            prefix={<SearchOutlined />}
+            placeholder="搜索科目、年级或题卡"
+            value={keyword}
+            onChange={e => setKeyword(e.target.value)}
+            style={{ width: 260 }}
+          />
+          {allSubjectIds.length > 0 && !q && (
+            <Button onClick={() => setOpenSubjects(allExpanded ? [] : allSubjectIds)}>
+              {allExpanded ? '全部收起' : '全部展开'}
+            </Button>
+          )}
+        </Space>
+        <Space>
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateSubjectOpen(true)}>
+            新建科目
+          </Button>
+        </Space>
+      </div>
+
+      {!visibleSubjects.length ? (
+        <Card>
+          <Empty description={q ? '没有匹配的科目或题卡' : '当前考试项目还没有科目'}>
+            {!q && (
+              <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateSubjectOpen(true)}>
+                新建科目
+              </Button>
+            )}
+          </Empty>
+        </Card>
+      ) : (
+        <Collapse
+          className="exam-tree-collapse"
+          bordered={false}
+          activeKey={effectiveOpenSubjects}
+          onChange={keys => {
+            if (!q) setOpenSubjects(Array.isArray(keys) ? keys.map(String) : [String(keys)])
+          }}
+          items={visibleSubjects.map(({ subject, gradeRows, gradeCount, totalCards }) => ({
+            key: subject.id,
+            label: (
+              <div className="exam-tree-subject-title">
+                <span>{subject.name}</span>
+                <span className="exam-tree-subject-meta">
+                  {gradeCount} 个年级 · {totalCards} 份题卡
+                </span>
+              </div>
+            ),
+            extra: (
+              <Space size={4} onClick={e => e.stopPropagation()}>
+                <Button
+                  type="link"
+                  size="small"
+                  icon={<PlusOutlined />}
+                  disabled={!availableGrades.length}
+                  onClick={() => openCreateCard(subject)}
+                >
+                  新建题卡
+                </Button>
+                <Rename kind="subjects" row={subject} refresh={refresh} />
+                <HierarchyDelete kind="subjects" target={subject} onDeleted={refresh} />
+              </Space>
+            ),
+            children: !gradeRows.length ? (
+              <div className="exam-tree-empty-hint">
+                <span>该科目下暂无题卡，点击右侧「新建题卡」并选择年级即可开始。</span>
+                {availableGrades.length > 0 ? (
+                  <Button size="small" type="primary" icon={<PlusOutlined />} onClick={() => openCreateCard(subject)}>
+                    新建题卡
+                  </Button>
+                ) : (
+                  <a href="#/people/grades">先去创建年级</a>
+                )}
+              </div>
+            ) : (
+              <div className="exam-tree-grades">
+                <Collapse
+                  className="exam-tree-grade-collapse"
+                  bordered={false}
+                  activeKey={gradeRows
+                    .map(({ grade }) => `${subject.id}:${grade.id}`)
+                    .filter(key => q || !closedGrades[key])}
+                  onChange={keys => {
+                    if (q) return
+                    const openSet = new Set(Array.isArray(keys) ? keys.map(String) : [String(keys)])
+                    setClosedGrades(prev => {
+                      const next = { ...prev }
+                      for (const { grade } of gradeRows) {
+                        const k = `${subject.id}:${grade.id}`
+                        next[k] = !openSet.has(k)
+                      }
+                      return next
+                    })
+                  }}
+                  items={gradeRows.map(({ grade, cards }) => {
+                    const gradeKey = `${subject.id}:${grade.id}`
+                    const isUnassigned = grade.id === unassignedGrade
+                    return {
+                      key: gradeKey,
+                      label: (
+                        <div className="exam-tree-grade-title">
+                          <span>{grade.name}</span>
+                          {isUnassigned && <Tag color="warning">需设置年级</Tag>}
+                          <Tag style={{ marginInlineEnd: 0 }}>{cards.length} 份题卡</Tag>
+                        </div>
+                      ),
+                      extra: (
+                        <Space size={4} onClick={e => e.stopPropagation()}>
+                          {!isUnassigned && (
+                            <Button
+                              type="link"
+                              size="small"
+                              icon={<PlusOutlined />}
+                              onClick={() => openCreateCard(subject, grade.id)}
+                            >
+                              新建题卡
+                            </Button>
+                          )}
+                          {!isUnassigned && cards.length === 0 && (
+                            <Popconfirm
+                              title="移除该科目的年级关联？"
+                              description="全局年级、班级和学生资料保留。"
+                              onConfirm={() => void removeSubjectGrade(subject.id, grade.id)}
+                            >
+                              <Button type="link" size="small" danger>
+                                移除年级
+                              </Button>
+                            </Popconfirm>
+                          )}
+                        </Space>
+                      ),
+                      children: !cards.length ? (
+                        <div className="exam-tree-empty-hint">
+                          <span>该年级下暂无题卡</span>
+                          {!isUnassigned && (
+                            <Button size="small" onClick={() => openCreateCard(subject, grade.id)}>
+                              新建题卡
+                            </Button>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="exam-tree-card-list">
+                          {cards.map(row => {
+                            const cardLoc: ExamLocation = {
+                              projectId: project.id,
+                              subjectId: subject.id,
+                              gradeId: row.grade_id || unassignedGrade,
+                              groupId: row.id,
+                            }
+                            const rosterText =
+                              row.roster_mode === 'selected'
+                                ? '指定名单'
+                                : row.roster_mode === 'open'
+                                  ? '开放扫入'
+                                  : row.grade_id
+                                    ? '年级全体'
+                                    : '开放扫入'
+                            return (
+                              <div key={row.id} className="exam-tree-card-row">
+                                <div className="exam-tree-card-main">
+                                  <a
+                                    className="exam-tree-card-link"
+                                    href={examPath(cardLoc)}
+                                    onClick={e => {
+                                      e.preventDefault()
+                                      go(cardLoc)
+                                    }}
+                                  >
+                                    {cardName(row, subject)}
+                                  </a>
+                                  <Tag color={row.template_id ? 'success' : 'default'}>
+                                    {row.template_id ? '版式已发布' : '版式待设计'}
+                                  </Tag>
+                                  <Tag>{rosterText}</Tag>
+                                  {row.conversion_id && row.conversion_mode !== 'none' && <Tag color="blue">已赋分</Tag>}
+                                  <Tag color={row.frozen ? 'green' : row.reopened_at && row.published_at ? 'blue' : 'default'}>
+                                    {row.frozen ? '成绩已发布' : row.reopened_at && row.published_at ? '复核中' : '成绩未发布'}
+                                  </Tag>
+                                </div>
+                                <div className="exam-tree-card-actions">
+                                  <Button type="link" size="small" onClick={() => go(cardLoc)}>
+                                    进入工作台
+                                  </Button>
+                                  <Button type="link" size="small" onClick={() => go({ ...cardLoc, section: 'template' })}>
+                                    题卡设计
+                                  </Button>
+                                  <Rename kind="groups" row={row} refresh={refresh} />
+                                  <CardGrade group={row} grades={grades} onSaved={refresh} />
+                                  <HierarchyDelete kind="groups" target={row} onDeleted={refresh} />
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      ),
+                    }
+                  })}
+                />
+              </div>
+            ),
+          }))}
+        />
+      )}
+
+      <Modal
+        title="新建科目"
+        open={createSubjectOpen}
+        onCancel={() => !busy && setCreateSubjectOpen(false)}
+        onOk={() => subjectForm.submit()}
+        confirmLoading={busy}
+      >
+        <Form form={subjectForm} layout="vertical" onFinish={createSubject}>
+          <Form.Item name="name" label="科目名称" rules={[{ required: true, whitespace: true, message: '请填写科目名称' }]}>
+            <Input maxLength={100} placeholder="如：语文、数学、英语" />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title={createCardTarget ? `新建题卡 · ${createCardTarget.subject.name}` : '新建题卡'}
+        open={!!createCardTarget}
+        onCancel={() => !busy && setCreateCardTarget(null)}
+        onOk={() => cardForm.submit()}
+        confirmLoading={busy}
+      >
+        <Form form={cardForm} layout="vertical" onFinish={createCard}>
+          <Form.Item name="name" label="题卡名称" rules={[{ required: true, whitespace: true, message: '请填写题卡名称' }]}>
+            <Input maxLength={100} placeholder="如：高一数学答题卡" />
+          </Form.Item>
+          <Form.Item name="grade_id" label="所属年级" rules={[{ required: true, message: '请选择所属年级' }]}>
+            <Select
+              showSearch
+              optionFilterProp="label"
+              options={availableGrades.map(g => ({ label: g.name, value: g.id }))}
+            />
+          </Form.Item>
+          <CardConversionFields projectId={project.id} />
+        </Form>
+      </Modal>
+    </div>
+  )
+}
 
 export function Exams({ location, navigate }: { location: ExamLocation; navigate: (path: string, replace?: boolean) => void }) {
   const projects = useResource<Row[]>('/projects', [])
@@ -144,7 +521,7 @@ export function Exams({ location, navigate }: { location: ExamLocation; navigate
   }
 
   const back: ExamLocation = group
-    ? { projectId: project!.id, subjectId: subject!.id, gradeId }
+    ? { projectId: project!.id }
     : grade
       ? { projectId: project!.id, subjectId: subject!.id }
       : subject
@@ -454,7 +831,6 @@ export function Exams({ location, navigate }: { location: ExamLocation; navigate
           onSection={section => go({ ...base, section })}
           scanTab={location.scanTab || 'capture'}
           onScanTab={tab => go({ ...base, section: 'scans', scanTab: tab === 'correct' ? 'correct' : undefined })}
-          onRooms={() => go({ projectId: project.id, section: 'rooms' })}
           sections={groupSections}
           renderTemplateEditor={id => <TemplateEditor groupId={id} />}
         />
@@ -506,44 +882,19 @@ export function Exams({ location, navigate }: { location: ExamLocation; navigate
           items={[
             {
               key: 'subjects',
-              label: '科目',
+              label: '科目与题卡',
               children: (
-                <EntityTable
+                <ProjectCollapsibleTree
                   key={project.id}
-                  path="/subjects"
-                  title="科目"
-                  hideTitle
-                  resource={subjects}
-                  scope={{ project_id: project.id }}
-                  fields={[{ name: 'name', label: '科目名称' }]}
-                  onEnter={row => go({ projectId: project.id, subjectId: row.id })}
-                  onCreated={async row => {
-                    await refresh()
-                    if (row) go({ projectId: project.id, subjectId: row.id })
-                  }}
-                  columns={[
-                    {
-                      title: '科目名称',
-                      dataIndex: 'name',
-                      render: (name: string, row: Row) => <a href={examPath({ projectId: project.id, subjectId: row.id })}>{name}</a>,
-                    },
-                    { title: '年级', render: (_: unknown, row: Row) => `${subjectGrades(row, groups.data).length} 个` },
-                    { title: '题卡', render: (_: unknown, row: Row) => `${groups.data.filter(g => g.subject_id === row.id).length} 份` },
-                    {
-                      title: '操作',
-                      className: 'row-actions',
-                      render: (_: unknown, row: Row) => (
-                        <Space>
-                          <Rename kind="subjects" row={row} refresh={refresh} />
-                          <HierarchyDelete kind="subjects" target={row} onDeleted={refresh} />
-                        </Space>
-                      ),
-                    },
-                  ]}
+                  project={project}
+                  subjects={subjects.data}
+                  groups={groups.data}
+                  grades={grades.data}
+                  go={go}
+                  refresh={refresh}
                 />
               ),
             },
-            { key: 'rooms', label: '考场设置', children: <RoomTagManager projectId={project.id} /> },
             { key: 'sheets', label: '答题卡查询', children: <SheetLookup key={project.id} projectId={project.id} /> },
             { key: 'summary', label: '成绩总览', children: <Results key={project.id} admin projectId={project.id} /> },
             { key: 'conversions', label: '赋分方案', children: <Conversions projectId={project.id} /> },

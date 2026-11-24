@@ -110,9 +110,14 @@ def register_batch(identifier: str, body: dict, current=Depends(scan_admin)):
         from .room_tags import snapshot,project_for_group
         labels=snapshot(db,project_for_group(db,group['id']),body.get('room_tag_ids',[]),group=group)
         mode = body.get('capture_mode', 'separate'); order = body.get('back_order', 'same'); room = body.get('room', '')
-        if mode not in ('duplex', 'separate') or order not in ('same', 'reverse') or (mode == 'duplex' and (template['sides'] != 2 or order != 'same')) or not isinstance(room, str) or len(room) > 100: raise HTTPException(422, '采集方式、背面顺序或考场备注无效')
+        expected_count = body.get('expected_count')
+        if expected_count is not None and (type(expected_count) is not int or not 1 <= expected_count <= 10000):
+            raise HTTPException(422, '预计张数应为 1 至 10000 的整数')
+        if mode not in ('duplex', 'separate') or order not in ('same', 'reverse') or (mode == 'duplex' and (template['sides'] != 2 or order != 'same')) or not isinstance(room, str) or len(room) > 100: raise HTTPException(422, '采集方式、背面顺序或批次备注无效')
         return put(db, 'scan-batches', {'id': identifier, 'group_id': group['id'], 'template_id': template['id'], 'template_revision': template['revision'],
-                                      'config_sha256': body['config_sha256'], 'grade_id':group.get('grade_id'), 'room_tags':labels, 'room': room, 'capture_mode': mode, 'back_order': order,
+                                      'config_sha256': body['config_sha256'], 'grade_id':group.get('grade_id'), 'room_tags':labels, 'room': room,
+                                      **({'expected_count': expected_count} if expected_count is not None else {}),
+                                      'capture_mode': mode, 'back_order': order,
                                       'status': 'front', **({'scanner_device_id': current['id']} if current['role'] == 'scanner' else {})}, current['id'])
 
 

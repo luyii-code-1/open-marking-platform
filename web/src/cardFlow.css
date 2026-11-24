@@ -4,3 +4,26 @@
 .card-flow-grid strong{font-size:22px;font-weight:600;font-variant-numeric:tabular-nums}.card-flow-grid .ant-progress{margin:0}
 .card-flow-grid section>.ant-space{font-size:12px;color:#526174}.card-flow-grid .ant-btn{padding-inline:0;margin-top:auto}
 @media(max-width:950px){.card-flow-grid{grid-template-columns:1fr}}
+
+.exam-tree-toolbar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px}
+.exam-tree-collapse .ant-collapse-item{margin-bottom:10px;border:1px solid #e3e7ed;border-radius:8px;overflow:hidden;background:#fff}
+.exam-tree-collapse .ant-collapse-header{align-items:center!important;background:#f8fafc;padding:10px 14px!important}
+.exam-tree-collapse .ant-collapse-content{border-top:1px solid #eef1f5}
+.exam-tree-collapse .ant-collapse-content-box{padding:12px 14px!important}
+.exam-tree-subject-title{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:15px;font-weight:600;color:#111827}
+.exam-tree-subject-meta{font-size:12px;font-weight:400;color:#667085}
+.exam-tree-grades{display:flex;flex-direction:column;gap:10px}
+.exam-tree-grade-collapse .ant-collapse-item{border:1px solid #edf0f5;border-radius:6px;overflow:hidden;background:#fff}
+.exam-tree-grade-collapse .ant-collapse-header{align-items:center!important;background:#fcfdff;padding:7px 12px!important}
+.exam-tree-grade-collapse .ant-collapse-content-box{padding:4px 0!important}
+.exam-tree-grade-title{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:#1f2937}
+.exam-tree-card-list{display:flex;flex-direction:column}
+.exam-tree-card-row{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;padding:9px 14px;border-top:1px solid #f1f4f8;transition:background .15s}
+.exam-tree-card-row:first-child{border-top:none}
+.exam-tree-card-row:hover{background:#f7faff}
+.exam-tree-card-main{display:flex;align-items:center;flex-wrap:wrap;gap:8px;min-width:0}
+.exam-tree-card-link{font-weight:600;color:#111827;font-size:14px}
+.exam-tree-card-link:hover{color:#1677ff}
+.exam-tree-card-actions{display:flex;align-items:center;flex-wrap:wrap;gap:2px}
+.exam-tree-card-actions .ant-btn-link{padding-inline:6px;height:26px}
+.exam-tree-empty-hint{padding:10px 14px;color:#667085;font-size:13px;display:flex;align-items:center;justify-content:space-between;gap:8px}

@@ -4,13 +4,14 @@ import { BellOutlined, CloseOutlined, ReloadOutlined, RightOutlined } from '@ant
 import { Button } from './Button'
 import { ErrorNotice } from './ErrorNotice'
 import { jobDetailText, jobKindLabel, jobStatusColor, jobStatusLabel } from './jobDisplay'
-import { request, send, type Row } from './api'
+import { request, send, watchChanges, type Row } from './api'
 import { serviceIsSlow, setServiceSlow } from './networkPolicy'
 
 type WorkspaceActivity = { exams: Row[]; events: Row[]; jobs: Row[] }
 type NotificationsContextValue = {
   slow: boolean
   jobs: Row[]
+  templateNotices: Row[]
   exams: Row[]
   events: Row[]
   activityLoaded: boolean
@@ -63,6 +64,7 @@ function formatJobTime(timestamp?: number) {
 const fallbackContext: NotificationsContextValue = {
   slow: false,
   jobs: [],
+  templateNotices: [],
   exams: [],
   events: [],
   activityLoaded: false,
@@ -84,6 +86,7 @@ export function WorkspaceNotificationsProvider({ isAdmin, children }: { isAdmin:
   const [open, setOpen] = useState(false)
   const [slow, setSlow] = useState(false)
   const [jobs, setJobs] = useState<Row[]>([])
+  const [templateNotices, setTemplateNotices] = useState<Row[]>([])
   const [exams, setExams] = useState<Row[]>([])
   const [events, setEvents] = useState<Row[]>([])
   const [dismissed, setDismissed] = useState<string[]>(readDismissed)
@@ -95,7 +98,17 @@ export function WorkspaceNotificationsProvider({ isAdmin, children }: { isAdmin:
   const mounted = useRef(true)
   const lastNotice = useRef(0)
 
+  const loadTemplateNotices = useCallback(async () => {
+    try {
+      const items = await request<Row[]>('/teacher-templates/notifications')
+      if (mounted.current && Array.isArray(items)) setTemplateNotices(items)
+    } catch {
+      /* Ignore offline or transient errors. */
+    }
+  }, [])
+
   const loadActivity = useCallback(async () => {
+    void loadTemplateNotices()
     if (!isAdmin) return
     setActivityLoading(true)
     setActivityError('')
@@ -111,7 +124,11 @@ export function WorkspaceNotificationsProvider({ isAdmin, children }: { isAdmin:
     } finally {
       if (mounted.current) setActivityLoading(false)
     }
-  }, [isAdmin])
+  }, [isAdmin, loadTemplateNotices])
+
+  useEffect(() => watchChanges(roots => {
+    if (!roots || roots.includes('teacher-templates')) void loadTemplateNotices()
+  }), [loadTemplateNotices])
 
   useEffect(() => {
     mounted.current = true
@@ -142,6 +159,7 @@ export function WorkspaceNotificationsProvider({ isAdmin, children }: { isAdmin:
               duration: 8,
             })
           }
+          await loadTemplateNotices()
           if (isAdmin) await loadActivity()
         } catch {
           /* Connectivity state is handled by the review workspace. */
@@ -158,7 +176,7 @@ export function WorkspaceNotificationsProvider({ isAdmin, children }: { isAdmin:
       clearTimeout(timer)
       notification.destroy('service-slow')
     }
-  }, [isAdmin, loadActivity, notification])
+  }, [isAdmin, loadActivity, loadTemplateNotices, notification])
 
   const dismissedSet = useMemo(() => new Set(dismissed), [dismissed])
   const visibleJobs = useMemo(
@@ -202,12 +220,13 @@ export function WorkspaceNotificationsProvider({ isAdmin, children }: { isAdmin:
     }
   }
 
-  const count = visibleJobs.length + (slow ? 1 : 0)
+  const count = visibleJobs.length + templateNotices.length + (slow ? 1 : 0)
   return (
     <NotificationsContext.Provider
       value={{
         slow,
         jobs: visibleJobs,
+        templateNotices,
         exams,
         events,
         activityLoaded,
@@ -232,17 +251,51 @@ export function WorkspaceNotificationsProvider({ isAdmin, children }: { isAdmin:
                 清空全部
               </Button>
             )}
-            {isAdmin && (
-              <Button size="small" icon={<ReloadOutlined />} loading={activityLoading} onClick={() => void loadActivity()}>
-                刷新
-              </Button>
-            )}
+            <Button size="small" icon={<ReloadOutlined />} loading={activityLoading} onClick={() => void loadActivity()}>
+              刷新
+            </Button>
           </Space>
         }
       >
         <Space direction="vertical" size={12} style={{ width: '100%' }}>
           {slow && <Alert type="warning" showIcon message="服务器响应较慢" description="正在自动降低状态查询频率，请稍候。" />}
           {isAdmin && <ErrorNotice error={activityError} retry={loadActivity} />}
+
+          {templateNotices.length > 0 && (
+            <div className="notification-card-list">
+              {templateNotices.map(item => (
+                <article key={`tpl-${item.id}`} className="notification-card is-running">
+                  <div className="notification-card-head">
+                    <Space size={6} wrap>
+                      <Tag color={item.kind === 'assigned_template' ? 'blue' : 'orange'} style={{ marginInlineEnd: 0 }}>
+                        {item.kind === 'assigned_template' ? (item.status === 'rejected' ? '退回修改' : '制卡任务') : '待审核'}
+                      </Tag>
+                      <strong className="notification-card-title">{item.title}</strong>
+                    </Space>
+                    {item.created_at && <span className="notification-card-time">{formatJobTime(item.created_at)}</span>}
+                  </div>
+                  {item.scope && <div className="notification-card-scope">{item.scope}</div>}
+                  {item.detail && (
+                    <Typography.Paragraph className="notification-card-detail" type="secondary" style={{ marginBottom: 0 }}>
+                      {item.detail}
+                    </Typography.Paragraph>
+                  )}
+                  <div className="notification-card-actions">
+                    <Button
+                      size="small"
+                      type="primary"
+                      onClick={() => {
+                        setOpen(false)
+                        window.location.hash = item.href
+                      }}
+                    >
+                      {item.action_label || '一键进入制卡'}
+                    </Button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
 
           {visibleJobs.length > 0 ? (
             <div className="notification-card-list">
@@ -306,7 +359,7 @@ export function WorkspaceNotificationsProvider({ isAdmin, children }: { isAdmin:
               })}
             </div>
           ) : (
-            !activityLoading && (
+            !activityLoading && templateNotices.length === 0 && (
               <Empty
                 image={Empty.PRESENTED_IMAGE_SIMPLE}
                 description={isAdmin ? '暂无待处理通知' : slow ? '当前仅服务慢响应提醒' : '服务连接正常，暂无待处理通知'}
@@ -321,8 +374,8 @@ export function WorkspaceNotificationsProvider({ isAdmin, children }: { isAdmin:
 }
 
 export function WorkspaceNotificationButton({ compact = false, onlyWhenActive = false }: { compact?: boolean; onlyWhenActive?: boolean }) {
-  const { slow, jobs, setOpen } = useWorkspaceNotifications()
-  const count = jobs.length + (slow ? 1 : 0)
+  const { slow, jobs, templateNotices, setOpen } = useWorkspaceNotifications()
+  const count = jobs.length + templateNotices.length + (slow ? 1 : 0)
   if (onlyWhenActive && count === 0) return null
   return (
     <Button

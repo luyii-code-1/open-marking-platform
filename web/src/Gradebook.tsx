@@ -348,7 +348,6 @@ function GradebookScope({ projectId, subjectId, gradeId, groupId }: Scope) {
                 items={[
                   { key: 'totals', label: groupId ? (metric === 'converted' ? '总分（赋分）' : '总分（裸分）') : '概览成绩' },
                   { key: 'items', label: '小题分' },
-                  { key: 'options', label: '选项分布' },
                 ]}
               />
               <Space wrap>
