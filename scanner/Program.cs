@@ -5,6 +5,7 @@ public static class Program
     [STAThread]
     public static int Main(string[] args)
     {
+        if(args.Length==2 && args[0]=="--market-plugin")return PluginMarket.RunPackage(args[1]);
         if(args.FirstOrDefault()=="--device-plugin")return DevicePlugin.Serve().GetAwaiter().GetResult();
         if(args.FirstOrDefault()=="--scan-bridge-self-test")
         {

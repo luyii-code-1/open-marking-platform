@@ -1,5 +1,5 @@
 const { pathToFileURL } = require('node:url')
-const methods = new Set(['state','connect','setDefaultServer','enterOffline','downloadProject','refreshCatalog','openProject','createBatch','clearRoom','choosePlugin','selectDriver','forgetPlugin','selectDevice','scanSettings','jpegEstimate','devices','start','stop','import','pair','upload','refreshBatch','sendForReview','retryPage','exclude','preview','roomReview','pageReview','correctAnswer','originalPage','onlinePage','offlinePage'])
+const methods = new Set(['state','connect','setDefaultServer','enterOffline','downloadProject','refreshCatalog','openProject','createBatch','clearRoom','marketRefresh','marketInstall','marketRemove','choosePlugin','selectDriver','forgetPlugin','selectDevice','scanSettings','jpegEstimate','devices','start','stop','import','pair','upload','refreshBatch','sendForReview','retryPage','exclude','preview','roomReview','pageReview','correctAnswer','originalPage','onlinePage','offlinePage'])
 const protocol = 'omp-scanner-4'
 function serverUrl(value) {
   const url = new URL(value)

@@ -1,4 +1,5 @@
 import { Collapse, Form, Radio, Select, Space, Typography } from 'antd'
+import { ScannerPluginMarket, type MarketCatalog } from './ScannerPluginMarket'
 import { Button } from './Button'
 import { ScannerJpegSettings } from './ScannerJpegSettings'
 import { isJpegQuality, type EstimateContext, type JpegQuality } from './scannerJpegEstimate'
@@ -13,6 +14,8 @@ type Props = {
 
 export function ScannerSettings({ state, locked, discovering, firstSide, manualSide, onFirstSide, onManualSide, active, estimateContext, action }: Props) {
   const prefs = state.device_preferences, driver = prefs?.driver || 'Twain'
+  const market: MarketCatalog | undefined = prefs?.market
+  const activePlugin = market?.plugins.find(p => p.hash === prefs?.plugin_id)
   const dpi = state.scan_settings?.dpi === 600 ? 600 : 300, color = state.scan_settings?.color || 'gray'
   const quality = state.scan_settings?.jpeg_quality
   function saveSettings(changes: { dpi?: number; color?: string; jpeg_quality?: JpegQuality }) {
@@ -32,6 +35,8 @@ export function ScannerSettings({ state, locked, discovering, firstSide, manualS
     {isJpegQuality(quality)
       ? <ScannerJpegSettings active={active} quality={quality} context={estimateContext} locked={locked} onChange={jpeg_quality => saveSettings({ jpeg_quality })} />
       : <Form.Item label="上传图像质量（JPEG）"><Typography.Text type="secondary">升级扫描客户端后，可选择 JPEG 质量并估算上传大小。</Typography.Text></Form.Item>}
+    {market && <ScannerPluginMarket catalog={market} activeHash={driver === 'market' ? prefs?.plugin_id : undefined}
+      legacyHi={driver === 'Hi5100S'} locked={locked} action={action} />}
     <Form.Item label="当前扫描仪">
       <Space direction="vertical" style={{ width: '100%' }}>
         <Select aria-label="选择扫描仪" placeholder="选择扫描仪" disabled={locked} value={prefs?.device?.id || undefined}
@@ -43,7 +48,8 @@ export function ScannerSettings({ state, locked, discovering, firstSide, manualS
     <Typography.Paragraph type="secondary">设置会自动保存在本机，下次打开继续使用。</Typography.Paragraph>
     <Collapse items={[{ key: 'advanced', label: '高级设置', children: <>
       <Form.Item label="扫描仪驱动"><Select aria-label="扫描仪驱动" value={driver} disabled={locked} onChange={driver => action('selectDriver', { driver })}
-        options={[{ value: 'Hi5100S', label: 'Hi-5100S（内置）' }, { value: 'Twain', label: 'TWAIN' }, { value: 'Wia', label: 'WIA' }, { value: 'Escl', label: 'eSCL' }, { value: 'external', label: '外部插件' }]} /></Form.Item>
+        options={[...(driver === 'market' ? [{ value: 'market', label: activePlugin?.name || '已选市场插件' }] : []),
+          ...(!market || driver === 'Hi5100S' ? [{ value: 'Hi5100S', label: 'Hi-5100S（内置）' }] : []), { value: 'Twain', label: 'TWAIN' }, { value: 'Wia', label: 'WIA' }, { value: 'Escl', label: 'eSCL' }, { value: 'external', label: '外部插件' }]} /></Form.Item>
       {driver === 'external' && <Form.Item label="扫描插件"><Space direction="vertical" style={{ width: '100%' }}>
         <Select aria-label="扫描插件" placeholder="选择插件" value={prefs?.plugin_id || undefined} disabled={locked}
           options={prefs?.plugins?.map((p: Row) => ({ value: p.id, label: p.name + (p.available ? '' : '（文件缺失）') }))} onChange={plugin_id => action('selectDriver', { driver, plugin_id })} />

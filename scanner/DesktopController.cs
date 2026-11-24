@@ -16,12 +16,14 @@ public sealed class DesktopController : IDisposable
     public const string Protocol="omp-scanner-4";
     private readonly LocalQueue _queue;
     private readonly RecognitionWorker _worker;
+    private readonly PluginMarket _market;
     private readonly bool _selfTest;
     private sealed record Plugin(string Id,string Path);
     private sealed record Preferences(string Driver,string? PluginId,List<Plugin> Plugins,JsonElement? Device);
     private Preferences _prefs = new("Twain",null,[],null);
     private string? Executable()
     {
+        if(_driver=="market")return _market.Resolve(_prefs.PluginId??"");
         if(_driver=="Hi5100S")return Path.Combine(AppContext.BaseDirectory,"Hi5100S.exe");
         if(_driver!="external")return null;
         var plugin=_prefs.Plugins.Find(p=>p.Id==_prefs.PluginId);
@@ -31,7 +33,10 @@ public sealed class DesktopController : IDisposable
     private void PersistDevices()=>Save(Path.Combine(_queue.Root,"device-plugins.json"),JsonSerializer.Serialize(_prefs));
     private void Switch(string driver,string? id)
     {
-        if(driver is not ("Twain" or "Wia" or "Escl" or "Hi5100S" or "external"))throw new ArgumentException("驱动接口无效");
+        if(driver is not ("Twain" or "Wia" or "Escl" or "Hi5100S" or "external" or "market"))throw new ArgumentException("驱动接口无效");
+        if(driver=="market")_market.KeepSelected(id??"");
+        if(driver=="external" && id!=null && !_prefs.Plugins.Any(p=>p.Id==id))throw new ArgumentException("插件未登记");
+        if(driver is not ("market" or "external"))id=null;
         if(driver==_driver && id==_prefs.PluginId)return;
         _driver=driver;
         _devices=[];
@@ -63,6 +68,7 @@ public sealed class DesktopController : IDisposable
     public DesktopController(LocalQueue? queue=null,RecognitionWorker? worker=null,bool selfTest=false)
     {
         _queue=queue??new LocalQueue();_worker=worker??new RecognitionWorker(_queue.Root);_selfTest=selfTest;
+        _market=new PluginMarket(_queue.Root);
         var path=Path.Combine(_queue.Root,"desktop-settings.json");
         if(File.Exists(path))
         {
@@ -144,7 +150,7 @@ public sealed class DesktopController : IDisposable
         }
         var projects=_packages.Values.Select(p=>new{id=Text(p.GetProperty("project"),"id"),name=Text(p.GetProperty("project"),"name"),exam_status=Text(p.GetProperty("project"),"exam_status","in_progress"),downloaded_at=Text(p,"downloaded_at")}).ToArray();
         var catalogPath=Path.Combine(_queue.Root,"workspaces",Partition,"catalog.json");
-        return new{device_preferences=new{driver=_driver,plugins=_prefs.Plugins.Select(p=>new{id=p.Id,name=Path.GetFileName(p.Path),available=File.Exists(p.Path)}),plugin_id=_prefs.PluginId,device=_prefs.Device,devices=_devices},review_edit=true,room_review=true,manual_room_upload=true,device_protocol=DevicePlugin.Protocol,scan_settings=CaptureSettingsView(),protocol=Protocol,server_url=_server,default_server_url=_defaultServer,storage_path=_queue.Root,servers=SavedServers,cached_servers=SavedServers.Where(HasOfflineProjects).ToArray(),session_open=_sessionOpen,online=_online,capturing=Capturing,processing=Processing,processing_remaining=Volatile.Read(ref _processingCount),syncing=_uploadGate.CurrentCount==0,message=_message,project_id=_project,
+        return new{device_preferences=new{market=_market.View(),driver=_driver,plugins=_prefs.Plugins.Select(p=>new{id=p.Id,name=Path.GetFileName(p.Path),available=File.Exists(p.Path)}),plugin_id=_prefs.PluginId,device=_prefs.Device,devices=_devices},review_edit=true,room_review=true,manual_room_upload=true,device_protocol=DevicePlugin.Protocol,scan_settings=CaptureSettingsView(),protocol=Protocol,server_url=_server,default_server_url=_defaultServer,storage_path=_queue.Root,servers=SavedServers,cached_servers=SavedServers.Where(HasOfflineProjects).ToArray(),session_open=_sessionOpen,online=_online,capturing=Capturing,processing=Processing,processing_remaining=Volatile.Read(ref _processingCount),syncing=_uploadGate.CurrentCount==0,message=_message,project_id=_project,
             projects,catalog=File.Exists(catalogPath)?Json(File.ReadAllText(catalogPath)):Json("{\"projects\":[]}"),
             package=_packages.TryGetValue(_project,out var package)?package:Json("null"),
             batches=batches.Select(b=>{
@@ -287,6 +293,18 @@ public sealed class DesktopController : IDisposable
                     throw new InvalidOperationException("请选择当前题卡组年级下的一个有效考场，并刷新项目配置。");
                 created.RoomTagsJson=JsonSerializer.Serialize(tags);
                 Bind(created,_project,selected);_queue.AddBatch(created);_queue.SaveDesktopBatch(created);return new{id=created.Id};
+            case "marketRefresh":
+                await _market.Fetch(null,_lifetime.Token);
+                return true;
+            case "marketInstall":
+                await _market.Fetch(Text(args,"hash"),_lifetime.Token);
+                return true;
+            case "marketRemove":
+                if(Capturing)throw new InvalidOperationException("请先停止采集");
+                var hash=Text(args,"hash");
+                if(_driver=="market" && _prefs.PluginId==hash)throw new InvalidOperationException("请先切换扫描插件。");
+                _market.Remove(hash);
+                return true;
             case "choosePlugin":
                 if(Capturing)throw new InvalidOperationException("请先停止采集");
                 var picker=new FileDialog{Filter="扫描设备插件|*.exe"};
@@ -300,9 +318,9 @@ public sealed class DesktopController : IDisposable
                 return new{name=Path.GetFileName(plugin.Path)};
             case "selectDriver":
                 if(Capturing)throw new InvalidOperationException("请先停止采集");
-                var key=Text(args,"plugin_id",_prefs.PluginId??"");
-                if(key.Length>0 && !_prefs.Plugins.Any(p=>p.Id==key))throw new ArgumentException("插件未登记");
-                Switch(Text(args,"driver"),key.Length==0?null:key);
+                var nextDriver=Text(args,"driver");
+                var key=Text(args,"plugin_id",nextDriver==_driver?_prefs.PluginId??"":"");
+                Switch(nextDriver,key.Length==0?null:key);
                 return true;
             case "forgetPlugin":
                 if(Capturing)throw new InvalidOperationException("请先停止采集");

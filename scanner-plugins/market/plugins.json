@@ -1,0 +1,16 @@
+[
+  {
+    "id": "hi5100s",
+    "name": "Hi-5100S",
+    "project": "Hi5100S",
+    "version": "1.0.0",
+    "description": "TWAIN / WIA，支持输稿器和平板。"
+  },
+  {
+    "id": "canon-mf752cdw-ii",
+    "name": "Canon imageCLASS MF752Cdw II",
+    "project": "CanonMF752CdwII",
+    "version": "1.0.0",
+    "description": "A4 输稿器自动双面、平板单面，使用佳能 ScanGear MF 驱动。"
+  }
+]

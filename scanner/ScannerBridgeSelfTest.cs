@@ -126,6 +126,7 @@ internal static class ScannerBridgeSelfTest
             Check(queue.LatestJpegSample(second,"project","group","template",batch.Id)==null,"Another server's sample leaked across scopes.");
         }
         finally{Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();System.IO.Directory.Delete(settingsRoot,true);}
+        await PluginMarketSelfTest.Run();
         int? count=null;
         if(discover){using var scanner=new ScannerService();count=(await scanner.Devices(Driver.Twain)).Count;}
         Console.WriteLine(JsonSerializer.Serialize(new{worker_arch="x86",dsm="New",transfer="Native",dpi=300,bit_depth="8-bit grayscale",discovery_executed=discover,devices=count}));

@@ -44,9 +44,11 @@ internal static class DevicePlugin
 
     public static async Task Run(string? executable,object request,Func<JsonElement,Task> handle,CancellationToken cancel)
     {
-        var info=new ProcessStartInfo(executable??Environment.ProcessPath!){UseShellExecute=false,RedirectStandardInput=true,RedirectStandardOutput=true,
+        var marketPackage = executable?.EndsWith(".b64", StringComparison.OrdinalIgnoreCase) == true;
+        var info=new ProcessStartInfo(marketPackage ? Environment.ProcessPath! : executable??Environment.ProcessPath!){UseShellExecute=false,RedirectStandardInput=true,RedirectStandardOutput=true,
             StandardInputEncoding=new UTF8Encoding(false),StandardOutputEncoding=Encoding.UTF8,CreateNoWindow=true};
-        if(executable==null)info.ArgumentList.Add("--device-plugin");
+        if(marketPackage){info.ArgumentList.Add("--market-plugin");info.ArgumentList.Add(executable!);}
+        else if(executable==null)info.ArgumentList.Add("--device-plugin");
         using var process=Process.Start(info)??throw new IOException("设备插件启动失败");
         void Stop(){try{if(!process.HasExited)process.Kill(true);}catch(InvalidOperationException){}}
         using var registration=cancel.Register(Stop);

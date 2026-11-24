@@ -2,7 +2,7 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
-    <Version>0.1.11</Version>
+    <Version>0.1.12</Version>
     <PackageLicenseExpression>GPL-3.0-only</PackageLicenseExpression>
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
@@ -25,6 +25,9 @@
     <PackageReference Remove="Microsoft.Web.WebView2" />
   </ItemGroup>
   <ItemGroup>
+    <EmbeddedResource Include="../scanner-plugins/market/public-key.txt" LogicalName="OMP.MarketPublicKey" />
+    <Content Include="../scanner-plugins/market/catalog.json" Link="plugin-market/catalog.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="../scanner-plugins/market/packages/*.b64" Link="plugin-market/packages/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="third-party-licenses\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\web\dist\**\*" Link="ui\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
