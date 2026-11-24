@@ -1,6 +1,7 @@
 """Classroom paper discussion using the published paper and its final scoring items."""
 from collections import defaultdict
 from fastapi import APIRouter, Depends, HTTPException
+from .analysis import rounded
 from .db import connect, find, get, objects
 from .dependencies import require, user
 from .merged_questions import label
@@ -13,6 +14,19 @@ router=APIRouter(prefix='/api/v1/analysis')
 
 def grade_key(cls):
     return ('id',cls['grade_id']) if cls.get('grade_id') else ('legacy',cls.get('grade') or '')
+
+
+def score_ratio(values,points):
+    if not values or not points or points<=0:return None
+    return sum(values)/(len(values)*points)
+
+
+def difficulty_tier(ratio):
+    if ratio is None:return None
+    if ratio<0.60:return 'difficult'
+    if ratio<0.70:return 'hard'
+    if ratio<0.85:return 'medium'
+    return 'easy'
 
 
 def review_holds(db,submissions):
@@ -60,9 +74,12 @@ def score_bands(values,points):
     return bins
 
 
-def grade_comparison(rows,questions,holds,classes):
+def grade_comparison(rows,questions,holds,classes,full_score=None):
     scores=defaultdict(lambda:defaultdict(list))
     grade_scores=defaultdict(list)
+    points_by_key={q['id']:q['points'] for q in questions}
+    if full_score is None:full_score=sum(q['points'] for q in questions)
+    points_by_key['total']=full_score
     for row in rows:
         cls_scores=scores[row['class_id']]
         if row['status'] in ('absent','unscanned'):continue
@@ -73,13 +90,17 @@ def grade_comparison(rows,questions,holds,classes):
             if value is not None:
                 grade_scores[key].append(value)
                 cls_scores[key].append(value)
+    grade_ratios={k:score_ratio(grade_scores.get(k),points_by_key.get(k)) for k in points_by_key}
+    score_rates={k:(rounded(r*100) if r is not None else None) for k,r in grade_ratios.items()}
     # The response contains only means for comparison classes, with no personal or count fields.
-    return {'averages':{k:mean(v) for k,v in grade_scores.items()},
-            'classes':[{'name':classes[cid]['name'],'averages':{k:mean(v) for k,v in metrics.items()}}
-                       for cid,metrics in scores.items()]}
+    chart={'averages':{k:mean(v) for k,v in grade_scores.items()},
+           'score_rates':score_rates,
+           'classes':[{'name':classes[cid]['name'],'averages':{k:mean(v) for k,v in metrics.items()}}
+                      for cid,metrics in scores.items()]}
+    return chart,grade_ratios
 
 
-def class_questions(db,questions,rows,submissions,template,holds):
+def class_questions(db,questions,rows,submissions,template,holds,grade_averages=None,grade_ratios=None):
     versions={template['id']:{label(q):q for q in questions}}
     read={}
     for row in rows:
@@ -92,7 +113,7 @@ def class_questions(db,questions,rows,submissions,template,holds):
         read[row['student_id']]=(versions[tid],options)
     output=[]
     for q in questions:
-        title=label(q);values=[];correct=0;graded=0;respondents=0
+        title=label(q);values=[];correct=0;graded=0;respondents=0;incomparable=0
         buckets={c:[] for c in 'ABCDEFG'[:q.get('options',4)]}
         buckets['blank']=[]
         for row in rows:
@@ -101,8 +122,12 @@ def class_questions(db,questions,rows,submissions,template,holds):
             version,selections=read[sid]
             actual=version.get(title)
             if not actual or actual['type']!=q['type'] or on_hold(actual,holds.get(sid,set())):continue
-            score=row['scores'].get(title)
-            if score is not None:values.append(score)
+            comparable_points=actual.get('points')==q.get('points')
+            if not comparable_points:
+                incomparable+=1
+            else:
+                score=row['scores'].get(title)
+                if score is not None:values.append(score)
             if q['type']=='subjective':continue
             selected=selections.get(actual['id'],set())
             respondents+=1
@@ -111,7 +136,19 @@ def class_questions(db,questions,rows,submissions,template,holds):
             if actual.get('answer'):
                 graded+=1
                 correct+=selected==set(actual['answer'])
-        item={'id':q['id'],'number':title,'type':q['type'],'points':q['points'],'average':mean(values)}
+        ratio=score_ratio(values,q['points'])
+        grade_ratio=(grade_ratios or {}).get(q['id'])
+        item={
+            'id':q['id'],'number':title,'type':q['type'],'points':q['points'],'average':mean(values),
+            'scored_count':len(values),
+            'score_rate':rounded(ratio*100) if ratio is not None else None,
+            'raw_score_rate':ratio*100 if ratio is not None else None,
+            'difficulty':difficulty_tier(ratio),
+            'grade_average':(grade_averages or {}).get(q['id']),
+            'grade_score_rate':rounded(grade_ratio*100) if grade_ratio is not None else None,
+            'rate_diff':rounded((ratio-grade_ratio)*100) if (ratio is not None and grade_ratio is not None) else None,
+            'incomparable_count':incomparable,
+        }
         if q['type']=='subjective':
             item.update(count=len(values),bands=score_bands(values,q['points']))
         else:
@@ -143,10 +180,12 @@ def paper_lesson(group_id:str,class_id:str,current=Depends(user)):
         if not own:raise HTTPException(404,'该班无此题卡的成绩记录')
         template=require(db,group['template_id'],'templates')
         questions=sorted(template['questions'],key=lambda q:q['number'])
+        full_score=sum(q['points'] for q in questions)
         submissions=find(db,'submissions',group_id=group_id)
         holds=review_holds(db,submissions)
-        chart=grade_comparison(rows,questions,holds,classes)
+        chart,grade_ratios=grade_comparison(rows,questions,holds,classes,full_score=full_score)
         chart['grade_wide']=all_classes
-        return {'group_id':group_id,'class_id':class_id,'full_score':sum(q['points'] for q in questions),
-                'questions':class_questions(db,questions,own,{s['student_id']:s for s in submissions},template,holds),
-                'comparison':chart}
+        items=class_questions(db,questions,own,{s['student_id']:s for s in submissions},template,holds,chart['averages'],grade_ratios)
+        weak_order=[item['id'] for _,item in sorted(enumerate(items),key=lambda pair:(pair[1]['raw_score_rate'] is None,pair[1]['raw_score_rate'] if pair[1]['raw_score_rate'] is not None else 0.0,pair[0]))]
+        return {'group_id':group_id,'class_id':class_id,'full_score':full_score,
+                'questions':items,'weak_order':weak_order,'comparison':chart}

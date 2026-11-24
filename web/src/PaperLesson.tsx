@@ -1,116 +1,400 @@
-import {useState} from 'react'
-import {Alert,Empty,Select,Spin,Tabs} from 'antd'
-import {LeftOutlined,RightOutlined} from '@ant-design/icons'
-import {Button} from './Button'
-import {useResource,type Row} from './api'
+import { useEffect, useMemo, useState } from 'react'
+import { Alert, Empty, Input, Segmented, Select, Space, Spin, Tabs } from 'antd'
+import {
+  ArrowLeftOutlined,
+  BarChartOutlined,
+  EyeInvisibleOutlined,
+  EyeOutlined,
+  LeftOutlined,
+  RightOutlined,
+  SearchOutlined,
+} from '@ant-design/icons'
+import { Button } from './Button'
+import { ClassChart, DifficultyTag, QuestionResult, type Comparison, type Question } from './LessonStatistics'
+import { gradeColor } from './SchoolTags'
+import { TagPicker } from './TagPicker'
+import { useResource, type Row } from './api'
 import './paper-lesson.css'
 
-export type LessonScope={project?:string;grade?:string;cls?:string;card?:string}
-type Question={
-  id:string;number:string;type:string;points:number;average:number|null;count:number
-  bands?:{lower:number;upper:number;inclusive:boolean;count:number}[]
-  answer?:string[];options?:Record<string,string[]>;correct?:number;graded?:number;correct_rate?:number|null
-}
-type Averages=Record<string,number|undefined>
-type Comparison={grade_wide:boolean;averages:Averages;classes:{name:string;averages:Averages}[]}
-type Lesson={group_id:string;class_id:string;full_score:number;questions:Question[];comparison:Comparison}
-const order=(a:string,b:string)=>a.localeCompare(b,'zh-CN',{numeric:true})
-const gradeKey=(cls:Row)=>cls.grade_id?'id:'+cls.grade_id:'legacy:'+(cls.grade||'')
-const gradeLabel=(cls:Row)=>cls.grade||'未设置年级'
-const format=(value:number|null|undefined)=>value==null?'—':String(value)
+export type LessonScope = { project?: string; grade?: string; cls?: string; card?: string }
 
-function QuestionResult({q}:{q:Question}){
-  if(q.type==='subjective')return <div>
-    <p className="lesson-metric">班级均分 <strong>{format(q.average)}</strong> 分 <span>已评分 {q.count} 人</span></p>
-    <table className="lesson-bands"><thead><tr><th>得分区间</th><th>人数</th><th>占比</th></tr></thead>
-      <tbody>{q.bands?.map(b=><tr key={b.lower}><td>{b.lower} ≤ 得分 {b.inclusive?'≤':'<'} {b.upper}</td><td>{b.count}</td><td>{q.count?(100*b.count/q.count).toFixed(1)+'%':'—'}</td></tr>)}</tbody>
-    </table></div>
-  return <div>
-    <p className="lesson-metric">正确率 <strong className="lesson-rate">{q.correct_rate==null?'—':q.correct_rate+'%'}</strong>
-      <span>完全答对 {q.correct} / {q.graded} 人</span><span>班级均分 {format(q.average)} 分</span></p>
-    <p>标准答案 <b>{q.answer?.join('、')||'待录入'}</b>　·　有效实考 {q.count} 人</p>
-    <div className="lesson-options">{Object.entries(q.options||{}).map(([option,names])=><details key={option}>
-      <summary><b>{option==='blank'?'留空':option}</b><span>{names.length} 人</span><span>{q.count?(100*names.length/q.count).toFixed(1)+'%':'—'}</span></summary>
-      <div>{names.length?[...names].sort(order).join('、'):'无人选择'}</div>
-    </details>)}</div>
-    <small>留空计入有效实考人数。{q.type==='multiple'?'多选按全部选项一致计为答对，选中多个选项的学生列入各对应选项。':''}</small>
-  </div>
+type Lesson = {
+  group_id: string
+  class_id: string
+  full_score: number
+  questions: Question[]
+  weak_order?: string[]
+  comparison: Comparison
 }
 
-function ClassChart({comparison,metric,maximum}:{comparison:Comparison;metric:string;maximum:number}){
-  const avg=comparison.averages[metric]
-  const rows=[...comparison.classes].sort((a,b)=>order(a.name,b.name))
-  const ceiling=Math.max(1,maximum,...rows.map(r=>r.averages[metric]??0))
-  const height=(n:number)=>Math.max(0,Math.min(100,n*100/ceiling))+'%'
-  return <section className="lesson-chart" aria-label="同题卡班级均分对比">
-    <p className="lesson-metric">{comparison.grade_wide?'年级均分':'可见班级均分'} <strong>{format(avg)}</strong> 分 <span>按有有效得分的学生人数加权</span></p>
-    <div className="lesson-chart-scroll" tabIndex={0} aria-label="各班均分，横向滚动">
-      <div className="lesson-plot" style={{minWidth:Math.max(240,rows.length*78)}}>
-        {avg!=null&&<div className="lesson-mean-line" style={{bottom:height(avg)}}/>}
-        {rows.map((row,index)=>{
-          const v=row.averages[metric]
-          return <div className="lesson-chart-column" key={index} aria-label={row.name+'，'+(v==null?'暂无成绩':v+' 分')}>
-            <div className="lesson-bar" style={{height:v==null?0:height(v)}}><b>{format(v)}</b></div>
-            <div className="lesson-bar-label" title={row.name}>{row.name}</div>
-          </div>
-        })}
-      </div>
+type SortMode = 'paper' | 'weak'
+
+const order = (a: string, b: string) => a.localeCompare(b, 'zh-CN', { numeric: true })
+const gradeKey = (cls: Row) => (cls.grade_id ? `id:${cls.grade_id}` : `legacy:${cls.grade || ''}`)
+const gradeLabel = (cls: Row) => cls.grade || '未设置年级'
+
+function LessonContent({
+  card,
+  cls,
+  onCatalogStale,
+}: {
+  card: Row
+  cls: Row
+  onCatalogStale: () => void
+}) {
+  const params = new URLSearchParams({ group_id: card.id, class_id: cls.id })
+  const data = useResource<Lesson | null>('/analysis/paper-lesson?' + params, null)
+  const [sort, setSort] = useState<SortMode>('paper')
+  const [activeId, setActiveId] = useState('')
+  const [tab, setTab] = useState<'questions' | 'compare'>('questions')
+  const [metric, setMetric] = useState('total')
+  const [classroom, setClassroom] = useState(false)
+  const [revealed, setRevealed] = useState(false)
+  const [showDist, setShowDist] = useState(true)
+  const [searchTerm, setSearchTerm] = useState('')
+
+  const stale = !!data.data && (data.data.group_id !== card.id || data.data.class_id !== cls.id)
+  const questions = !stale && data.data ? data.data.questions : []
+  const weakOrder = !stale && data.data ? data.data.weak_order : undefined
+
+  const orderedQuestions = useMemo(() => {
+    if (!questions.length) return []
+    if (sort === 'paper') return questions
+    if (weakOrder?.length) {
+      const byId = new Map(questions.map(q => [q.id, q]))
+      const list = weakOrder.map(id => byId.get(id)).filter((q): q is Question => !!q)
+      if (list.length === questions.length) return list
+    }
+    return [...questions]
+      .map((q, idx) => ({ q, idx }))
+      .sort((a, b) => {
+        const ra = a.q.raw_score_rate ?? a.q.score_rate
+        const rb = b.q.raw_score_rate ?? b.q.score_rate
+        if (ra == null && rb == null) return a.idx - b.idx
+        if (ra == null) return 1
+        if (rb == null) return -1
+        return ra - rb || a.idx - b.idx
+      })
+      .map(item => item.q)
+  }, [questions, sort, weakOrder])
+
+  useEffect(() => {
+    if (orderedQuestions.length && !orderedQuestions.some(q => q.id === activeId)) {
+      setActiveId(orderedQuestions[0].id)
+    }
+  }, [orderedQuestions, activeId])
+
+  if (data.error) {
+    return (
+      <Alert
+        type="error"
+        showIcon
+        message={data.error}
+        action={
+          <Space>
+            <Button onClick={data.reload}>重试</Button>
+            <Button type="primary" onClick={onCatalogStale}>
+              刷新可讲评范围
+            </Button>
+          </Space>
+        }
+      />
+    )
+  }
+  if (!data.data || stale) return <Spin />
+  if (!orderedQuestions.length) return <Empty description="题卡暂无评分项" />
+
+  const current = orderedQuestions.find(q => q.id === activeId) || orderedQuestions[0]
+  const pos = Math.max(0, orderedQuestions.findIndex(q => q.id === current.id))
+  const { comparison, full_score } = data.data
+
+  const filteredNav = searchTerm.trim()
+    ? orderedQuestions.filter(q => String(q.number).toLowerCase().includes(searchTerm.trim().toLowerCase()))
+    : orderedQuestions
+
+  function selectQuestion(id: string) {
+    setActiveId(id)
+    setTab('questions')
+    setRevealed(false)
+  }
+
+  function toggleClassroom() {
+    setClassroom(prev => {
+      const next = !prev
+      setRevealed(false)
+      setShowDist(!next)
+      if (next) setTab('questions')
+      return next
+    })
+  }
+
+  return (
+    <div className="lesson-workbench">
+      <aside className="lesson-sidebar" aria-label="全卷题目导航">
+        <div className="lesson-sidebar-head">
+          <h3>全卷题目</h3>
+          <span>{orderedQuestions.length} 项</span>
+        </div>
+        <Segmented<SortMode>
+          block
+          size="small"
+          value={sort}
+          onChange={next => {
+            setSort(next)
+            setActiveId(current.id)
+          }}
+          options={[
+            { value: 'paper', label: '原卷顺序' },
+            { value: 'weak', label: '低得分率优先' },
+          ]}
+        />
+        <Input
+          size="small"
+          allowClear
+          prefix={<SearchOutlined />}
+          placeholder="按题号定位"
+          aria-label="按题号定位"
+          value={searchTerm}
+          onChange={e => setSearchTerm(e.target.value)}
+        />
+        <nav className="lesson-question-list">
+          {filteredNav.map(q => (
+            <button
+              type="button"
+              key={q.id}
+              aria-current={q.id === current.id ? 'true' : undefined}
+              className="lesson-q-btn"
+              onClick={() => selectQuestion(q.id)}
+            >
+              <span className="lesson-q-num">第 {q.number} 题</span>
+              <span className="lesson-q-type">{q.type === 'subjective' ? '主观' : q.type === 'multiple' ? '多选' : '单选'}</span>
+              <span className="lesson-q-rate">{q.score_rate != null ? `${q.score_rate}%` : '—'}</span>
+              <span className={`lesson-diff-dot is-${q.difficulty || 'none'}`} aria-hidden="true" />
+            </button>
+          ))}
+          {!filteredNav.length && <div className="lesson-nav-empty">无匹配题号</div>}
+        </nav>
+        <p className="lesson-sidebar-foot">百分比为本班单题得分率（困难 &lt;60%、较难 &lt;70%、一般 &lt;85%）</p>
+      </aside>
+
+      <article className="lesson-main">
+        <div className="lesson-main-head">
+          <Space wrap size={8} align="center">
+            <h2 className="lesson-q-heading">第 {current.number} 题</h2>
+            <span className="lesson-q-meta">
+              {current.type === 'subjective' ? '主观题' : current.type === 'multiple' ? '多选题' : '单选题'} · 满分 {current.points} 分
+            </span>
+            <DifficultyTag difficulty={current.difficulty} />
+          </Space>
+          <Space wrap size={8}>
+            <Button
+              type={classroom ? 'primary' : 'default'}
+              icon={classroom ? <EyeInvisibleOutlined /> : <EyeOutlined />}
+              onClick={toggleClassroom}
+            >
+              {classroom ? '退出课堂讲解' : '课堂讲解'}
+            </Button>
+            {!classroom &&
+              (tab === 'questions' ? (
+                <Button
+                  icon={<BarChartOutlined />}
+                  onClick={() => {
+                    setMetric(current.id)
+                    setTab('compare')
+                  }}
+                >
+                  对比本题均分
+                </Button>
+              ) : (
+                <Button onClick={() => setTab('questions')}>返回逐题讲评</Button>
+              ))}
+          </Space>
+        </div>
+
+        {classroom ? (
+          <>
+            <div className="lesson-classroom-bar">
+              <span>课堂讲解模式 · 答案默认隐藏，换题或切班后自动复位</span>
+              <Space wrap size={8}>
+                <Button
+                  type="primary"
+                  icon={revealed ? <EyeInvisibleOutlined /> : <EyeOutlined />}
+                  onClick={() => setRevealed(v => !v)}
+                >
+                  {revealed ? '收起答案' : '揭示答案'}
+                </Button>
+                <Button onClick={() => setShowDist(v => !v)}>{showDist ? '隐藏作答分布' : '显示作答分布'}</Button>
+              </Space>
+            </div>
+            <QuestionResult
+              key={current.id}
+              q={current}
+              gradeWide={comparison.grade_wide}
+              hideAnswer={!revealed}
+              showDistribution={showDist}
+            />
+          </>
+        ) : (
+          <>
+            <Tabs
+              activeKey={tab}
+              onChange={key => setTab(key as 'questions' | 'compare')}
+              items={[
+                { key: 'questions', label: '本班作答', children: null },
+                { key: 'compare', label: '跨班均分', children: null },
+              ]}
+            />
+            {tab === 'questions' ? (
+              <QuestionResult key={current.id} q={current} gradeWide={comparison.grade_wide} />
+            ) : (
+              <div>
+                <Space wrap style={{ marginBottom: 12 }}>
+                  <span>对比指标</span>
+                  <Select
+                    aria-label="均分对比项目"
+                    showSearch
+                    optionFilterProp="label"
+                    style={{ minWidth: 200 }}
+                    value={metric}
+                    options={[
+                      { value: 'total', label: '整卷原始总分' },
+                      ...orderedQuestions.map(v => ({ value: v.id, label: `第 ${v.number} 题` })),
+                    ]}
+                    onChange={setMetric}
+                  />
+                </Space>
+                <ClassChart
+                  comparison={comparison}
+                  metric={metric}
+                  maximum={questions.find(v => v.id === metric)?.points ?? full_score}
+                  activeClassName={cls.name}
+                />
+              </div>
+            )}
+          </>
+        )}
+
+        <footer className="lesson-footer">
+          <Button icon={<LeftOutlined />} disabled={pos <= 0} onClick={() => selectQuestion(orderedQuestions[pos - 1].id)}>
+            上一题
+          </Button>
+          <span>
+            {pos + 1} / {orderedQuestions.length} 个评分项{sort === 'weak' ? ' · 按低得分率优先' : ''}
+          </span>
+          <Button
+            icon={<RightOutlined />}
+            iconPosition="end"
+            disabled={pos >= orderedQuestions.length - 1}
+            onClick={() => selectQuestion(orderedQuestions[pos + 1].id)}
+          >
+            下一题
+          </Button>
+        </footer>
+      </article>
     </div>
-  </section>
+  )
 }
 
-function LessonContent({card,cls}:{card:Row;cls:Row}){
-  const params=new URLSearchParams({group_id:card.id,class_id:cls.id})
-  const data=useResource<Lesson|null>('/analysis/paper-lesson?'+params,null)
-  const [tab,setTab]=useState('questions'),[index,setIndex]=useState(0),[metric,setMetric]=useState('total')
-  if(data.error)return <Alert type="error" message={data.error} action={<Button onClick={data.reload}>重试</Button>}/>
-  if(!data.data)return <Spin/>
-  const {questions,comparison,full_score}=data.data
-  if(!questions.length)return <Empty description="题卡暂无评分项"/>
-  const q=questions[Math.min(index,questions.length-1)]
-  const options=questions.map((v,i)=>({value:i,label:'第 '+v.number+' 题'}))
-  return <section className="class-report-panel">
-    <Tabs activeKey={tab} onChange={setTab} items={[{key:'questions',label:'逐题讲评'},{key:'compare',label:'跨班均分'}]}/>
-    {tab==='questions'?<>
-      <div className="lesson-question-nav">
-        <Button aria-label="上一题" icon={<LeftOutlined/>} disabled={index===0} onClick={()=>setIndex(index-1)}/>
-        <Select aria-label="讲评题号" showSearch optionFilterProp="label" value={index} options={options} onChange={setIndex}/>
-        <Button aria-label="下一题" icon={<RightOutlined/>} disabled={index>=questions.length-1} onClick={()=>setIndex(index+1)}/>
-        <span>{q.type==='subjective'?'主观题':q.type==='multiple'?'多选题':'单选题'} · 满分 {q.points} 分</span>
-        <Button type="link" onClick={()=>{setMetric(q.id);setTab('compare')}}>对比本题均分</Button>
+export function PaperLesson({
+  initial,
+  onBack,
+}: {
+  initial: LessonScope
+  onBack?: () => void
+}) {
+  const catalog = useResource<{ projects: Row[] }>('/analysis/class-catalog', { projects: [] })
+  const [choice, setChoice] = useState(initial)
+  useEffect(() => {
+    setChoice(initial)
+  }, [initial.project, initial.grade, initial.cls, initial.card])
+
+  if (catalog.error) return <Alert type="error" message={catalog.error} action={<Button onClick={catalog.reload}>重试</Button>} />
+  if (!catalog.loaded) return <Spin />
+
+  const projects = catalog.data.projects.filter(p => p.cards.some((c: Row) => c.published && c.class_ids.length))
+  const project = projects.find(p => p.id === choice.project) || projects[0]
+  if (!project) {
+    return (
+      <Empty description="暂无可讲评的已发布题卡">
+        {onBack && <Button onClick={onBack}>返回班级成绩</Button>}
+      </Empty>
+    )
+  }
+
+  const published: Row[] = project.cards.filter((c: Row) => c.published)
+  const classes: Row[] = project.classes.filter((c: Row) => published.some(card => card.class_ids.includes(c.id)))
+  const grades = new Map(classes.map(c => [gradeKey(c), gradeLabel(c)]))
+  const requested = classes.find(c => c.id === choice.cls)
+  const grade = choice.grade && grades.has(choice.grade) ? choice.grade : gradeKey(requested || classes[0])
+  const gradeClasses = classes.filter(c => gradeKey(c) === grade).sort((a, b) => order(a.name, b.name))
+  const cls = gradeClasses.find(c => c.id === choice.cls) || gradeClasses[0]
+  const cards = published.filter(c => c.class_ids.includes(cls.id))
+  const card = cards.find(c => c.id === choice.card) || cards[0]
+
+  return (
+    <section className="class-results">
+      <div className="lesson-header-bar">
+        {onBack && (
+          <Button icon={<ArrowLeftOutlined />} onClick={onBack}>
+            返回班级成绩
+          </Button>
+        )}
+        <div className="lesson-selectors">
+          <label>
+            考试
+            <Select
+              aria-label="讲评考试"
+              showSearch
+              optionFilterProp="label"
+              value={project.id}
+              options={projects.map(p => ({ label: p.name, value: p.id }))}
+              onChange={id => setChoice({ project: id })}
+            />
+          </label>
+          <label>
+            年级
+            {grades.size <= 8 ? (
+              <TagPicker
+                compact
+                aria-label="讲评年级标签"
+                value={grade}
+                options={[...grades].map(([value, label]) => ({ label, value, color: gradeColor(label) }))}
+                onChange={g => g && setChoice({ project: project.id, grade: g })}
+              />
+            ) : (
+              <Select
+                aria-label="讲评年级标签"
+                value={grade}
+                options={[...grades].map(([value, label]) => ({ label, value }))}
+                onChange={g => setChoice({ project: project.id, grade: g })}
+              />
+            )}
+          </label>
+          <label>
+            班级
+            <Select
+              aria-label="讲评班级"
+              showSearch
+              optionFilterProp="label"
+              value={cls.id}
+              options={gradeClasses.map(c => ({ label: c.name, value: c.id }))}
+              onChange={id => setChoice({ project: project.id, grade, cls: id, card: card?.id })}
+            />
+          </label>
+          <label>
+            科目题卡
+            <Select
+              aria-label="讲评题卡"
+              showSearch
+              optionFilterProp="label"
+              value={card?.id}
+              options={cards.map(c => ({ label: `${c.subject} · ${c.name}`, value: c.id }))}
+              onChange={id => setChoice({ project: project.id, grade, cls: cls.id, card: id })}
+            />
+          </label>
+        </div>
       </div>
-      <QuestionResult key={q.id} q={q}/>
-    </>:<>
-      <Select aria-label="均分对比项目" showSearch optionFilterProp="label" value={metric} options={[{value:'total',label:'整卷原始总分'},...questions.map(v=>({value:v.id,label:'第 '+v.number+' 题'}))]} onChange={setMetric}/>
-      <ClassChart comparison={comparison} metric={metric} maximum={questions.find(v=>v.id===metric)?.points??full_score}/>
-    </>}
-  </section>
-}
-
-export function PaperLesson({initial}:{initial:LessonScope}){
-  const catalog=useResource<{projects:Row[]}>('/analysis/class-catalog',{projects:[]})
-  const [choice,setChoice]=useState(initial)
-  if(catalog.error)return <Alert type="error" message={catalog.error} action={<Button onClick={catalog.reload}>重试</Button>}/>
-  if(!catalog.loaded)return <Spin/>
-  const projects=catalog.data.projects.filter(p=>p.cards.some((c:Row)=>c.published&&c.class_ids.length))
-  const project=projects.find(p=>p.id===choice.project)||projects[0]
-  if(!project)return <Empty description="暂无可讲评的已发布题卡"/>
-  const published:Row[]=project.cards.filter((c:Row)=>c.published)
-  const classes:Row[]=project.classes.filter((c:Row)=>published.some(card=>card.class_ids.includes(c.id)))
-  const grades=new Map(classes.map(c=>[gradeKey(c),gradeLabel(c)]))
-  const requested=classes.find(c=>c.id===choice.cls)
-  const grade=choice.grade&&grades.has(choice.grade)?choice.grade:gradeKey(requested||classes[0])
-  const gradeClasses=classes.filter(c=>gradeKey(c)===grade).sort((a,b)=>order(a.name,b.name))
-  const cls=gradeClasses.find(c=>c.id===choice.cls)||gradeClasses[0]
-  const cards=published.filter(c=>c.class_ids.includes(cls.id))
-  const card=cards.find(c=>c.id===choice.card)||cards[0]
-  return <section className="class-results">
-    <div className="lesson-selectors">
-      <label>考试<Select aria-label="讲评考试" showSearch optionFilterProp="label" value={project.id} options={projects.map(p=>({label:p.name,value:p.id}))} onChange={id=>setChoice({project:id})}/></label>
-      <label>年级<Select aria-label="讲评年级标签" value={grade} options={[...grades].map(([value,label])=>({label,value}))} onChange={g=>setChoice({project:project.id,grade:g})}/></label>
-      <label>班级<Select aria-label="讲评班级" showSearch optionFilterProp="label" value={cls.id} options={gradeClasses.map(c=>({label:c.name,value:c.id}))} onChange={id=>setChoice({project:project.id,grade,cls:id,card:card?.id})}/></label>
-      <label>科目题卡<Select aria-label="讲评题卡" showSearch optionFilterProp="label" value={card?.id} options={cards.map(c=>({label:c.subject+' · '+c.name,value:c.id}))} onChange={id=>setChoice({project:project.id,grade,cls:cls.id,card:id})}/></label>
-    </div>
-    {card&&<LessonContent key={card.id+':'+cls.id} card={card} cls={cls}/>}
-  </section>
+      {card && <LessonContent key={`${card.id}:${cls.id}`} card={card} cls={cls} onCatalogStale={() => void catalog.reload()} />}
+    </section>
+  )
 }

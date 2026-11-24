@@ -1,6 +1,6 @@
 import {useEffect,useState} from 'react'
 import {Alert,Drawer,Empty,Input,Select,Space,Spin,Tag,Typography} from 'antd'
-import {ArrowLeftOutlined} from '@ant-design/icons'
+import {ArrowLeftOutlined,ReadOutlined} from '@ant-design/icons'
 import {Button} from './Button'
 import {Table} from './DataTable'
 import {useResource,type Row} from './api'
@@ -64,10 +64,11 @@ function ClassTotals({project,cls,cards,onCard}:{project:Row;cls:Row;cards:Row[]
   </section>
 }
 
-export function ClassResults({admin,projectId,groupId,initialProject,onProjectChange,onCardChange,onLesson}:{onLesson?:(scope:LessonScope)=>void;admin:boolean;projectId?:string;groupId?:string;initialProject?:string;onProjectChange?:(id:string)=>void;onCardChange?:(id:string)=>void}){
+export function ClassResults({admin,projectId,groupId,initialProject,refreshKey,onProjectChange,onCardChange,onLesson}:{onLesson?:(scope:LessonScope)=>void;admin:boolean;projectId?:string;groupId?:string;initialProject?:string;refreshKey?:number;onProjectChange?:(id:string)=>void;onCardChange?:(id:string)=>void}){
   const catalog=useResource<{projects:Row[]}>('/analysis/class-catalog',{projects:[]})
   const [choice,setChoice]=useState(initialProject||''),[classId,setClass]=useState(''),[cardId,setCard]=useState(''),[managing,setManaging]=useState(false)
   useEffect(()=>{if(initialProject&&initialProject!==choice)setChoice(initialProject)},[initialProject])
+  useEffect(()=>{if(refreshKey)void catalog.reload()},[refreshKey])
   const projects=catalog.data.projects
   const project=projectId?projects.find(p=>p.id===projectId):groupId?projects.find(p=>p.cards.some((g:Row)=>g.id===groupId)):projects.find(p=>p.id===choice)||projects[0]
   const fixed=groupId?project?.cards.find((c:Row)=>c.id===groupId):undefined
@@ -89,7 +90,7 @@ export function ClassResults({admin,projectId,groupId,initialProject,onProjectCh
     <div className="class-results-heading">
       {!projectId&&!groupId&&<Select aria-label="成绩考试" showSearch optionFilterProp="label" value={project?.id} placeholder="选择考试" options={projects.map(p=>({label:p.name,value:p.id}))} onChange={id=>{setChoice(id);setClass('');setCard('');setManaging(false);onProjectChange?.(id)}}/>}
       {cls&&<><Button type="text" icon={<ArrowLeftOutlined/>} onClick={()=>{if(card&&!groupId)setCard('');else{setClass('');setCard('')}setManaging(false)}}>{card&&!groupId?'班级总表':'班级列表'}</Button><strong>{[cls.grade,cls.name,card?.subject].filter(Boolean).join(' / ')}</strong></>}
-      {onLesson&&cls&&card?.published&&project&&<Button onClick={()=>onLesson({project:project.id,cls:cls.id,card:card.id})}>讲评试卷</Button>}
+      {onLesson&&cls&&card?.published&&project&&<Button type="primary" icon={<ReadOutlined/>} onClick={()=>onLesson({project:project.id,cls:cls.id,card:card.id})}>讲评试卷</Button>}
       {admin&&managementCard&&<Button className="class-management" onClick={()=>setManaging(true)}>成绩管理</Button>}
     </div>
     {!project?<Empty description={admin?'暂无可查看的考试成绩，请先在考试项目中发布题卡并配置应考名单或扫描答卷':'暂无已发布的任教班级成绩'}/>:!cls?<ClassDirectory key={project.id} classes={classes} onSelect={id=>{setClass(id);setCard('')}}/>:card?<ClassCardReports key={card.id+cls.id} project={project} card={card} cls={cls}/>:<ClassTotals key={project.id+cls.id} project={project} cls={cls} cards={cards} onCard={chooseCard}/>}
