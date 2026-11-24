@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { App, Card, ColorPicker, Divider, Form, Input, Modal, Segmented, Space, Tag, Typography } from 'antd'
+import { App, Card, ColorPicker, Divider, Form, Input, Modal, Segmented, Select, Space, Tag, Typography } from 'antd'
 import { PlusOutlined } from '@ant-design/icons'
 import { Table } from './DataTable'
 import { Button } from './Button'
@@ -365,27 +365,30 @@ export function TagsManager({
             )}
           </Form.Item>
           <Form.Item label="标签颜色">
-            <Space direction="vertical" size={8} style={{ width: '100%' }}>
-              <TagPicker
-                compact
+            <Space wrap align="center">
+              <Select
+                style={{ width: 140 }}
                 value={isHex ? undefined : color}
+                placeholder="预设色"
+                allowClear
                 onChange={v => setColor(v || 'blue')}
                 options={TAG_COLOR_CHOICES.map(item => ({
                   value: item.value,
-                  label: item.label,
-                  color: item.value,
+                  label: (
+                    <Tag color={item.value} style={{ marginInlineEnd: 0 }}>
+                      {item.label}
+                    </Tag>
+                  ),
                 }))}
               />
-              <Space wrap align="center">
-                <ColorPicker
-                  value={isHex ? color : '#1677ff'}
-                  showText
-                  onChange={c => setColor(c.toHexString())}
-                />
-                <Tag color={color} style={{ marginInlineEnd: 0 }}>
-                  {name.trim() || '预览标签'}
-                </Tag>
-              </Space>
+              <ColorPicker
+                value={isHex ? color : '#1677ff'}
+                showText
+                onChange={c => setColor(c.toHexString())}
+              />
+              <Tag color={color} style={{ marginInlineEnd: 0 }}>
+                {name.trim() || '预览标签'}
+              </Tag>
             </Space>
           </Form.Item>
 

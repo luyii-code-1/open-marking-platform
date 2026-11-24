@@ -63,22 +63,40 @@ export function Paper({value,page,selected,draw,answerMode=false,forbiddenMode=f
   const scale=zoom??fit
   const [selectedForbidden,setSelectedForbidden]=useState<number|null>(null),{message}=App.useApp()
   const [draft,setDraft]=useState<Region|null>(null),[preview,setPreview]=useState<{url:string;paper:string;page:number;key:string}|null>(null),[error,setError]=useState(''),[retry,setRetry]=useState(0)
-  const currentUrl=useRef(''),payload=JSON.stringify({...value,questions:value.questions.map(q=>({...q,answer:[]}))}),key=`${page}:${payload}`
+  const previewCache=useRef<Map<string,string>>(new Map())
+  const payload=JSON.stringify({...value,questions:value.questions.map(q=>({...q,answer:[]}))}),key=`${page}:${payload}`
   useEffect(()=>{
+    const cached=previewCache.current.get(key)
+    if(cached){
+      previewCache.current.delete(key)
+      previewCache.current.set(key,cached)
+      setError('')
+      setPreview({url:cached,paper:value.paper,page,key})
+      return
+    }
     const abort=new AbortController();let cancelled=false
     setError('')
+    const delay=preview&&preview.paper===value.paper&&preview.page===page?220:30
     const timer=setTimeout(async()=>{
       try{
         const blob=await requestBlob(`/templates/preview?page=${page}`,{method:'POST',body:payload,signal:abort.signal})
         if(cancelled)return
-        const url=URL.createObjectURL(blob),previous=currentUrl.current;currentUrl.current=url
-        setPreview({url,paper:JSON.parse(payload).paper,page,key})
-        if(previous)URL.revokeObjectURL(previous)
+        const url=URL.createObjectURL(blob)
+        const map=previewCache.current
+        map.set(key,url)
+        while(map.size>20){
+          const oldest=map.keys().next().value
+          if(!oldest)break
+          const oldUrl=map.get(oldest)
+          map.delete(oldest)
+          if(oldUrl&&oldUrl!==url)URL.revokeObjectURL(oldUrl)
+        }
+        setPreview({url,paper:value.paper,page,key})
       }catch(e){if(!cancelled)setError((e as Error).message)}
-    },700)
+    },delay)
     return()=>{cancelled=true;clearTimeout(timer);abort.abort()}
-  },[payload,page,key,retry])
-  useEffect(()=>()=>{if(currentUrl.current)URL.revokeObjectURL(currentUrl.current)},[])
+  },[payload,page,key,retry,value.paper])
+  useEffect(()=>()=>{for(const url of previewCache.current.values())URL.revokeObjectURL(url);previewCache.current.clear()},[])
   useEffect(()=>{start.current=null;setDraft(null);setSelectedForbidden(null)},[page,value.id,forbiddenMode,noteMode,draw,answerMode,readOnly])
   useEffect(()=>{if(answerMode&&selected)svg.current?.querySelector(`[data-question-id="${selected}"]`)?.scrollIntoView({block:'nearest',inline:'nearest'})},[selected,page,answerMode])
   const objective=value.questions.filter(q=>q.type!=='subjective').sort((a,b)=>a.number-b.number)

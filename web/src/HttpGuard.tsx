@@ -50,7 +50,7 @@ const methodColors: Record<string, string> = { GET: 'blue', POST: 'green', PUT: 
 const pageNames: Record<string, string> = {
   dashboard: '工作概览', scanner: '扫描台', 'subject-catalog': '科目管理', electives: '选科管理', exams: '考试项目', marking: '阅卷中心',
   exceptions: '异常总览', results: '成绩分析', people: '人员与班级', conversions: '赋分方案', settings: '系统设置',
-  account: '个人账号', login: '登录入口', 'login/admin': '管理后台登录', 'login/marking': '阅卷台登录', archives: '归档文件',
+  account: '个人账号', login: '登录', 'login/admin': '管理员登录', 'login/marking': '教师端登录', archives: '归档文件',
   ...Object.fromEntries(views.map(view => ['http-guard/' + view.key, '防护工作台 / ' + view.name])),
 }
 

@@ -1,5 +1,5 @@
 import {useEffect,useState} from 'react'
-import {Alert,App,Card,Empty,Form,Input,InputNumber,Modal,Popconfirm,Space,Statistic,Tag,Typography,Upload} from 'antd'
+import {Alert,App,Card,Empty,Form,Input,InputNumber,Modal,Popconfirm,Select,Space,Statistic,Tag,Typography,Upload} from 'antd'
 import { Table } from './DataTable'
 import {ArrowLeftOutlined,PlusOutlined,ReloadOutlined,UploadOutlined} from '@ant-design/icons'
 import {Button} from './Button'
@@ -102,7 +102,7 @@ export function ScanCapture({groupId,selectedGroup:externalGroup,onGroupChange,s
           <InputNumber min={1} max={10000} precision={0} style={{width:'100%'}} placeholder="例如：37" addonAfter="张"/>
         </Form.Item>
         <Form.Item name="back_order" label="双面扫描背面顺序" initialValue="same">
-          <TagPicker options={[{value:'same',label:'同序（正反顺序一致）'},{value:'reverse',label:'逆序（翻页后倒序）'}]}/>
+          <Select options={[{value:'same',label:'同序（双面扫描仪或正反顺序一致）'},{value:'reverse',label:'逆序（单面翻页后背面倒序）'}]}/>
         </Form.Item>
       </Form>
     </Modal>

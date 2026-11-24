@@ -1,7 +1,10 @@
+import hashlib
+import json
 import shutil
 import subprocess
 import tempfile
 import threading
+from collections import OrderedDict
 from copy import deepcopy
 from pathlib import Path
 from uuid import uuid4
@@ -15,7 +18,10 @@ from .template_checks import issues,asset_ids
 from .identifiers import prepare_questions
 
 router=APIRouter(prefix='/api/v1')
-_render_slots=threading.BoundedSemaphore(2)
+_render_slots=threading.BoundedSemaphore(4)
+_preview_cache_lock=threading.Lock()
+_preview_cache:OrderedDict[tuple[str,int],tuple[bytes,str]]=OrderedDict()
+_PREVIEW_CACHE_MAX=64
 DEFINITION_FIELDS=('name','subtitle','font_size','leading','paper','sides','candidate_length','layout_version','sheet_columns','notice_template','notice_layout','print_style','column_frame','uniform_subjective','auto_subjective_layout','print_notes','forbidden_regions','background_assets','background_boxes','background_asset_id','questions')
 
 
@@ -191,17 +197,39 @@ def preview_template(body:dict,page:int=1,current=Depends(user)):
     if not 1<=page<=body['sides']:raise HTTPException(422,'预览页码超出题卡范围')
     check_assets(body)
     template={**body,'id':body.get('id') or str(uuid4()),'revision':body.get('revision',0),'layout_version':body.get('layout_version',3)}
+    cache_payload={k:template.get(k) for k in DEFINITION_FIELDS}
+    cache_key=(hashlib.sha256(json.dumps(cache_payload,sort_keys=True,ensure_ascii=False).encode()).hexdigest(),page)
+    with _preview_cache_lock:
+        cached=_preview_cache.get(cache_key)
+        if cached is not None:
+            _preview_cache.move_to_end(cache_key)
+            return Response(cached[0],media_type=cached[1],headers={'Cache-Control':'private, no-store'})
     renderer=shutil.which('pdftoppm')
     if not renderer:raise HTTPException(503,'PDF预览需要服务器安装Poppler的pdftoppm')
     if not _render_slots.acquire(blocking=False):raise HTTPException(503,'预览正在生成，请稍后更新',headers={'Retry-After':'1'})
     try:
         with tempfile.TemporaryDirectory(prefix='omp-preview-') as directory:
             root=Path(directory);source=root/'sheet.pdf'
-            try:source.write_bytes(paper.pdf(template))
+            try:source.write_bytes(paper.pdf(template,only_page=page))
             except (ValueError,TypeError,KeyError,OverflowError) as error:raise HTTPException(422,str(error))
+            flags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess,'CREATE_NO_WINDOW') else 0
             try:
-                rendered=subprocess.run([renderer,'-r','220','-f',str(page),'-l',str(page),'-singlefile','-png',str(source),str(root/'preview')],capture_output=True,timeout=15,creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess,'CREATE_NO_WINDOW') else 0)
+                rendered=subprocess.run([renderer,'-r','140','-f','1','-l','1','-singlefile','-jpeg','-jpegopt','quality=88',str(source),str(root/'preview')],capture_output=True,timeout=15,creationflags=flags)
             except subprocess.TimeoutExpired:raise HTTPException(503,'PDF预览生成超时，请稍后更新')
-            if rendered.returncode or not (root/'preview.png').exists():raise HTTPException(503,'PDF预览生成失败，请检查服务器的PDF渲染工具')
-            return Response((root/'preview.png').read_bytes(),media_type='image/png',headers={'Cache-Control':'private, no-store'})
+            jpg_file=root/'preview.jpg'
+            if rendered.returncode==0 and jpg_file.exists():
+                content,media_type=jpg_file.read_bytes(),'image/jpeg'
+            else:
+                try:
+                    rendered=subprocess.run([renderer,'-r','140','-f','1','-l','1','-singlefile','-png',str(source),str(root/'preview')],capture_output=True,timeout=15,creationflags=flags)
+                except subprocess.TimeoutExpired:raise HTTPException(503,'PDF预览生成超时，请稍后更新')
+                png_file=root/'preview.png'
+                if rendered.returncode or not png_file.exists():raise HTTPException(503,'PDF预览生成失败，请检查服务器的PDF渲染工具')
+                content,media_type=png_file.read_bytes(),'image/png'
+            with _preview_cache_lock:
+                _preview_cache[cache_key]=(content,media_type)
+                _preview_cache.move_to_end(cache_key)
+                while len(_preview_cache)>_PREVIEW_CACHE_MAX:
+                    _preview_cache.popitem(last=False)
+            return Response(content,media_type=media_type,headers={'Cache-Control':'private, no-store'})
     finally:_render_slots.release()

@@ -55,3 +55,41 @@ export function forbiddenConflict(template:Template,region:Region,index?:number)
   const occupied=[...template.questions.flatMap(q=>q.regions),...(template.print_notes||[]),...(template.forbidden_regions||[]).filter((_,i)=>i!==index)]
   return occupied.some(r=>r.page===region.page&&r.x<region.x+region.width&&region.x<r.x+r.width&&r.y<region.y+region.height&&region.y<r.y+r.height)?'禁答区与已有区域重叠，请调整位置或大小':''
 }
+
+export function initialSubjectiveRegion(template:Template,currentPage:number):Region|null{
+  const targetPage=Math.max(1,Math.min(template.sides||1,currentPage||1))
+  const width=template.paper==='A3'?420:210
+  const columns=template.paper==='A3'?(template.sheet_columns||2):1
+  const size=(width-24-(columns-1)*8)/columns
+  const defaultHeight=35
+  const occupied=[
+    ...template.questions.flatMap(q=>q.regions),
+    ...(template.print_notes||[]),
+    ...(template.forbidden_regions||[]),
+  ].filter(r=>r.page===targetPage)
+  let fallback:Region|null=null
+  for(let col=0;col<columns;col++){
+    const sampleX=12+col*(size+8)+1
+    const {left,right,top,bottom}=columnBounds(template,targetPage,sampleX)
+    const regionWidth=Math.round((right-left)*1000)/1000
+    const colOccupied=occupied.filter(r=>r.x<right&&r.x+r.width>left).sort((a,b)=>a.y-b.y)
+    let y=top
+    for(const obs of colOccupied){
+      if(obs.y<y+defaultHeight&&obs.y+obs.height>y)y=obs.y+obs.height+2
+    }
+    const candidate:Region={
+      page:targetPage,
+      x:left,
+      y:Math.round(y*1000)/1000,
+      width:regionWidth,
+      height:defaultHeight,
+      min_height:defaultHeight,
+      anchor_page:targetPage,
+      anchor_x:left,
+      anchor_y:Math.round(y*1000)/1000,
+    }
+    if(!fallback)fallback={...candidate,y:top,anchor_y:top}
+    if(y+defaultHeight<=bottom+0.001)return candidate
+  }
+  return template.auto_subjective_layout?fallback:null
+}

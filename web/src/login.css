@@ -25,7 +25,11 @@
 .login-card{width:min(100%,420px);border-radius:12px;padding:28px clamp(20px,5vw,36px) 32px}
 .login-card .brand-login{margin-bottom:10px}
 .login-card .brand-login img{width:120px;height:auto}
-.login-card h3{text-align:center;margin:0 0 24px}
+.login-card h3{text-align:center;margin:0 0 18px}
+.login-role-switch{display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:4px;background:#f1f5f9;border-radius:8px;margin-bottom:20px}
+.login-role-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:36px;border:0;border-radius:6px;background:transparent;color:#475569;font-size:14px;font-weight:500;cursor:pointer;transition:background-color .15s,color .15s,box-shadow .15s}
+.login-role-btn:hover:not(:disabled){color:#0f172a}
+.login-role-btn.is-active{background:#fff;color:#0866ff;font-weight:600;box-shadow:0 1px 3px rgba(15,23,42,.1)}
 .login-card p{margin:0 0 16px;color:#434343}
 .login-card .forgot-help{margin:16px 0 0}
 .login-button,.login-back,.login-eye{display:inline-flex;align-items:center;justify-content:center;gap:8px}

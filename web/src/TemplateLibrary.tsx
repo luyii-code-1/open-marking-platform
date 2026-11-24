@@ -55,22 +55,22 @@ export function TemplateLibrary({value,dirty,onCreated,groupId,disabled=false}:{
       const created=await send<Row>('/teacher-templates/assign',{group_id:targetGroup,teacher_id:values.teacher_id,name:values.name?.trim()||undefined,description:values.description?.trim()||''})
       setAssignOpen(false)
       assignForm.resetFields()
-      message.success(`已向 ${created.owner_name} 下发制卡任务，对方将在通知中收到一键入口`)
+      message.success(`已向 ${created.owner_name} 创建并下发任务题卡，对方将在教师端通知中收到一键入口`)
     }catch(e){message.error((e as Error).message)}
     finally{setPending('')}
   }
   return <>
     <Button disabled={disabled||groupLocked} onClick={()=>{setUseOpen(true);void library.reload();void groups.reload();void subjects.reload();void projects.reload()}}>从题卡库创建</Button>
     <Button disabled={disabled||groupLocked} onClick={()=>{setTeacherOpen(true);setLinkText('');setLinkEntry(null);setSelectedTeacherId('');setAdoptName('');void teacherList.reload();void groups.reload();void subjects.reload();void projects.reload()}}>导入教师题卡 / 链接</Button>
-    {(groupId||value.group_id)&&<Button disabled={disabled||groupLocked} onClick={()=>{assignForm.setFieldsValue({name:value.name||'',description:''});setAssignOpen(true);void users.reload()}}>下发制卡任务</Button>}
+    {(groupId||value.group_id)&&<Button disabled={disabled||groupLocked} onClick={()=>{assignForm.setFieldsValue({name:value.name||'',description:''});setAssignOpen(true);void users.reload()}}>创建任务题卡</Button>}
     <Button disabled={disabled||!value.id||dirty} onClick={()=>{saveForm.setFieldsValue({name:value.name,description:''});setSaveOpen(true)}}>存入题卡库</Button>
-    <Modal title="下发制卡任务给教师" open={assignOpen} onCancel={()=>!busy&&setAssignOpen(false)} onOk={()=>assignForm.submit()} confirmLoading={pending==='assign'} okText="确认下发">
-      <Alert type="info" showIcon style={{marginBottom:14}} message="下发后，目标教师账号的通知中心将显示该制卡任务，支持一键进入制卡界面；制作完成后可保存、复制内部链接或推送给管理员审核。"/>
+    <Modal title="创建任务题卡（分配给教师）" open={assignOpen} onCancel={()=>!busy&&setAssignOpen(false)} onOk={()=>assignForm.submit()} confirmLoading={pending==='assign'} okText="创建并分配">
+      <Alert type="info" showIcon style={{marginBottom:14}} message="创建后将分配到指定教师账号，对方教师端通知中心会显示一键进入制卡入口；制作完成后可保存、复制内部链接或推送给管理员审核。"/>
       <Form form={assignForm} layout="vertical" onFinish={assignTask}>
-        <Form.Item name="teacher_id" label="接收教师账号" rules={[{required:true,message:'请选择接收教师'}]}>
-          <Select showSearch optionFilterProp="label" placeholder="搜索姓名或账号" options={users.data.map(u=>({value:u.id,label:`${u.name}（${u.username}）`}))}/>
+        <Form.Item name="teacher_id" label="分配给教师" rules={[{required:true,message:'请选择接收教师'}]}>
+          <Select showSearch optionFilterProp="label" placeholder="搜索教师姓名或账号" options={users.data.map(u=>({value:u.id,label:`${u.name}（${u.username}）`}))}/>
         </Form.Item>
-        <Form.Item name="name" label="题卡任务标题（选填）"><Input maxLength={100} placeholder="留空自动按考试科目命名"/></Form.Item>
+        <Form.Item name="name" label="任务题卡标题（选填）"><Input maxLength={100} placeholder="留空自动按考试科目命名"/></Form.Item>
         <Form.Item name="description" label="制卡要求说明（选填）"><Input.TextArea rows={3} maxLength={2000} placeholder="可注明题量、分值、纸张大小或截稿时间"/></Form.Item>
       </Form>
     </Modal>

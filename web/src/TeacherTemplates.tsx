@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Alert, App, Card, Descriptions, Dropdown, Empty, Form, Input, InputNumber, Modal, Radio, Segmented, Select, Space, Switch, Tabs, Tag, Typography, Upload } from 'antd'
+import { Alert, App, Card, Descriptions, Dropdown, Empty, Form, Input, InputNumber, Modal, Popconfirm, Radio, Segmented, Select, Space, Switch, Tabs, Tag, Typography, Upload } from 'antd'
 import { ArrowLeftOutlined, BookOutlined, CheckCircleOutlined, CopyOutlined, DownloadOutlined, PaperClipOutlined, PlusOutlined, ReloadOutlined, SaveOutlined } from '@ant-design/icons'
 import { Button } from './Button'
 import { Table } from './DataTable'
@@ -11,7 +11,7 @@ import { SUBJECT_PRESETS, TagPicker } from './TagPicker'
 import { download, newQuestion, request, send, useResource, type Question, type Row, type Template } from './api'
 import { examPath } from './examNavigation'
 import { mergeQuestions, questionLabel, questionNumbers, splitQuestions } from './mergeQuestions'
-import { uniformSubjectiveWidths } from './sheetRegions'
+import { initialSubjectiveRegion, uniformSubjectiveWidths } from './sheetRegions'
 import { subjectiveLayoutKey } from './subjectiveLayout'
 import { useUnsavedChanges } from './useNavigation'
 
@@ -100,12 +100,15 @@ export function TeacherTemplates({
   const projects = useResource<Row[]>(management ? '/projects' : null, [])
   const subjects = useResource<Row[]>(management ? '/subjects' : null, [])
   const groups = useResource<Row[]>(management ? '/groups' : null, [])
+  const users = useResource<Row[]>(management ? '/users' : null, [])
 
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [editingRow, setEditingRow] = useState<TeacherTemplateRow | null>(null)
   const openedRef = useRef('')
   const [createOpen, setCreateOpen] = useState(false)
   const [createForm] = Form.useForm()
+  const [assignOpen, setAssignOpen] = useState(false)
+  const [assignForm] = Form.useForm()
   const [linkOpen, setLinkOpen] = useState(false)
   const [linkText, setLinkText] = useState('')
   const [linkMatch, setLinkMatch] = useState<TeacherTemplateRow | null>(null)
@@ -154,6 +157,26 @@ export function TeacherTemplates({
       await list.reload()
       setEditingRow(created)
       message.success('独立题卡草稿已创建')
+    } catch (e) {
+      message.error((e as Error).message)
+    } finally {
+      setActionBusy(false)
+    }
+  }
+
+  async function createTaskCard(values: { group_id: string; teacher_id: string; name?: string; description?: string }) {
+    setActionBusy(true)
+    try {
+      const created = await send<TeacherTemplateRow>('/teacher-templates/assign', {
+        group_id: values.group_id,
+        teacher_id: values.teacher_id,
+        name: values.name?.trim() || undefined,
+        description: values.description?.trim() || '',
+      })
+      setAssignOpen(false)
+      assignForm.resetFields()
+      await list.reload()
+      message.success(`已向 ${created.owner_name} 创建并分配任务题卡`)
     } catch (e) {
       message.error((e as Error).message)
     } finally {
@@ -331,11 +354,27 @@ export function TeacherTemplates({
               刷新
             </Button>
             {management && (
-              <Button icon={<PaperClipOutlined />} onClick={() => { setLinkText(''); setLinkMatch(null); setLinkOpen(true) }}>
-                通过内部链接添加
-              </Button>
+              <>
+                <Button icon={<PaperClipOutlined />} onClick={() => { setLinkText(''); setLinkMatch(null); setLinkOpen(true) }}>
+                  通过内部链接添加
+                </Button>
+                <Button
+                  type="primary"
+                  icon={<PlusOutlined />}
+                  onClick={() => {
+                    assignForm.resetFields()
+                    setAssignOpen(true)
+                    void projects.reload()
+                    void subjects.reload()
+                    void groups.reload()
+                    void users.reload()
+                  }}
+                >
+                  创建任务题卡
+                </Button>
+              </>
             )}
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => { createForm.resetFields(); setCreateOpen(true) }}>
+            <Button type={management ? 'default' : 'primary'} icon={<PlusOutlined />} onClick={() => { createForm.resetFields(); setCreateOpen(true) }}>
               新建独立题卡
             </Button>
           </Space>
@@ -477,6 +516,55 @@ export function TeacherTemplates({
           ]}
         />
       </Card>
+
+      <Modal
+        title="创建任务题卡（分配给教师）"
+        open={assignOpen}
+        onCancel={() => !actionBusy && setAssignOpen(false)}
+        onOk={() => assignForm.submit()}
+        confirmLoading={actionBusy}
+        okText="创建并分配"
+      >
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 14 }}
+          message="选择考试题卡并分配给指定教师，对方教师端通知中心将收到一键进入制卡入口。"
+        />
+        <Form form={assignForm} layout="vertical" onFinish={createTaskCard}>
+          <Form.Item name="group_id" label="目标考试题卡" rules={[{ required: true, message: '请选择目标考试题卡' }]}>
+            <Select
+              showSearch
+              optionFilterProp="label"
+              placeholder="搜索考试项目 / 科目 / 题卡"
+              options={groups.data
+                .filter(g => !g.frozen)
+                .map(g => {
+                  const s = subjects.data.find(item => item.id === g.subject_id)
+                  const p = projects.data.find(item => item.id === s?.project_id)
+                  return {
+                    value: g.id,
+                    label: `${p?.name || ''} / ${s?.name || ''} / ${g.name}${g.template_id ? '（已有版式）' : ''}`,
+                  }
+                })}
+            />
+          </Form.Item>
+          <Form.Item name="teacher_id" label="分配给教师" rules={[{ required: true, message: '请选择接收教师' }]}>
+            <Select
+              showSearch
+              optionFilterProp="label"
+              placeholder="搜索教师姓名或账号"
+              options={users.data.map(u => ({ value: u.id, label: `${u.name}（${u.username}）` }))}
+            />
+          </Form.Item>
+          <Form.Item name="name" label="任务题卡标题（选填）">
+            <Input maxLength={100} placeholder="留空自动按考试科目命名" />
+          </Form.Item>
+          <Form.Item name="description" label="制卡要求说明（选填）">
+            <Input.TextArea rows={3} maxLength={2000} placeholder="可注明题量、分值、纸张大小或截稿时间" />
+          </Form.Item>
+        </Form>
+      </Modal>
 
       <Modal
         title="新建独立题卡"
@@ -675,6 +763,7 @@ function TeacherTemplateWorkbench({
   const [answerMode, setAnswerMode] = useState(false)
   const [forbiddenMode, setForbiddenMode] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [subBatchPoints, setSubBatchPoints] = useState<number | null>(10)
   const [mergeIds, setMergeIds] = useState<string[]>([])
   const [editing, setEditing] = useState<TextTarget | null>(null)
   const [noteId, setNoteId] = useState('')
@@ -873,13 +962,17 @@ function TeacherTemplateWorkbench({
   }
 
   function combine() {
+    const targets = mergeIds.filter(id => {
+      const q = value.questions.find(item => item.id === id)
+      return q && q.type === 'subjective' && !q.parts
+    })
     try {
-      const q = mergeQuestions(value.questions, mergeIds)
+      const q = mergeQuestions(value.questions, targets)
       modal.confirm({
         title: `合并第 ${questionLabel(q)} 题？`,
         content: `合并后共 ${q.points} 分，每份答卷只录一个总分。评阅方式、评分步长和双评允许差值沿用第 ${q.number} 题的设置。`,
         onOk: () => {
-          change({ questions: value.questions.flatMap(item => (item.id === q.id ? [q] : mergeIds.includes(item.id) ? [] : [item])) })
+          change({ questions: value.questions.flatMap(item => (item.id === q.id ? [q] : targets.includes(item.id) ? [] : [item])) })
           setQuestionId(q.id)
           setMergeIds([])
           setDraw(false)
@@ -891,8 +984,22 @@ function TeacherTemplateWorkbench({
     }
   }
 
+  function addSubjective() {
+    const num = Math.max(0, ...value.questions.flatMap(questionNumbers)) + 1
+    const starter = initialSubjectiveRegion(value, page)
+    const q = { ...newQuestion(num), regions: starter ? [starter] : [] }
+    change({ questions: [...value.questions, q] })
+    setEditing(null)
+    setQuestionId(q.id)
+    setDraw(!starter)
+    setAnswerMode(false)
+    setForbiddenMode(false)
+  }
+
   const question = value.questions.find(q => q.id === questionId)
   const subjective = value.questions.filter(q => q.type === 'subjective').sort((a, b) => a.number - b.number)
+  const validSubIds = mergeIds.filter(id => subjective.some(q => q.id === id))
+  const mergeableIds = validSubIds.filter(id => !subjective.find(q => q.id === id)?.parts)
   const notes = value.print_notes || []
   const note = notes.find(n => n.id === noteId && n.page === page)
   const total = value.questions.reduce((sum, q) => sum + Number(q.points || 0), 0)
@@ -945,6 +1052,7 @@ function TeacherTemplateWorkbench({
         <div className="editor-form-grid">
           <Form.Item label="纸张">
             <TagPicker
+              compact
               disabled={readOnly || saving}
               value={value.paper}
               options={[{ label: 'A4 纵向', value: 'A4' }, { label: 'A3 横向', value: 'A3' }]}
@@ -953,6 +1061,7 @@ function TeacherTemplateWorkbench({
           </Form.Item>
           <Form.Item label="面数">
             <TagPicker
+              compact
               disabled={readOnly || saving}
               value={value.sides}
               options={[{ label: '单面', value: 1 }, { label: '双面', value: 2 }]}
@@ -970,11 +1079,10 @@ function TeacherTemplateWorkbench({
         </div>
         {value.paper === 'A3' && (
           <Form.Item label="题卡分栏模板">
-            <TagPicker
-              disabled={readOnly || saving}
+            <Select
               value={value.sheet_columns || 2}
               options={[{ label: '2×2 · 正反面各2栏', value: 2 }, { label: '3×3 · 正反面各3栏', value: 3 }]}
-              onChange={sheet_columns => sheet_columns && change({ sheet_columns, layout_version: 3 })}
+              onChange={sheet_columns => change({ sheet_columns, layout_version: 3 })}
             />
           </Form.Item>
         )}
@@ -1001,22 +1109,20 @@ function TeacherTemplateWorkbench({
           </Form.Item>
         </div>
         <Form.Item label="分栏底版">
-          <TagPicker
-            disabled={readOnly || saving}
+          <Select
             value={value.column_frame ? 'framed' : 'classic'}
             options={[{ label: '整栏圆角框与边缘提示', value: 'framed' }, { label: '逐题圆角框', value: 'classic' }]}
-            onChange={v => v && change({ column_frame: v === 'framed' })}
+            onChange={v => change({ column_frame: v === 'framed' })}
           />
         </Form.Item>
         <Form.Item label="准考证号位数">
           <InputNumber min={1} max={11} value={value.candidate_length} onChange={length => change({ candidate_length: length || 9 })} />
         </Form.Item>
         <Form.Item label="内置须知">
-          <TagPicker
-            disabled={readOnly || saving}
+          <Select
             value={value.notice_template || 'none'}
             options={[{ label: '标准模板 · 考生禁填、注意事项与填涂样例', value: 'standard-v1' }, { label: '不添加', value: 'none' }]}
-            onChange={notice_template => notice_template && change({ notice_template })}
+            onChange={notice_template => change({ notice_template })}
           />
         </Form.Item>
         <Space wrap>
@@ -1195,71 +1301,134 @@ function TeacherTemplateWorkbench({
                 label: '主观题',
                 children: (
                   <div className="editor-section">
-                    <Space wrap>
+                    <Space wrap size={6}>
                       <Switch
+                        size="small"
                         aria-label="题区随内容自动调整"
                         disabled={readOnly || saving}
                         checked={!!value.auto_subjective_layout}
                         onChange={auto_subjective_layout => change({ auto_subjective_layout })}
                       />
-                      <Text>题区随内容自动调整</Text>
-                      <Button disabled={readOnly || saving || layoutBusy} loading={layoutBusy} onClick={() => void arrange(valueRef.current).catch(error => setLayoutError((error as Error).message))}>
+                      <Text style={{ fontSize: 12 }}>自动排版</Text>
+                      <Button size="small" disabled={readOnly || saving || layoutBusy} loading={layoutBusy} onClick={() => void arrange(valueRef.current).catch(error => setLayoutError((error as Error).message))}>
                         按内容排版
                       </Button>
-                      <Button
-                        icon={<PlusOutlined />}
-                        disabled={readOnly || saving}
-                        onClick={() => {
-                          const q = newQuestion(Math.max(0, ...value.questions.flatMap(questionNumbers)) + 1)
-                          change({ questions: [...value.questions, q] })
-                          setEditing(null)
-                          setQuestionId(q.id)
-                          setDraw(true)
-                          setAnswerMode(false)
-                          setForbiddenMode(false)
-                        }}
-                      >
-                        {value.auto_subjective_layout ? '添加主观题' : '添加主观题并框选'}
-                      </Button>
-                      <Button disabled={readOnly || saving || mergeIds.length < 2} onClick={combine}>
-                        合并题目
+                      <Button size="small" type="primary" icon={<PlusOutlined />} disabled={readOnly || saving} onClick={addSubjective}>
+                        {value.sides === 2 ? `添加主观题（${page === 2 ? '背面' : '正面'}）` : '添加主观题'}
                       </Button>
                     </Space>
+                    {!readOnly && validSubIds.length > 0 && (
+                      <div className="question-batch-bar">
+                        <Space wrap size={6}>
+                          <Text style={{ fontSize: 12 }}>已选 {validSubIds.length} 题</Text>
+                          <InputNumber
+                            size="small"
+                            min={0.01}
+                            precision={2}
+                            value={subBatchPoints}
+                            onChange={setSubBatchPoints}
+                            style={{ width: 64 }}
+                            aria-label="主观题批量分值"
+                          />
+                          <Button
+                            size="small"
+                            onClick={() => {
+                              if (subBatchPoints == null || subBatchPoints <= 0) return
+                              const ids = new Set(mergeableIds)
+                              change({ questions: value.questions.map(q => (ids.has(q.id) ? { ...q, points: subBatchPoints } : q)) })
+                              message.success('已批量更新分值')
+                            }}
+                          >
+                            设分
+                          </Button>
+                          <Button size="small" disabled={saving || mergeableIds.length < 2} onClick={combine}>
+                            合并
+                          </Button>
+                          <Popconfirm
+                            title={`删除选中的 ${validSubIds.length} 道主观题？`}
+                            onConfirm={() => {
+                              const ids = new Set(validSubIds)
+                              change({ questions: value.questions.filter(q => !ids.has(q.id)) })
+                              setMergeIds([])
+                              if (ids.has(questionId)) setQuestionId('')
+                            }}
+                          >
+                            <Button size="small" danger>删除</Button>
+                          </Popconfirm>
+                          <Button size="small" type="text" onClick={() => setMergeIds([])}>取消</Button>
+                        </Space>
+                      </div>
+                    )}
                     <Table<Question>
-                      rowSelection={readOnly ? undefined : { selectedRowKeys: mergeIds, onChange: keys => setMergeIds(keys.map(String)), getCheckboxProps: q => ({ disabled: !!q.parts || saving }) }}
+                      columnChooser={false}
+                      exportable={false}
+                      rowSelection={readOnly ? undefined : { columnWidth: 32, selectedRowKeys: validSubIds, onChange: keys => setMergeIds(keys.map(String)) }}
                       rowClassName={q => (q.id === questionId ? 'selected-question-row' : '')}
                       onRow={q => ({
                         onClick: () => {
                           setEditing(null)
                           setQuestionId(q.id)
-                          setDraw(!q.parts)
+                          setDraw(!q.parts && !q.regions.length)
                           if (q.regions.length) setPage(q.regions[0].page)
                         },
                       })}
                       rowKey="id"
-                      size="middle"
+                      size="small"
                       dataSource={subjective}
-                      pagination={{ defaultPageSize: 50 }}
-                      locale={{ emptyText: <Empty description="添加主观题后，在预览中框选答题区域" /> }}
+                      pagination={subjective.length > 50 ? { defaultPageSize: 50, size: 'small' } : false}
+                      locale={{ emptyText: <Empty description="点击「添加主观题」在当前面创建答题区" /> }}
                       columns={[
-                        { title: '题号', render: (_, q) => questionLabel(q) },
+                        {
+                          title: '题号',
+                          width: 92,
+                          render: (_, q) => (
+                            <Space size={4}>
+                              <span>{questionLabel(q)}</span>
+                              {q.regions.length ? (
+                                <Tag style={{ marginInlineEnd: 0, fontSize: 11, paddingInline: 4, lineHeight: '16px' }}>
+                                  {[...new Set(q.regions.map(r => (r.page === 1 ? '正' : '背')))].join('/')}
+                                </Tag>
+                              ) : (
+                                <Tag color="orange" style={{ marginInlineEnd: 0, fontSize: 11, paddingInline: 4, lineHeight: '16px' }}>待框选</Tag>
+                              )}
+                            </Space>
+                          ),
+                        },
                         {
                           title: '分值',
+                          width: 76,
                           render: (_, q) => (
                             <InputNumber
+                              size="small"
                               aria-label={'第' + q.number + '题分值'}
                               disabled={readOnly || saving || !!q.parts}
                               min={0.01}
                               precision={2}
                               value={q.points}
+                              onClick={e => e.stopPropagation()}
                               onChange={points => {
                                 if (points !== null) change({ questions: value.questions.map(item => (item.id === q.id ? { ...item, points } : item)) })
                               }}
                             />
                           ),
                         },
-                        { title: '区域', render: (_, q) => (q.regions.length ? `${q.regions.length} 个` : '待框选') },
-                        { title: '', render: (_, q) => <Button type="link" onClick={() => select(q.id, true)}>设置</Button> },
+                        {
+                          title: '',
+                          width: 48,
+                          render: (_, q) => (
+                            <Button
+                              size="small"
+                              type="link"
+                              style={{ paddingInline: 2 }}
+                              onClick={e => {
+                                e.stopPropagation()
+                                select(q.id, true)
+                              }}
+                            >
+                              设置
+                            </Button>
+                          ),
+                        },
                       ]}
                     />
                   </div>

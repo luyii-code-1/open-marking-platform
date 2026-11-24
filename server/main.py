@@ -133,7 +133,7 @@ def login(body: Login,request:Request=None):
         if not hmac.compare_digest(stored,password_hash(body.password,stored.split(':')[0])) or row is None:
             raise HTTPException(401,'账号或密码错误')
         if body.portal not in (None,'admin','marking'):raise HTTPException(422,'登录入口无效')
-        if body.portal=='admin' and row['role'] not in ('admin','manager'):raise HTTPException(403,'此账号没有管理后台权限，请使用阅卷台入口')
+        if body.portal=='admin' and row['role'] not in ('admin','manager'):raise HTTPException(403,'此账号没有管理后台权限，请切换为教师角色登录')
         from .accounts import session
         value=session(db,dict(row),'password')
         set_request_actor(request, dict(row))

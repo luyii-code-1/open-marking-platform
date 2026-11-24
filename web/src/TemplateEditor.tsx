@@ -1,7 +1,7 @@
 import { DraftSaver } from './draftSaver'
 import {ScoringChanges} from './ScoringChanges'
 import { useEffect, useRef, useState } from 'react'
-import { Alert, App, Card, Dropdown, Empty, Form, Input, InputNumber, Modal, Radio, Select, Space, Switch, Tabs, Tag, Typography, Upload } from 'antd'
+import { Alert, App, Card, Dropdown, Empty, Form, Input, InputNumber, Modal, Popconfirm, Radio, Select, Space, Switch, Tabs, Tag, Typography, Upload } from 'antd'
 import { Table } from './DataTable'
 import { Button } from './Button'
 import { CopyOutlined, DownloadOutlined, PlusOutlined, SaveOutlined } from '@ant-design/icons'
@@ -16,7 +16,7 @@ import { QuestionSettings } from './QuestionSettings'
 import { TagPicker } from './TagPicker'
 
 import { mergeQuestions, splitQuestions, questionNumbers, questionLabel } from './mergeQuestions'
-import { uniformSubjectiveWidths } from './sheetRegions'
+import { initialSubjectiveRegion, uniformSubjectiveWidths } from './sheetRegions'
 import {subjectiveLayoutKey} from './subjectiveLayout'
 
 const { Text } = Typography
@@ -32,7 +32,9 @@ export function TemplateEditor({ groupId }: { groupId?: string }) {
   const [value, setValue] = useState<Template>(() => emptyTemplate(groupId)), [questionId, setQuestionId] = useState(''), [page, setPage] = useState(1), [draw, setDraw] = useState(false)
   const [saveAction, setSaveAction] = useState(''), [dirty, setDirty] = useState(false), [pane, setPane] = useState('setup'), [settingsOpen, setSettingsOpen] = useState(false)
   const [answerMode,setAnswerMode]=useState(false),[forbiddenMode,setForbiddenMode]=useState(false)
-  const [mergeIds,setMergeIds]=useState<string[]>([])
+  const [mergeIds,setMergeIds]=useState<string[]>([]),[subBatchPoints,setSubBatchPoints]=useState<number|null>(10)
+  const [taskModalOpen,setTaskModalOpen]=useState(false),[taskBusy,setTaskBusy]=useState(false),[taskForm]=Form.useForm()
+  const users=useResource<Row[]>(taskModalOpen?'/users':null,[])
   const [editing,setEditing]=useState<TextTarget|null>(null)
   useEffect(()=>setEditing(null),[value.id])
   function editText(target:TextTarget|null){
@@ -183,15 +185,15 @@ export function TemplateEditor({ groupId }: { groupId?: string }) {
     {!groupId && <Form.Item label="所属题卡" required><HierarchyPicker value={value.group_id} onChange={group_id => change({ group_id })} /></Form.Item>}
     <Form.Item label="题卡标题"><Input value={value.name} onChange={event => change({ name: event.target.value })} /></Form.Item>
     <Form.Item label="副标题"><Input value={value.subtitle || ''} onChange={event => change({ subtitle: event.target.value })} /></Form.Item>
-    <div className="editor-form-grid"><Form.Item label="纸张"><TagPicker disabled={readOnly||saving} value={value.paper} options={[{ label: 'A4 纵向', value: 'A4' }, { label: 'A3 横向', value: 'A3' }]} onChange={paper => paper && change({ paper, sheet_columns: paper==='A3'?2:1, layout_version:3 })} /></Form.Item><Form.Item label="面数"><TagPicker disabled={readOnly||saving} value={value.sides} options={[{ label: '单面', value: 1 }, { label: '双面', value: 2 }]} onChange={sides => { if (!sides) return; if (sides === 1 && (value.questions.some(q => q.regions.some(r => r.page === 2))||notes.some(n=>n.page===2)||(value.forbidden_regions||[]).some(r=>r.page===2))) { message.warning('背面已有答题区域，请先调整后再改为单面'); return } change({ sides }); setPage(1) }} /></Form.Item></div>
-    {value.paper==='A3' && <Form.Item label="题卡分栏模板"><TagPicker disabled={readOnly||saving} value={value.sheet_columns||2} options={[{label:"2×2 · 正反面各2栏",value:2},{label:"3×3 · 正反面各3栏",value:3}]} onChange={sheet_columns=>sheet_columns&&change({sheet_columns,layout_version:3})}/><Text type="secondary">内容依次续排到下一栏、下一面。改变模板后请重新排布客观题。</Text></Form.Item>}
+    <div className="editor-form-grid"><Form.Item label="纸张"><TagPicker compact disabled={readOnly||saving} value={value.paper} options={[{ label: 'A4 纵向', value: 'A4' }, { label: 'A3 横向', value: 'A3' }]} onChange={paper => paper && change({ paper, sheet_columns: paper==='A3'?2:1, layout_version:3 })} /></Form.Item><Form.Item label="面数"><TagPicker compact disabled={readOnly||saving} value={value.sides} options={[{ label: '单面', value: 1 }, { label: '双面', value: 2 }]} onChange={sides => { if (!sides) return; if (sides === 1 && (value.questions.some(q => q.regions.some(r => r.page === 2))||notes.some(n=>n.page===2)||(value.forbidden_regions||[]).some(r=>r.page===2))) { message.warning('背面已有答题区域，请先调整后再改为单面'); return } change({ sides }); setPage(1) }} /></Form.Item></div>
+    {value.paper==='A3' && <Form.Item label="题卡分栏模板"><Select value={value.sheet_columns||2} options={[{label:"2×2 · 正反面各2栏",value:2},{label:"3×3 · 正反面各3栏",value:3}]} onChange={sheet_columns=>change({sheet_columns,layout_version:3})}/><Text type="secondary">内容依次续排到下一栏、下一面。改变模板后请重新排布客观题。</Text></Form.Item>}
     <div className="editor-form-grid">
       <Form.Item label="题干与自定义文字字号（磅）"><InputNumber min={6} max={36} value={value.font_size??9} onChange={size=>{if(size!=null)change({font_size:size,leading:Math.max(size,value.leading??13)})}}/></Form.Item>
       <Form.Item label="文字行距（磅）"><InputNumber min={value.font_size??9} max={72} value={value.leading??13} onChange={leading=>{if(leading!=null)change({leading})}}/></Form.Item>
     </div>
-    <Form.Item label="分栏底版"><TagPicker disabled={readOnly||saving} value={value.column_frame?'framed':'classic'} options={[{label:'整栏圆角框与边缘提示',value:'framed'},{label:'逐题圆角框',value:'classic'}]} onChange={v=>v&&change({column_frame:v==='framed'})}/></Form.Item>
+    <Form.Item label="分栏底版"><Select value={value.column_frame?'framed':'classic'} options={[{label:'整栏圆角框与边缘提示',value:'framed'},{label:'逐题圆角框',value:'classic'}]} onChange={v=>change({column_frame:v==='framed'})}/></Form.Item>
     <Form.Item label="准考证号位数"><InputNumber min={1} max={readOnly&&value.print_style!=='standard-v2'?20:11} value={value.candidate_length} onChange={length => change({ candidate_length: length || 9 })} /></Form.Item>
-    <Form.Item label="内置须知"><TagPicker disabled={readOnly||saving} value={value.notice_template||'none'} options={[{label:'标准模板 · 考生禁填、注意事项与填涂样例',value:'standard-v1'},{label:'不添加',value:'none'}]} onChange={notice_template=>notice_template&&change({notice_template})}/><Text type="secondary">标准模板保留条形码核对及错区扣分说明；扣分文字用于印刷说明，不自动扣分。</Text></Form.Item>
+    <Form.Item label="内置须知"><Select value={value.notice_template||'none'} options={[{label:'标准模板 · 考生禁填、注意事项与填涂样例',value:'standard-v1'},{label:'不添加',value:'none'}]} onChange={notice_template=>change({notice_template})}/><Text type="secondary">标准模板保留条形码核对及错区扣分说明；扣分文字用于印刷说明，不自动扣分。</Text></Form.Item>
     <Space wrap>
       <Upload disabled={readOnly} accept="image/*" showUploadList={false} beforeUpload={async file => { const data = new FormData(); data.append('file', file); try { const asset = await request<Row>('/assets', { method: 'POST', body: data }); const pageW = value.paper === 'A3' ? 420 : 210; const defaultBox = { x: 12, y: page === 1 ? 100 : 34, width: pageW - 24, height: page === 1 ? 165 : 225 }; change({ background_assets: { ...value.background_assets, [String(page)]: asset.id }, background_boxes: { ...value.background_boxes, [String(page)]: defaultBox } }); setForbiddenMode(false); message.success('当前面底图已导入，可在画布上自由拖动和缩放') } catch (e) { message.error((e as Error).message) } return false }}><Button disabled={readOnly || saving}>导入当前面题卡底图</Button></Upload>
       {value.background_assets?.[String(page)] && !readOnly && (
@@ -204,23 +206,54 @@ export function TemplateEditor({ groupId }: { groupId?: string }) {
     {value.background_assets?.[String(page)] && !readOnly && <Text type="secondary">在「底版」视图下可直接拖动底图位置，拖动右下角控制点自由缩放。</Text>}
   </Form><div className="library-actions"><TemplateLibrary disabled={saving||saver.saving} value={value} dirty={dirty||(!saved.some(t=>t.id===value.id)&&!saver.savedAt)} groupId={groupId} onCreated={async template => { await Promise.all([templates.reload(), groups.reload()]); load(template) }} /></div></div>
   function combine(){
+    const targets=mergeIds.filter(id=>{const q=value.questions.find(item=>item.id===id);return q&&q.type==='subjective'&&!q.parts})
     try{
-      const q=mergeQuestions(value.questions,mergeIds)
+      const q=mergeQuestions(value.questions,targets)
       modal.confirm({title:'合并第 '+questionLabel(q)+' 题？',content:'合并后共 '+q.points+' 分，每份答卷只录一个总分。评阅方式、评分步长和双评允许差值沿用第 '+q.number+' 题的设置。',onOk:()=>{
-        change({questions:value.questions.flatMap(row=>row.id===q.id?[q]:mergeIds.includes(row.id)?[]:[row])})
+        change({questions:value.questions.flatMap(row=>row.id===q.id?[q]:targets.includes(row.id)?[]:[row])})
         setQuestionId(q.id);setMergeIds([]);setDraw(false);setPage(q.regions[0].page)
       }})
     }catch(e){message.warning((e as Error).message)}
   }
   const subjective = value.questions.filter(q => q.type === 'subjective').sort((a, b) => a.number - b.number)
+  const validSubIds = mergeIds.filter(id => subjective.some(q => q.id === id))
+  const mergeableIds = validSubIds.filter(id => !subjective.find(q => q.id === id)?.parts)
+  function addSubjective() {
+    const num = Math.max(0, ...value.questions.flatMap(questionNumbers)) + 1
+    const starter = initialSubjectiveRegion(value, page)
+    const q = { ...newQuestion(num), regions: starter ? [starter] : [] }
+    change({ questions: [...value.questions, q] })
+    setEditing(null); setQuestionId(q.id); setDraw(!starter); setAnswerMode(false); setForbiddenMode(false)
+  }
+  async function createTaskCard(values: { teacher_id: string; name?: string; description?: string }) {
+    const targetGroup = groupId || value.group_id
+    if (!targetGroup || taskBusy) return
+    setTaskBusy(true)
+    try {
+      const created = await send<Row>('/teacher-templates/assign', {
+        group_id: targetGroup,
+        teacher_id: values.teacher_id,
+        name: values.name?.trim() || undefined,
+        description: values.description?.trim() || '',
+      })
+      setTaskModalOpen(false)
+      taskForm.resetFields()
+      message.success(`已向 ${created.owner_name} 创建并分配任务题卡`)
+    } catch (e) {
+      message.error((e as Error).message)
+    } finally {
+      setTaskBusy(false)
+    }
+  }
   return <div className="template-workspace">
     <ErrorNotice error={templates.error || groups.error} retry={() => { void templates.reload(); void groups.reload() }} />
     <Card className="template-action-bar"><div className="template-actions">
       <Space wrap><Select disabled={saving||saver.saving} className="template-select" showSearch optionFilterProp="label" placeholder="选择版式草稿" value={value.id || undefined} options={[...saved.filter(t=>t.id!==value.id),value].map(t => ({ label: `${t.name} · ${versionLabel(t)}`, value: t.id }))} onChange={id => { const item = saved.find(t => t.id === id); if (item) load(item) }} /><Dropdown menu={{ items: [
         { key: 'new', label: '新建版式草稿', icon: <PlusOutlined />, onClick: () => load(emptyTemplate(groupId)) },
+        ...(groupId||value.group_id ? [{ key: 'task', label: '创建任务题卡（分配给教师）', disabled: !!group?.frozen, onClick: () => { taskForm.setFieldsValue({ name: value.name || '', description: '' }); setTaskModalOpen(true) } }] : []),
         { key: 'copy', label: '复制为新草稿', icon: <CopyOutlined />, disabled: !value.id, onClick: () => load({ ...structuredClone(value), id: crypto.randomUUID(), draft_version:0, name: `${value.name}（副本）`, status: 'draft', revision: 0, layout_version:3, sheet_columns:value.paper==='A3'?(value.sheet_columns||2):1, notice_template:value.notice_template||'standard-v1', print_style:'standard-v2', forbidden_regions:value.forbidden_regions||[], group_id: groupId || value.group_id, questions: value.questions.map(q => ({ ...q, id: crypto.randomUUID() })) }) },
         {key:'delete',label:'删除当前版式',danger:true,disabled:templateLocked&&value.id===official,onClick:removeVersion},
-      ] }}><Button disabled={saving||saver.saving}>题卡操作</Button></Dropdown></Space>
+      ] }}><Button disabled={saving||saver.saving}>题卡操作</Button></Dropdown>{(groupId||value.group_id)&&<Button disabled={saving||saver.saving||!!group?.frozen} onClick={()=>{taskForm.setFieldsValue({name:value.name||'',description:''});setTaskModalOpen(true)}}>创建任务题卡</Button>}</Space>
       <Space wrap><Text type="secondary">{value.questions.length} 题 · {total} 分</Text><Tag color={readOnly ? 'green' : dirty ? 'orange' : 'default'}>{readOnly ? versionLabel(value) : saver.saving ? '正在保存…' : saver.error ? '保存失败' : dirty ? '等待自动保存' : saver.savedAt ? '已保存 '+new Date(saver.savedAt).toLocaleTimeString() : '草稿'}</Tag><Button icon={<SaveOutlined />} disabled={readOnly || saving} loading={saveAction === 'save'} onClick={() => save()}>保存草稿</Button><Button type="primary" disabled={readOnly || saving || templateLocked} loading={saveAction === 'publish'} onClick={() => modal.confirm({ title: official?'替换当前发布版本？':'发布这张题卡？', content: official?'将用「'+value.name+'」替换「'+(saved.find(t=>t.id===official)?.name||'当前版本')+'」。请用新版本重新创建扫描批次。':'发布后即可扫描，客观题答案可在扫描后补录。', onOk: () => save(true) })}>{templateLocked?'扫描已开始，正式题卡已锁定':'审查发布'}</Button>{readOnly&&<ScoringChanges template={value} onSaved={async()=>{const next=await request<Template[]>('/templates');const t=next.find(t=>t.id===value.id);if(t)load(t);await templates.reload();await groups.reload()}}/>}<Button icon={<DownloadOutlined />} disabled={saving || !value.group_id} loading={saveAction === 'export'} onClick={exportPaper}>导出题卡 PDF</Button></Space>
     </div></Card>
     {layoutError&&<Alert type="error" showIcon message="题区需要调整" description={layoutError} action={<Button disabled={readOnly||layoutBusy} onClick={()=>void arrange(saver.value).catch(error=>setLayoutError((error as Error).message))}>重新排版</Button>}/>}
@@ -229,7 +262,7 @@ export function TemplateEditor({ groupId }: { groupId?: string }) {
       <Card className="template-config"><Tabs activeKey={pane} onChange={key=>{setEditing(null);setPane(key);setForbiddenMode(false);setAnswerMode(key==='objective');setDraw(key==='subjective');if(key==='subjective'&&question?.type!=='subjective')setQuestionId(subjective[0]?.id||'')}} items={[
         { key: 'setup', label: '底版', children: setup },
         { key: 'objective', label: '选择题', children: <ObjectiveEditor value={value} page={page} readOnly={readOnly || saving} selected={questionId} onChange={questions => change({ questions, layout_version:3 })} onSelect={id => select(id)} onEdit={id => select(id, true)} /> },
-        { key: 'subjective', label: '主观题', children: <div className="editor-section"><Space wrap><Switch aria-label="题区随内容自动调整" disabled={readOnly||saving} checked={!!value.auto_subjective_layout} onChange={auto_subjective_layout=>change({auto_subjective_layout})}/><Text>题区随内容自动调整</Text><Button disabled={readOnly||saving||layoutBusy} loading={layoutBusy} onClick={()=>void arrange(saver.value).catch(error=>setLayoutError((error as Error).message))}>按内容排版</Button><Button icon={<PlusOutlined />} disabled={readOnly||saving} onClick={() => { const q = newQuestion(Math.max(0, ...value.questions.flatMap(questionNumbers)) + 1); change({ questions: [...value.questions, q] }); setEditing(null);setQuestionId(q.id); setDraw(true); setAnswerMode(false); setForbiddenMode(false) }}>{value.auto_subjective_layout?'添加主观题':'添加主观题并框选'}</Button><Button disabled={readOnly||saving||mergeIds.length<2} onClick={combine}>合并题目</Button></Space><Text type="secondary">双击题区编辑题干；切换移动模式后可拖动底边调整高度。自动排版会顺排后续题区。</Text><Table<Question> rowSelection={readOnly?undefined:{selectedRowKeys:mergeIds,onChange:keys=>setMergeIds(keys.map(String)),getCheckboxProps:q=>({disabled:!!q.parts||saving})}} rowClassName={q=>q.id===questionId?'selected-question-row':''} onRow={q=>({onClick:()=>{setEditing(null);setQuestionId(q.id);setDraw(!q.parts);if(q.regions.length)setPage(q.regions[0].page)}})} rowKey="id" size="middle" dataSource={subjective} pagination={{ defaultPageSize:50 }} locale={{ emptyText: <Empty description="添加主观题后，在预览中框选答题区域" /> }} columns={[{ title: '题号', render:(_,q)=>questionLabel(q) }, { title: '分值', render:(_,q)=><InputNumber aria-label={'第'+q.number+'题分值'} disabled={readOnly||saving||!!q.parts} min={0.01} precision={2} value={q.points} onChange={points=>{if(points!==null)change({questions:value.questions.map(item=>item.id===q.id?{...item,points}:item)})}}/> }, { title: '区域', render: (_, q) => q.regions.length ? `${q.regions.length} 个` : '待框选' }, { title: '', render: (_, q) => <Button type="link" onClick={() => select(q.id, true)}>设置</Button> }]} /></div> },
+        { key: 'subjective', label: '主观题', children: <div className="editor-section"><Space wrap size={6}><Switch size="small" aria-label="题区随内容自动调整" disabled={readOnly||saving} checked={!!value.auto_subjective_layout} onChange={auto_subjective_layout=>change({auto_subjective_layout})}/><Text style={{fontSize:12}}>自动排版</Text><Button size="small" disabled={readOnly||saving||layoutBusy} loading={layoutBusy} onClick={()=>void arrange(saver.value).catch(error=>setLayoutError((error as Error).message))}>按内容排版</Button><Button size="small" type="primary" icon={<PlusOutlined />} disabled={readOnly||saving} onClick={addSubjective}>{value.sides===2?`添加主观题（${page===2?'背面':'正面'}）`:'添加主观题'}</Button></Space>{!readOnly&&validSubIds.length>0&&<div className="question-batch-bar"><Space wrap size={6}><Text style={{fontSize:12}}>已选 {validSubIds.length} 题</Text><InputNumber size="small" min={0.01} precision={2} value={subBatchPoints} onChange={setSubBatchPoints} style={{width:64}} aria-label="主观题批量分值"/><Button size="small" onClick={()=>{if(subBatchPoints==null||subBatchPoints<=0)return;const ids=new Set(mergeableIds);change({questions:value.questions.map(q=>ids.has(q.id)?{...q,points:subBatchPoints}:q)});message.success('已批量更新分值')}}>设分</Button><Button size="small" disabled={saving||mergeableIds.length<2} onClick={combine}>合并</Button><Popconfirm title={`删除选中的 ${validSubIds.length} 道主观题？`} onConfirm={()=>{const ids=new Set(validSubIds);change({questions:value.questions.filter(q=>!ids.has(q.id))});setMergeIds([]);if(ids.has(questionId))setQuestionId('')}}><Button size="small" danger>删除</Button></Popconfirm><Button size="small" type="text" onClick={()=>setMergeIds([])}>取消</Button></Space></div>}<Table<Question> columnChooser={false} exportable={false} rowSelection={readOnly?undefined:{columnWidth:32,selectedRowKeys:validSubIds,onChange:keys=>setMergeIds(keys.map(String))}} rowClassName={q=>q.id===questionId?'selected-question-row':''} onRow={q=>({onClick:()=>{setEditing(null);setQuestionId(q.id);setDraw(!q.parts&&!q.regions.length);if(q.regions.length)setPage(q.regions[0].page)}})} rowKey="id" size="small" dataSource={subjective} pagination={subjective.length>50?{defaultPageSize:50,size:'small'}:false} locale={{ emptyText: <Empty description="点击「添加主观题」在当前面创建答题区" /> }} columns={[{ title: '题号', width: 92, render:(_,q)=><Space size={4}><span>{questionLabel(q)}</span>{q.regions.length?<Tag style={{marginInlineEnd:0,fontSize:11,paddingInline:4,lineHeight:'16px'}}>{[...new Set(q.regions.map(r=>r.page===1?'正':'背'))].join('/')}</Tag>:<Tag color="orange" style={{marginInlineEnd:0,fontSize:11,paddingInline:4,lineHeight:'16px'}}>待框选</Tag>}</Space> }, { title: '分值', width: 76, render:(_,q)=><InputNumber size="small" aria-label={'第'+q.number+'题分值'} disabled={readOnly||saving||!!q.parts} min={0.01} precision={2} value={q.points} onClick={e=>e.stopPropagation()} onChange={points=>{if(points!==null)change({questions:value.questions.map(item=>item.id===q.id?{...item,points}:item)})}}/> }, { title: '', width: 48, render: (_, q) => <Button size="small" type="link" style={{paddingInline:2}} onClick={e => { e.stopPropagation(); select(q.id, true) }}>设置</Button> }]} /></div> },
         { key:'notes',label:'版面文字',children:<div className="editor-section">
           <Text>点击网格添加文字，双击已有文字修改。拖动文字框移动，拖右下角调整大小。</Text>
           {!!notes.filter(n=>n.page===page).length&&<Select aria-label="当前面的文字框" placeholder="选择文字框" value={note?.id} onChange={id=>{setEditing(null);setNoteId(id)}} options={notes.filter(n=>n.page===page).map((n,i)=>({value:n.id,label:new DOMParser().parseFromString(n.html,'text/html').body.textContent?.trim().slice(0,35)||('文字框 '+(i+1))}))}/>}
@@ -246,5 +279,15 @@ export function TemplateEditor({ groupId }: { groupId?: string }) {
       </Card>
     </div>
     <QuestionSettings template={value} onText={()=>{if(!question?.regions.length)return;const index=Math.max(0,question.regions.findIndex(r=>r.page===page));setPage(question.regions[index].page);editText({kind:'question',id:question.id,index})}} onSplit={()=>{if(!question?.parts)return;change({questions:value.questions.flatMap(q=>q.id===question.id?splitQuestions(q):[q])});setSettingsOpen(false);setMergeIds([])}} question={question} open={settingsOpen} readOnly={readOnly || saving} onClose={() => setSettingsOpen(false)} onChange={patchQuestion} onDraw={() => { setForbiddenMode(false); setDraw(true); setAnswerMode(false); setSettingsOpen(false) }} onDelete={() => { if (!question) return; change({ questions: value.questions.filter(q => q.id !== question.id) }); setQuestionId(''); setSettingsOpen(false) }} />
+    <Modal title="创建任务题卡（分配给教师）" open={taskModalOpen} onCancel={()=>!taskBusy&&setTaskModalOpen(false)} onOk={()=>taskForm.submit()} confirmLoading={taskBusy} okText="创建并分配">
+      <Alert type="info" showIcon style={{marginBottom:14}} message="创建后将分配到指定教师账号，对方教师端通知中心会显示一键进入制卡入口；制作完成后可保存、复制内部链接或推送给管理员审核。"/>
+      <Form form={taskForm} layout="vertical" onFinish={createTaskCard}>
+        <Form.Item name="teacher_id" label="分配给教师" rules={[{required:true,message:'请选择接收教师'}]}>
+          <Select showSearch optionFilterProp="label" placeholder="搜索教师姓名或账号" options={users.data.map(u=>({value:u.id,label:`${u.name}（${u.username}）`}))}/>
+        </Form.Item>
+        <Form.Item name="name" label="任务题卡标题（选填）"><Input maxLength={100} placeholder="留空自动按考试科目命名"/></Form.Item>
+        <Form.Item name="description" label="制卡要求说明（选填）"><Input.TextArea rows={3} maxLength={2000} placeholder="可注明题量、分值、纸张大小或截稿时间"/></Form.Item>
+      </Form>
+    </Modal>
   </div>
 }

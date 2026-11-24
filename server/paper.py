@@ -144,7 +144,7 @@ def forbidden_regions(template,page):
     return [r for r in result if r['width']>=30 and r['height']>=12]
 
 
-def pdf(template):
+def pdf(template, only_page=None):
     from .merged_questions import print_questions
     template={**template,'questions':list(print_questions(template))}
     validate(template)
@@ -152,7 +152,8 @@ def pdf(template):
     output=io.BytesIO()
     w,h=dimensions(template)
     c=PaperCanvas(output,pagesize=(w*mm,h*mm))
-    for page in range(1,template['sides']+1):
+    pages_to_draw=[only_page] if only_page is not None else range(1,template['sides']+1)
+    for page in pages_to_draw:
         side='front' if page==1 else 'back'
         background_id=template.get('background_assets',{}).get(str(page)) or (template.get('background_asset_id') if page==1 else None)
         if background_id:

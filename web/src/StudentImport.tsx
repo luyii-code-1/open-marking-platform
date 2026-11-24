@@ -3,7 +3,7 @@ import {Alert, App, Form, Input, Modal, Select, Space, Upload} from 'antd'
 import { Table } from './DataTable'
 import {Button} from './Button'
 import {gradeColor} from './SchoolTags'
-import {MultiTagPicker,TagPicker} from './TagPicker'
+import {TagPicker} from './TagPicker'
 import {request, type Row} from './api'
 
 type Sheet = {name:string;columns:string[];rows:number}
@@ -49,11 +49,11 @@ export function StudentImport({grades,onSaved}:{grades:Row[];onSaved:()=>Promise
       <Space direction="vertical" size={16} style={{width:'100%'}}>
         <Upload accept=".xlsx,.csv" disabled={busy} showUploadList={false} beforeUpload={f=>{void inspect(f);return false}}><Button disabled={busy}>{file?'更换文件':'选择 Excel 或 CSV 文件'}</Button></Upload>
         {file&&<Form layout="vertical" disabled={busy}>
-          <Form.Item label={file.name}><MultiTagPicker showSelectAll value={selected} options={sheets.map(s=>({value:s.name,label:s.name+'（'+s.rows+' 行）'}))} onChange={v=>{setSelected(v);invalidate()}}/></Form.Item>
+          <Form.Item label={file.name}><Select mode="multiple" value={selected} options={sheets.map(s=>({value:s.name,label:s.name+'（'+s.rows+' 行）'}))} onChange={v=>{setSelected(v);invalidate()}}/></Form.Item>
           <Form.Item label="统一年级"><TagPicker allowClear clearLabel="按表内年级列" value={grade} options={grades.filter(g=>!g.archived).map(g=>({value:g.id,label:g.name,color:gradeColor(g.name)}))} onChange={v=>{setGrade(v);invalidate()}}/></Form.Item>
           <div className="editor-form-grid">{(Object.keys(fields) as Field[]).filter(f=>!(f==='grade'&&grade)&&!(f==='class_name'&&fixedClass.trim())).map(f=><Form.Item key={f} label={fields[f]}><Select placeholder="选择表格列" value={mapping[f]} options={columns.map(c=>({value:c,label:c}))} onChange={v=>{setMapping({...mapping,[f]:v});invalidate()}}/></Form.Item>)}</div>
           <Form.Item label="统一班级（可选）"><Input value={fixedClass} placeholder="留空时按班级列匹配或创建" onChange={e=>{setFixedClass(e.target.value);invalidate()}}/></Form.Item>
-          <Form.Item label="已有考号的姓名或班级不一致时"><TagPicker value={policy} options={[{value:'block',label:'列出冲突，暂停导入'},{value:'skip',label:'跳过冲突学生'},{value:'update',label:'按表格更新已有学生'}]} onChange={v=>{if(v){setPolicy(v);invalidate()}}}/></Form.Item>
+          <Form.Item label="已有考号的姓名或班级不一致时"><Select value={policy} options={[{value:'block',label:'列出冲突，暂停导入'},{value:'skip',label:'跳过冲突学生'},{value:'update',label:'按表格更新已有学生'}]} onChange={v=>{setPolicy(v);invalidate()}}/></Form.Item>
         </Form>}
         {error&&<Alert type="error" message={error}/>}
         {result&&<><Alert type={result.can_import?'info':'warning'} message={'新增 '+result.new+' 人，更新 '+result.updated+' 人，跳过 '+result.skipped+' 人，合并重复 '+result.duplicates+' 行，新建 '+result.classes+' 个班级'}/>
