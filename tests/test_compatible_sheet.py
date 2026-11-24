@@ -110,3 +110,63 @@ def test_reference_import_reads_both_pdf_faces(paper, pdf_page):
     assert len(images) == 2
     assert (images[0].shape[1] > images[0].shape[0]) == (paper == 'A3')
     assert np.min(images[0]) < 50
+
+
+def test_publish_trial_and_wire_compatibility(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    from server import db, jobs
+    from server.main import app
+
+    monkeypatch.setattr(db, 'ROOT', tmp_path)
+    monkeypatch.setattr(jobs, 'dispatch', lambda *args, **kwargs: None)
+    template, (image,) = sheet('A4', 1)
+    sample = cv2.imencode('.png', image)[1].tobytes()
+    with TestClient(app) as client:
+        account = {'username': 'admin', 'password': 'administrator-password', 'name': '管理员'}
+        assert client.post('/api/v1/auth/bootstrap', json=account).is_success
+        login = client.post('/api/v1/auth/login', json=account)
+        assert login.is_success
+        headers = {'Authorization': 'Bearer ' + login.json()['token']}
+        with db.connect() as connection:
+            project = db.put(connection, 'projects', {'name': '兼容测试', 'status': 'draft'})
+            subject = db.put(connection, 'subjects', {'project_id': project['id'], 'name': '数学'})
+            group = db.put(connection, 'groups', {'subject_id': subject['id'], 'name': '题卡组'})
+        template['group_id'] = group['id']
+        group_url = f"/api/v1/groups/{group['id']}"
+        reference = client.post(group_url + '/compatible/reference', data={'paper': 'A4'},
+                                files={'files': ('reference.png', sample)}, headers=headers)
+        assert reference.is_success and len(reference.json()['pages']) == 1, reference.text[:400]
+        url = f"/api/v1/templates/{template['id']}"
+        saved = client.put(group_url + f"/drafts/{template['id']}", headers=headers,
+                           json={'value': template, 'base_version': 0, 'request_id': str(uuid4())})
+        assert saved.is_success, saved.text
+        assert client.post(url + '/publish', headers=headers).status_code == 422
+        trial = client.post(url + '/compatible/trial', data={'side': 'front'},
+                            files={'file': ('trial.png', sample)}, headers=headers)
+        assert trial.is_success and trial.json()['candidate'] == '012', trial.text[:400]
+        with db.connect() as connection:
+            assert not db.objects(connection, 'pages') and not db.objects(connection, 'submissions')
+        published = client.post(url + '/publish', headers=headers)
+        assert published.is_success, published.text
+        package_url = f"/api/v1/scanner/projects/{project['id']}/package"
+        assert not client.get(package_url, headers=headers).json()['groups']
+        group_config = client.get(package_url, params={'capability': external.CAPABILITY}, headers=headers).json()['groups'][0]
+        assert group_config['config_sha256'] == config_hash(published.json())
+        assert group_config['template']['external_sheet'] == template['external_sheet']
+        batch, page = str(uuid4()), str(uuid4())
+        created = client.post(f'/api/v1/scanner/batches/{batch}', headers=headers,
+                              json={'group_id': group['id'], 'template_id': template['id'],
+                                    'template_revision': published.json()['revision'], 'config_sha256': group_config['config_sha256']})
+        assert created.is_success, created.text
+        qid = template['questions'][0]['id']
+        x, y, _, b = external.bounds(template['questions'][0]['external_options'][0])
+        image[y + 3:b - 3, x + 6:x + 10] = 20
+        uploaded = client.post(f'/api/v1/scan-batches/{batch}/pages', headers=headers,
+                               data={'capture_id': page, 'side': 'front', 'sequence': 1},
+                               files={'file': ('answer.png', cv2.imencode('.png', image)[1].tobytes())})
+        assert uploaded.is_success, uploaded.text
+        jobs.process_page(page)
+        page_url = f'/api/v1/pages/{page}'
+        assert client.put(page_url, json={'reason': '核对扫描页'}, headers=headers).status_code == 422
+        corrected = client.put(page_url, json={'reason': '核对扫描页', 'selections': {qid: ['C']}}, headers=headers)
+        assert corrected.is_success and corrected.json()['status'] == 'recognized', corrected.text

@@ -129,8 +129,8 @@ export function CompatibleTemplateEditor({ value, disabled, readOnly, change, fl
 
   function point(event: PointerEvent<SVGSVGElement>): Point {
     const rect = event.currentTarget.getBoundingClientRect()
-    return [Math.min(width, Math.max(0, (event.clientX - rect.left) / rect.width * width)),
-      Math.min(height, Math.max(0, (event.clientY - rect.top) / rect.height * height))]
+    return [Math.min(correcting ? width - 1 : width, Math.max(0, (event.clientX - rect.left) / rect.width * width)),
+      Math.min(correcting ? height - 1 : height, Math.max(0, (event.clientY - rect.top) / rect.height * height))]
   }
 
   function rectangle(a: Point, b: Point): ImageBox {

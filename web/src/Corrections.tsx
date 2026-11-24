@@ -79,7 +79,7 @@ export function Corrections({groupId,selectedGroup:externalGroup,onGroupChange,s
     <Modal title="核对页面" open={!!page} onCancel={()=>setPage(null)} confirmLoading={busy}
       okButtonProps={{disabled:!reason.trim()||frozen||(!excluded&&pendingMarks?.questions.some(id=>!(id in markSelections)))}}
       onOk={()=>act(async()=>{
-        await send(`/pages/${page!.id}`,{candidate_number:candidate||undefined,sequence,excluded,reason,
+        await send(`/pages/${page!.id}`,{candidate_number:excluded?undefined:candidate||undefined,sequence,excluded,reason,
           ...(page!.side==='front'?{absent_mark:absentMark}:{}),
           ...(pendingMarks?.questions.length&&!excluded?{selections:markSelections}:{})},'PUT')
         setPage(null)

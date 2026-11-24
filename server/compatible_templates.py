@@ -63,7 +63,9 @@ def input_pages(content, width, height):
             source.seek(frame)
             if source.width * source.height > 40_000_000 or min(source.size) < 150:
                 raise ValueError('题卡图片尺寸无效或超过 4000 万像素')
-            images.append(np.array(ImageOps.exif_transpose(source).convert('L')))
+            gray = ImageOps.exif_transpose(source).convert('L')
+            gray.thumbnail((2200, 2200), Image.Resampling.LANCZOS)
+            images.append(np.array(gray))
         return images
 
 
