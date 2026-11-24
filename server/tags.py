@@ -156,7 +156,32 @@ def build_tag_catalog(db):
             'student_count': len(sids),
         })
 
-    # 3. Custom tags
+    # 3. Built-in custom role tags (e.g. 班主任)
+    homeroom_class_ids = []
+    homeroom_teacher_ids = set()
+    for c in classes:
+        teaching = c.get('teaching') or {}
+        hr_uids = [uid for uid, info in teaching.items() if isinstance(info, dict) and info.get('homeroom') is True]
+        if hr_uids:
+            homeroom_class_ids.append(c['id'])
+            homeroom_teacher_ids.update(hr_uids)
+    hr_ref_key = 'role:homeroom'
+    result.append({
+        'id': hr_ref_key,
+        'ref_id': 'homeroom',
+        'name': '班主任',
+        'category': 'custom',
+        'builtin': True,
+        'color': meta.get(hr_ref_key, {}).get('color') or 'gold',
+        'description': '系统内置教师职务标签，担任班主任的教师自动拥有此标签',
+        'class_ids': homeroom_class_ids,
+        'student_ids': [],
+        'class_count': len(homeroom_class_ids),
+        'student_count': 0,
+        'teacher_count': len(homeroom_teacher_ids),
+    })
+
+    # 4. Custom tags
     for tag in custom_tags:
         tname = tag['name']
         cids = [c['id'] for c in classes if tname in (c.get('tags') or [])]
@@ -232,8 +257,8 @@ def create_tag(body: dict, current=Depends(admin)):
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
         ensure_synced_custom_tags(db, current['id'])
-        if any(t['name'] == name for t in objects(db, 'tags')):
-            raise HTTPException(409, '已有同名标签')
+        if name == '班主任' or any(t['name'] == name for t in objects(db, 'tags')):
+            raise HTTPException(409, '「班主任」为系统内置标签' if name == '班主任' else '已有同名标签')
         valid_sids = []
         for sid in dict.fromkeys(student_ids):
             require(db, sid, 'students')
@@ -304,10 +329,19 @@ def update_tag(identifier: str, body: dict, current=Depends(admin)):
                 _set_meta(db, identifier, clean_color(body['color'], 'geekblue'), current['id'])
             return {'id': identifier, 'name': st['name'], 'color': body.get('color')}
 
+        # Handle built-in role tag edit (color only)
+        if identifier == 'role:homeroom':
+            color = clean_color(body.get('color'), 'gold')
+            if 'color' in body:
+                _set_meta(db, identifier, color, current['id'])
+            return {'id': identifier, 'name': '班主任', 'color': color}
+
         # Handle custom tag edit
         tag = require(db, identifier, 'tags')
         old_name = tag['name']
         new_name = clean_tag_name(body['name']) if 'name' in body else old_name
+        if new_name == '班主任':
+            raise HTTPException(409, '「班主任」为系统内置标签')
         if new_name != old_name and any(t['id'] != identifier and t['name'] == new_name for t in objects(db, 'tags')):
             raise HTTPException(409, '已有同名标签')
         tag['name'] = new_name

@@ -44,6 +44,7 @@ class DeleteExecuteRequest(BaseModel):
     ids: list[str] = Field(min_length=1, max_length=500)
     cascade: bool = False
     mode: Literal['cascade', 'unlink'] = 'cascade'
+    force: bool = False
 
 
 def _find_referenced_ids(value, id_set):
@@ -476,11 +477,11 @@ def plan_deletion(db, kind: KINDS, raw_ids: list[str], mode: Literal['cascade', 
     }
 
 
-def _execute_plan(db, plan, current, cascade: bool):
-    if plan['blockers']:
+def _execute_plan(db, plan, current, cascade: bool, force: bool = False):
+    if plan['blockers'] and not force:
         summary = '；'.join(f"{b['kind_label']}「{b['name']}」（{b['reason']}）" for b in plan['blockers'][:5])
         raise HTTPException(409, f'存在受保护的引用，无法删除：{summary}')
-    if plan['requires_cascade'] and not cascade:
+    if plan['requires_cascade'] and not cascade and not force:
         refs = sorted({item['kind_label'] for item in [*plan['cascade_deletes'], *plan['cascade_unlinks']]})
         raise HTTPException(409, '记录已被引用：' + '、'.join(refs))
 
@@ -499,9 +500,31 @@ def _execute_plan(db, plan, current, cascade: bool):
     def remove_one(item_kind, oid, row):
         if item_kind == 'users':
             db.execute(
-                "UPDATE objects SET deleted=1 WHERE kind IN ('passkey','auth-challenge','recovery-code') AND json_extract(body,'$.user_id')=?",
-                (oid,),
+                "UPDATE objects SET deleted=1 WHERE kind IN ('passkey','auth-challenge','recovery-code','teacher-profiles') AND (id=? OR json_extract(body,'$.user_id')=?)",
+                (oid, oid),
             )
+            if force:
+                db.execute("UPDATE objects SET deleted=1 WHERE kind='tasks' AND json_extract(body,'$.user_id')=?", (oid,))
+                for tbl in ('review_allocations', 'regrade_queue'):
+                    try:
+                        db.execute(f'DELETE FROM {tbl} WHERE user_id=?', (oid,))
+                    except Exception:
+                        pass
+                for asgn in objects(db, 'assignments'):
+                    uids = asgn.get('user_ids') or []
+                    aids = asgn.get('arbitrator_ids') or []
+                    if oid in uids or oid in aids:
+                        asgn['user_ids'] = [u for u in uids if u != oid]
+                        asgn['arbitrator_ids'] = [u for u in aids if u != oid]
+                        put(db, 'assignments', asgn, actor)
+                for cls in objects(db, 'classes'):
+                    teaching = dict(cls.get('teaching') or {})
+                    tids = list(cls.get('teacher_ids') or [])
+                    if oid in teaching or oid in tids:
+                        teaching.pop(oid, None)
+                        cls['teaching'] = teaching
+                        cls['teacher_ids'] = [u for u in tids if u != oid]
+                        put(db, 'classes', cls, actor)
             db.execute('DELETE FROM sessions WHERE user_id=?', (oid,))
             db.execute('DELETE FROM users WHERE id=?', (oid,))
             audit_name = row.get('name', oid)
@@ -510,7 +533,7 @@ def _execute_plan(db, plan, current, cascade: bool):
             audit_name = row.get('subject') if item_kind == 'electives' else row.get('name', oid)
         db.execute(
             'INSERT INTO audit(id,actor,action,object_id,body) VALUES(?,?,?,?,?)',
-            (str(uuid4()), actor, 'delete', oid, json.dumps({'kind': item_kind, 'name': audit_name, 'cascade': cascade}, ensure_ascii=False)),
+            (str(uuid4()), actor, 'delete', oid, json.dumps({'kind': item_kind, 'name': audit_name, 'cascade': cascade, 'force': force}, ensure_ascii=False)),
         )
 
     for oid, (item_kind, obj) in plan['cascade_delete_map'].items():
@@ -522,6 +545,7 @@ def _execute_plan(db, plan, current, cascade: bool):
         'deleted': len(plan['targets']),
         'cascaded_deletes': len(plan['cascade_deletes']),
         'cascaded_unlinks': len(plan['cascade_unlinks']),
+        'forced': force,
     }
 
 
@@ -551,13 +575,13 @@ def batch_delete_records(kind: KINDS, body: DeleteExecuteRequest, current=Depend
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
         plan = plan_deletion(db, kind, body.ids, mode=body.mode)
-        return _execute_plan(db, plan, current, cascade=body.cascade or body.mode == 'unlink')
+        return _execute_plan(db, plan, current, cascade=body.cascade or body.mode == 'unlink', force=body.force)
 
 
 @router.delete('/records/{kind}/{identifier}')
-def delete_record(kind: KINDS, identifier: str, cascade: bool = Query(False), mode: Literal['cascade', 'unlink'] = Query('cascade'), current=Depends(admin)):
+def delete_record(kind: KINDS, identifier: str, cascade: bool = Query(False), mode: Literal['cascade', 'unlink'] = Query('cascade'), force: bool = Query(False), current=Depends(admin)):
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
         plan = plan_deletion(db, kind, [identifier], mode=mode)
-        _execute_plan(db, plan, current, cascade=cascade or mode == 'unlink')
-        return {'deleted': True}
+        _execute_plan(db, plan, current, cascade=cascade or mode == 'unlink', force=force)
+        return {'deleted': True, 'forced': force}

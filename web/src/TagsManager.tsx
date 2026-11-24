@@ -272,13 +272,13 @@ export function TagsManager({
           {
             title: '类别',
             dataIndex: 'category',
-            render: (value: string) => (
+            render: (value: string, row: Row) => (
               <Tag
                 style={{ cursor: 'pointer', marginInlineEnd: 0 }}
                 title="点击按此类别筛选"
                 onClick={() => setCategory(value === 'grade' || value === 'elective' || value === 'custom' ? value : 'all')}
               >
-                {categoryLabels[value] || value}
+                {value === 'custom' && row.builtin ? '内置 · 自定义' : categoryLabels[value] || value}
               </Tag>
             ),
           },

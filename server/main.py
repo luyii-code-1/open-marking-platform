@@ -11,7 +11,7 @@ from typing import Annotated
 from uuid import uuid4
 
 from fastapi import FastAPI, Depends, Header, HTTPException, UploadFile, File, Form, Request, Body
-from fastapi.responses import Response, JSONResponse, FileResponse
+from fastapi.responses import Response, JSONResponse, FileResponse, RedirectResponse
 from pathlib import Path
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -678,6 +678,18 @@ app.include_router(comparison_router)
 
 from .ai_admin import router as ai_admin_router
 app.include_router(ai_admin_router)
+
+
+@app.get('/marking', include_in_schema=False)
+@app.get('/marking/{rest:path}', include_in_schema=False)
+def redirect_marking(rest: str = ''):
+    target = f'/#/marking/{rest}' if rest else '/#/marking'
+    return RedirectResponse(url=target, status_code=302)
+
+
+@app.get('/teacher', include_in_schema=False)
+def redirect_teacher():
+    return RedirectResponse(url='/#/marking', status_code=302)
 
 
 if web_files is not None:

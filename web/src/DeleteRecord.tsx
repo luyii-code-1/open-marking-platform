@@ -70,6 +70,7 @@ export function DeleteRecordsModal({
   const [plan, setPlan] = useState<DeletePlan | null>(null)
   const [mode, setMode] = useState<'unlink' | 'cascade'>('unlink')
   const [confirmed, setConfirmed] = useState(false)
+  const [forceDelete, setForceDelete] = useState(false)
   const [busy, setBusy] = useState(false)
   const { message } = App.useApp()
 
@@ -78,6 +79,7 @@ export function DeleteRecordsModal({
     setLoading(true)
     setLoadError('')
     setConfirmed(false)
+    setForceDelete(false)
     try {
       const value = await send<DeletePlan>(`/records/${kind}/delete-preview`, { ids, mode: targetMode })
       setPlan(value)
@@ -95,21 +97,27 @@ export function DeleteRecordsModal({
       setPlan(null)
       setLoadError('')
       setConfirmed(false)
+      setForceDelete(false)
       setMode('unlink')
     }
   }, [open, mode, loadPreview])
 
   async function execute() {
-    if (!plan || !plan.can_delete || busy) return
-    if (plan.requires_cascade && !confirmed) return
+    if (!plan || busy) return
+    const isForce = plan.blockers.length > 0
+    if (isForce && !forceDelete) return
+    if (!isForce && !plan.can_delete) return
+    if (!isForce && plan.requires_cascade && !confirmed) return
     setBusy(true)
     try {
-      const result = await send<{ deleted: number; cascaded_deletes: number; cascaded_unlinks: number }>(`/records/${kind}/delete`, {
+      const result = await send<{ deleted: number; cascaded_deletes: number; cascaded_unlinks: number; forced?: boolean }>(`/records/${kind}/delete`, {
         ids,
-        cascade: plan.requires_cascade,
+        cascade: plan.requires_cascade || isForce,
         mode,
+        force: isForce && forceDelete,
       })
       const extras = [
+        result.forced ? '强制删除' : '',
         result.cascaded_deletes ? `连带删除 ${result.cascaded_deletes} 项基础资料` : '',
         result.cascaded_unlinks ? `解除 ${result.cascaded_unlinks} 项关联绑定` : '',
       ]
@@ -132,7 +140,8 @@ export function DeleteRecordsModal({
       : `核对删除${plan.kind_label}`
     : '核对引用与删除'
 
-  const okDisabled = loading || !plan || !plan.can_delete || (plan.requires_cascade && !confirmed)
+  const hasBlockers = !!plan && plan.blockers.length > 0
+  const okDisabled = loading || !plan || (hasBlockers ? !forceDelete : !plan.can_delete || (plan.requires_cascade && !confirmed))
 
   return (
     <Modal
@@ -141,7 +150,7 @@ export function DeleteRecordsModal({
       width={660}
       onCancel={() => !busy && onClose()}
       onOk={() => void execute()}
-      okText={plan?.requires_cascade ? (mode === 'unlink' ? '确认解绑并删除' : '确认链式删除') : '确认删除'}
+      okText={hasBlockers ? '确认强制删除' : plan?.requires_cascade ? (mode === 'unlink' ? '确认解绑并删除' : '确认链式删除') : '确认删除'}
       cancelText="取消"
       confirmLoading={busy}
       okButtonProps={{ danger: true, disabled: okDisabled }}
@@ -192,10 +201,15 @@ export function DeleteRecordsModal({
                 <Alert
                   type="error"
                   showIcon
-                  message={`存在 ${plan.blockers.length} 项受保护的考试业务引用，无法删除`}
-                  description="考试题卡、答卷、评分记录及已发布成绩受保护，请先在对应考试项目中处理后再删除。"
+                  message={`存在 ${plan.blockers.length} 项受保护的考试业务引用，默认不可删除`}
+                  description="考试题卡、答卷、评分记录及已发布成绩受保护；如确需清理测试账号或强制移除，请勾选下方强制删除确认。"
                 />
                 <ReferenceList items={plan.blockers} tone="blocker" />
+                <Checkbox checked={forceDelete} onChange={e => setForceDelete(e.target.checked)}>
+                  <Typography.Text type="danger" strong>
+                    强制删除：我已核对受保护引用，确认强制删除所选记录并清理其关联任务与绑定
+                  </Typography.Text>
+                </Checkbox>
               </>
             ) : plan.requires_cascade ? (
               <>

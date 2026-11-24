@@ -20,6 +20,7 @@ export const TAG_COLOR_CHOICES = [
 ]
 
 const presetTagColors: Record<string, string> = {
+  班主任: 'gold',
   直卓: 'purple',
   卓越: 'blue',
   重点: 'geekblue',

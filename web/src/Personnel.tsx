@@ -92,6 +92,11 @@ export function Personnel({
   const applyClassTagFilter = (tagName: string) => applyClassFilter('tag', tagName)
   const applyStudentTagFilter = (tagName: string) => applyStudentFilter('tag', tagName)
   const jumpToStudentsByTag = (tagName: string) => {
+    if (tagName === '班主任') {
+      setTeacherFilters({ tag: ['班主任'] })
+      onTab?.('users')
+      return
+    }
     setStudentFilters({ tag: [tagName] })
     onTab?.('students')
   }
@@ -194,6 +199,7 @@ export function Personnel({
         }
         if (roleInfo.homeroom === true && !meta.homeroomClasses.some(item => item.id === c.id)) {
           meta.homeroomClasses.push({ id: c.id, label })
+          if (!meta.tags.includes('班主任')) meta.tags.unshift('班主任')
         }
       }
     }
@@ -234,18 +240,9 @@ export function Personnel({
     },
     {
       key: 'tag',
-      label: '班级标签',
-      options: classTagOptions,
+      label: '标签',
+      options: [{ value: '班主任', label: '班主任' }, ...classTagOptions.filter(o => o.value !== '班主任')],
       values: u => teacherMetaById.get(u.id)?.tags || [],
-    },
-    {
-      key: 'homeroom',
-      label: '班主任',
-      options: [
-        { value: 'yes', label: '班主任' },
-        { value: 'no', label: '非班主任' },
-      ],
-      values: u => [(teacherMetaById.get(u.id)?.homeroomClasses.length || 0) > 0 ? 'yes' : 'no'],
     },
     {
       key: 'class',
@@ -536,28 +533,7 @@ export function Personnel({
                 ]}
                 columns={[
                   { title: '账号', dataIndex: 'username' },
-                  {
-                    title: '姓名',
-                    dataIndex: 'name',
-                    render: (value: string, row: Row) => {
-                      const meta = teacherMetaById.get(row.id)
-                      const hrList = meta?.homeroomClasses || []
-                      return (
-                        <Space size={6} wrap>
-                          <span>{value}</span>
-                          {hrList.length > 0 && (
-                            <Tag
-                              color="gold"
-                              style={{ marginInlineEnd: 0, cursor: 'pointer' }}
-                              onClick={() => applyTeacherFilter('homeroom', 'yes')}
-                            >
-                              班主任
-                            </Tag>
-                          )}
-                        </Space>
-                      )
-                    },
-                  },
+                  { title: '姓名', dataIndex: 'name' },
                   {
                     title: '角色',
                     dataIndex: 'role',
@@ -608,27 +584,6 @@ export function Personnel({
                         <ClassTags tags={tags} colorMap={tagColors} onTagClick={t => applyTeacherFilter('tag', t)} />
                       ) : (
                         '—'
-                      )
-                    },
-                  },
-                  {
-                    title: '班主任班级',
-                    render: (_, row) => {
-                      const hrList = teacherMetaById.get(row.id)?.homeroomClasses || []
-                      if (!hrList.length) return '—'
-                      return (
-                        <Space size={4} wrap>
-                          {hrList.map(c => (
-                            <Tag
-                              key={c.id}
-                              color="gold"
-                              style={{ cursor: 'pointer', marginInlineEnd: 0 }}
-                              onClick={() => applyTeacherFilter('class', c.id)}
-                            >
-                              {c.label}
-                            </Tag>
-                          ))}
-                        </Space>
                       )
                     },
                   },

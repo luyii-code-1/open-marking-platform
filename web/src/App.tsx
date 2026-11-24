@@ -45,6 +45,8 @@ export function App() {
     if(user.role==='admin'){
       if(portal!=='admin'){setPortal('admin');sessionStorage.setItem('omp-portal','admin')}
       if(location.page==='marking')navigate('#/scanner',true)
+    }else if(user.role==='manager'&&location.page==='marking'&&portal!=='marking'){
+      setPortal('marking');sessionStorage.setItem('omp-portal','marking')
     }
     if(location.page==='login'){
       const next:Portal=user.role==='admin'||location.section==='admin'&&user.role==='manager'?'admin':'marking'
@@ -53,8 +55,8 @@ export function App() {
   },[user,offlineAccess,location.page,location.section,portal])
   const guardPage = location.page === 'http-guard'
   const loginPortal = guardPage ? 'admin' : location.page === 'login' && (location.section === 'admin' || location.section === 'marking') ? location.section : undefined
-  const admin = user?.role==='admin'||user?.role==='manager', management = admin && (user.role==='admin'||portal==='admin')&&!offlineAccess
-  const page = management&&location.page==='marking'?'scanner':offlineAccess?'marking':location.page==='settings'&&user?.role==='manager'?'scanner':management || ['dashboard','marking','results','account'].includes(location.page) ? location.page : 'dashboard'
+  const admin = user?.role==='admin'||user?.role==='manager', management = admin && (user.role==='admin'||(portal==='admin'&&location.page!=='marking'))&&!offlineAccess
+  const page = management&&location.page==='marking'?'scanner':offlineAccess?'marking':location.page==='settings'&&user?.role==='manager'?'scanner':management || ['dashboard','marking','teacher-templates','results','account'].includes(location.page) ? location.page : 'dashboard'
   const waiting = checking || !!user && verifiedToken !== authToken
   const displayed = !user ? (loginPortal ? 'login/' + loginPortal : 'login')
     : guardPage ? (user.role === 'admin' && !offlineAccess ? 'http-guard/' + guardView(location.section) : null)
