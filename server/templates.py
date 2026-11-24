@@ -182,8 +182,8 @@ def objective_preview(body:dict,current=Depends(user)):
     errors=issues({'name':'规则试算','paper':'A4','sides':1,'questions':[question]})
     selected=body.get('selected',[])
     if question.get('type') not in ('single','multiple'):errors.append('请选择客观题')
-    count=question.get('options',4);count=count if type(count) is int and count in (3,4,5) else 0
-    if not isinstance(selected,list) or any(not isinstance(s,str) or s not in 'ABCDE'[:count] for s in selected) or len(set(selected))!=len(selected):errors.append('试算选项无效')
+    count=question.get('options',4);count=count if type(count) is int and count in (3,4,5,6,7) else 0
+    if not isinstance(selected,list) or any(not isinstance(s,str) or s not in 'ABCDEFG'[:count] for s in selected) or len(set(selected))!=len(selected):errors.append('试算选项无效')
     if question.get('type')=='single' and len(selected)>1:errors.append('单选题只能选择一个选项')
     if not question.get('answer'):errors.append('请先填写标准答案')
     if errors:raise HTTPException(422,'；'.join(errors))

@@ -68,8 +68,8 @@ def issues(template,complete=False,*,require_answers=True):
                     errors.append(label+'插图位置或尺寸无效')
         if q.get('type')!='subjective':
             answers=q.get('answer',[]);count=q.get('options',4)
-            if type(count) is not int or count not in (3,4,5):errors.append(label+'选项数量应为3、4或5')
-            elif not isinstance(answers,list) or any(not isinstance(a,str) or a not in 'ABCDE'[:count] or len(a)!=1 for a in answers):errors.append(label+'标准答案含无效选项')
+            if type(count) is not int or count not in (3,4,5,6,7):errors.append(label+'选项数量应为3至7项')
+            elif not isinstance(answers,list) or any(not isinstance(a,str) or a not in 'ABCDEFG'[:count] or len(a)!=1 for a in answers):errors.append(label+'标准答案含无效选项')
             elif len(set(answers))!=len(answers) or (q.get('type')=='single' and len(answers)>1):errors.append(label+'标准答案重复或单选题设置了多个答案')
             elif complete and require_answers and not answers:errors.append(label+'请设置标准答案')
             rule=q.get('rule') if q.get('rule') is not None else {'mode':'exact'}

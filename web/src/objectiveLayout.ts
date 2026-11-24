@@ -1,6 +1,6 @@
 import type { Question, Region, Template } from './api'
 
-export const answerLetters = 'ABCDE'
+export const answerLetters = 'ABCDEFG'
 export function parseQuestionNumbers(input: string): number[] {
   const numbers: number[] = []
   for (const part of input.trim().replace(/[，、；;]/g, ',').replace(/[–—~～]/g, '-').split(/[\s,]+/).filter(Boolean)) {
@@ -31,12 +31,12 @@ export function applyAnswers(questions: Question[], input: string) {
   if (!objective.length) throw new Error('请先创建客观题')
   if (!source) throw new Error('请粘贴答案')
   const lines = source.split(/\r?\n/).map(s => s.trim()).filter(Boolean)
-  const numbered = lines.every(line => /^\d+\s*[.、:：\s]\s*[A-E]+$/.test(line))
+  const numbered = lines.every(line => /^\d+\s*[.、:：\s]\s*[A-G]+$/.test(line))
   const answers = new Map<string, string[]>()
   if (numbered) {
     const seen = new Set<number>()
     for (const line of lines) {
-      const [, numberText, text] = /^(\d+)\s*[.、:：\s]\s*([A-E]+)$/.exec(line)!
+      const [, numberText, text] = /^(\d+)\s*[.、:：\s]\s*([A-G]+)$/.exec(line)!
       const number = Number(numberText), question = objective.find(q => q.number === number)
       if (!question) throw new Error(`第${number}题不存在或不是客观题`)
       if (seen.has(number)) throw new Error(`第${number}题重复出现`)
@@ -44,7 +44,7 @@ export function applyAnswers(questions: Question[], input: string) {
     }
     if (answers.size !== objective.length) throw new Error(`需要${objective.length}题答案，当前仅匹配${answers.size}题`)
   } else {
-    const values = /^[A-E]+$/.test(source) && objective.every(q => q.type === 'single') ? [...source] : source.split(/[\s,，;；]+/).filter(Boolean)
+    const values = /^[A-G]+$/.test(source) && objective.every(q => q.type === 'single') ? [...source] : source.split(/[\s,，;；]+/).filter(Boolean)
     if (values.length !== objective.length) throw new Error(`需要${objective.length}题答案，当前有${values.length}项；多选题答案请用空格或换行分隔`)
     objective.forEach((q, index) => answers.set(q.id, parseAnswer(q, values[index], false)))
   }
@@ -98,7 +98,7 @@ export function addObjective(template: Template, config: Layout & { numbers: str
   const numbers = parseQuestionNumbers(config.numbers), existing = new Set(template.questions.flatMap(q => q.parts?.map(p=>p.number)??[q.number]))
   const duplicate = numbers.filter(number => existing.has(number))
   if (duplicate.length) throw new Error(`题号已存在：${duplicate.join('、')}`)
-  if (![3, 4, 5].includes(config.options) || !['single', 'multiple'].includes(config.type) || !Number.isFinite(config.points) || config.points <= 0 || Math.abs(config.points * 100 - Math.round(config.points * 100)) > 1e-7) throw new Error('请选择3/4/5个选项，分值须为最多两位小数的正数')
+  if (![3, 4, 5, 6, 7].includes(config.options) || !['single', 'multiple'].includes(config.type) || !Number.isFinite(config.points) || config.points <= 0 || Math.abs(config.points * 100 - Math.round(config.points * 100)) > 1e-7) throw new Error('请选择3至7个选项，分值须为最多两位小数的正数')
   const created: Question[] = numbers.map(number => ({ id: uuid(), number, type: config.type, options: config.options, points: config.points, answer: [], rule: { mode: 'exact' }, regions: [], review_mode: 'single', threshold: 0 }))
   if(config.order==='row')for(const question of created)question.choice_group=created[0].id
   return arrangeObjective({ ...template, questions: [...template.questions, ...created].sort((a, b) => a.number - b.number) }, created.map(q => q.id), config)

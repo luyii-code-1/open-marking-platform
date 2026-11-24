@@ -103,9 +103,9 @@ export function Paper({value,page,selected,draw,answerMode=false,forbiddenMode=f
   function answerKey(event:React.KeyboardEvent){
     if(!answerMode||readOnly||event.ctrlKey||event.metaKey||event.altKey)return
     const index=Math.max(0,objective.findIndex(q=>q.id===selected)),q=objective[index];if(!q)return
-    const letter=/^[1-5]$/.test(event.key)?'ABCDE'[Number(event.key)-1]:/^[a-e]$/i.test(event.key)?event.key.toUpperCase():''
-    if(letter&&'ABCDE'.slice(0,q.options).includes(letter)){event.preventDefault();onAnswer?.(q.id,letter)}
-    else if(['Enter','6','ArrowRight','ArrowLeft'].includes(event.key)){event.preventDefault();const next=objective[Math.max(0,Math.min(objective.length-1,index+(event.key==='ArrowLeft'?-1:1)))];onSelect(next.id,next.regions[0]?.page)}
+    const letter=/^[1-7]$/.test(event.key)?'ABCDEFG'[Number(event.key)-1]:/^[a-g]$/i.test(event.key)?event.key.toUpperCase():''
+    if(letter&&'ABCDEFG'.slice(0,q.options).includes(letter)){event.preventDefault();onAnswer?.(q.id,letter)}
+    else if(['Enter','8','ArrowRight','ArrowLeft'].includes(event.key)||(event.key==='6'&&q.options<=5)){event.preventDefault();const next=objective[Math.max(0,Math.min(objective.length-1,index+(event.key==='ArrowLeft'?-1:1)))];onSelect(next.id,next.regions[0]?.page)}
   }
   const visible=preview?.paper===value.paper&&preview.page===page?preview:null,pending=preview?.key!==key
   function minimumY(x:number){const panels=value.paper==='A3'?(value.sheet_columns||2):1,panelWidth=(width-24-(panels-1)*8)/panels;return (value.layout_version||2)>=3&&(page!==1||x>=12+panelWidth)?35:100}

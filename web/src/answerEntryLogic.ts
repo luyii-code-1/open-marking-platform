@@ -2,9 +2,9 @@ import type {Question} from './api'
 import {parseAnswer,answerLetters} from './objectiveLayout'
 
 export function answerEntryKey(key:string,question:Pick<Question,'options'>):{letter?:string;offset?:number}|null{
-  const letter=/^[1-5]$/.test(key)?answerLetters[Number(key)-1]:/^[a-e]$/i.test(key)?key.toUpperCase():''
+  const letter=/^[1-7]$/.test(key)?answerLetters[Number(key)-1]:/^[a-g]$/i.test(key)?key.toUpperCase():''
   if(letter&&answerLetters.slice(0,question.options).includes(letter))return {letter}
-  if(['Enter','6','ArrowRight'].includes(key))return {offset:1}
+  if(['Enter','8','ArrowRight'].includes(key)||(key==='6'&&question.options<=5))return {offset:1}
   if(key==='ArrowLeft')return {offset:-1}
   return null
 }

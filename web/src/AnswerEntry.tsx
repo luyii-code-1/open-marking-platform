@@ -33,7 +33,7 @@ export function AnswerEntry({questions,onChange,readOnly=false,active=true}:{que
     }}>
       <Typography.Text type="secondary">{Math.min(index+1,rows.length)} / {rows.length} · {current.type==='single'?'单选题':'多选题'}</Typography.Text><Typography.Title level={3}>第 {current.number} 题</Typography.Title>
       <div className="answer-buttons">{[...answerLetters.slice(0,current.options)].map((letter,option)=><Button size="large" key={letter} disabled={readOnly} aria-label={`选项 ${letter}，快捷键 ${option+1}`} aria-pressed={current.answer.includes(letter)} type={current.answer.includes(letter)?'primary':'default'} onClick={()=>choose(letter)}>{letter}</Button>)}</div>
-      <Typography.Text type="secondary">数字 1–5 或 A–E 选择答案。单选自动下一题，多选按 Enter 或 6 继续。</Typography.Text>
+      <Typography.Text type="secondary">数字 1–7 或 A–G 选择答案。单选自动下一题，多选按 Enter 继续。</Typography.Text>
       <Space className="answer-pagination"><Button icon={<LeftOutlined/>} disabled={index===0||readOnly} onClick={()=>move(-1)}>上一题</Button><Button icon={<RightOutlined/>} iconPosition="end" disabled={index>=rows.length-1||readOnly} onClick={()=>move(1)}>下一题</Button></Space>
     </div>
 

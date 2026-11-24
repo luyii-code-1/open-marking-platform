@@ -71,7 +71,7 @@ def _build_option_distribution(db, current, project, subjects, scope, groups, fi
                 continue
             opt_count = int(question.get('options', 4) or 4)
             max_options = max(max_options, opt_count)
-            counts = {ch: 0 for ch in 'ABCDE'}
+            counts = {ch: 0 for ch in 'ABCDEFG'}
             blank_count = 0
             correct_count = 0
             analyzed = 0
@@ -109,6 +109,8 @@ def _build_option_distribution(db, current, project, subjects, scope, groups, fi
                 'opt_C': fmt(counts['C']),
                 'opt_D': fmt(counts['D']) if opt_count >= 4 else '—',
                 'opt_E': fmt(counts['E']) if opt_count >= 5 else '—',
+                'opt_F': fmt(counts['F']) if opt_count >= 6 else '—',
+                'opt_G': fmt(counts['G']) if opt_count >= 7 else '—',
                 'opt_blank': fmt(blank_count),
                 '_option_meta': {'answers': answers, 'analyzed': analyzed, 'counts': counts, 'blank': blank_count},
             }
@@ -128,6 +130,8 @@ def _build_option_distribution(db, current, project, subjects, scope, groups, fi
         {'key': 'opt_C', 'label': '选项 C'},
         {'key': 'opt_D', 'label': '选项 D'},
         *([{'key': 'opt_E', 'label': '选项 E'}] if max_options >= 5 else []),
+        *([{'key': 'opt_F', 'label': '选项 F'}] if max_options >= 6 else []),
+        *([{'key': 'opt_G', 'label': '选项 G'}] if max_options >= 7 else []),
         {'key': 'opt_blank', 'label': '未作答'},
     ]
     for key, values in choices.items():

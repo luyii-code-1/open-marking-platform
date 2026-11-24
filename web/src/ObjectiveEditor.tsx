@@ -208,7 +208,7 @@ export function ObjectiveEditor({ value, page, readOnly, selected, onChange, onE
                         disabled={readOnly}
                         value={q.answer.join('')}
                         placeholder={q.type === 'single' ? 'A' : 'AC'}
-                        maxLength={5}
+                        maxLength={7}
                         onClick={e => e.stopPropagation()}
                         onFocus={event => {
                           event.target.select()
@@ -266,7 +266,7 @@ export function ObjectiveEditor({ value, page, readOnly, selected, onChange, onE
               <TagPicker compact options={[{ label: '单选题', value: 'single' }, { label: '多选题', value: 'multiple' }]} />
             </Form.Item>
             <Form.Item name="options" label="选项数" rules={[{ required: true }]}>
-              <TagPicker compact options={[3, 4, 5].map(n => ({ label: `${n} 项`, value: n }))} />
+              <TagPicker compact options={[3, 4, 5, 6, 7].map(n => ({ label: `${n} 项`, value: n }))} />
             </Form.Item>
           </div>
           <Form.Item name="points" label="每题分值" rules={[{ required: true }]}>

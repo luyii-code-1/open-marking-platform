@@ -174,7 +174,7 @@ def tables(data):
             value[q['id']]=average;value[q['id']+'-rate']=percent(sum(values),len(values)*q['points'])
         averages.append(value)
     result['averages']=ReportTable(REPORT_NAMES['averages'],average_columns,averages)
-    options=list('ABCDE'[:max((q.get('options',4) for q in objective),default=4)])
+    options=list('ABCDEFG'[:max((q.get('options',4) for q in objective),default=4)])
     question_columns=[leaf('question','题号',24),leaf('answer','标准答案',14),leaf('points','满分'),leaf('analyzed','评分人数'),leaf('respondents','作答人数'),leaf('maximum','最大值'),leaf('minimum','最小值'),leaf('average','平均分'),leaf('deviation','标准差'),leaf('rate','得分率（%）',15),leaf('full_rate','满分率（%）',15),leaf('zero_rate','零分率（%）',15),leaf('difficulty','难度')]
     question_columns += [group(option,[leaf(option+'-count','人数'),leaf(option+'-rate','选率（%）',14)]) for option in [*options,'多选','留空']]
     analyzed=[]

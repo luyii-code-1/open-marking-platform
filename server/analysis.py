@@ -367,7 +367,7 @@ def answer_details(group_id:str,question_id:str,room_tag_id:str|None=None,includ
         subs={s['student_id']:s for s in find(db,'submissions',group_id=group_id)}
         label=question_label(q)
         objective=q['type']!='subjective'
-        counts={k:0 for k in 'ABCDE'[:q.get('options',4)]} if objective else {}
+        counts={k:0 for k in 'ABCDEFG'[:q.get('options',4)]} if objective else {}
         rows_out=[];respondents=0;blank=0
         versions={}
         for r in rows:

@@ -41,7 +41,7 @@ def correct_objective(identifier:str,body:dict,current=Depends(admin)):
         changes=body.get('selections')
         if not isinstance(changes,dict) or not changes:raise HTTPException(422,'请提供需更正的客观题选项')
         for qid,answers in changes.items():
-            if qid not in questions or not isinstance(answers,list) or any(not isinstance(a,str) or a not in 'ABCDE'[:questions[qid].get('options',4)] or len(a)!=1 for a in answers):raise HTTPException(422,'题目或选项无效')
+            if qid not in questions or not isinstance(answers,list) or any(not isinstance(a,str) or a not in 'ABCDEFG'[:questions[qid].get('options',4)] or len(a)!=1 for a in answers):raise HTTPException(422,'题目或选项无效')
         submission.setdefault('objective_overrides',{}).update({k:sorted(set(v)) for k,v in changes.items()})
         submission['objective_correction_reason']=body['reason']
         from .anomalies import check_submission
@@ -103,7 +103,7 @@ def correct_page(identifier:str,body:dict,current=Depends(admin)):
             selections=body['selections']
             if not isinstance(selections,dict): raise HTTPException(422,'选项数据无效')
             for qid,answers in selections.items():
-                if qid not in by_id or not isinstance(answers,list) or not set(answers)<=set('ABCDE'[:by_id[qid].get('options',4)]): raise HTTPException(422,'选项超出题目范围')
+                if qid not in by_id or not isinstance(answers,list) or not set(answers)<=set('ABCDEFG'[:by_id[qid].get('options',4)]): raise HTTPException(422,'选项超出题目范围')
             page['selections']={**page.get('selections',{}),**selections}
         if 'absent_mark' in body:
             if page['side']!='front' or type(body['absent_mark']) is not bool:raise HTTPException(422,'缺考标记只用于正面，值需为布尔值')

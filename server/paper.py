@@ -77,7 +77,7 @@ def validate(template):
                 rich_layout(question['content_html'],(region['width']-6)*mm,(region['height']-12-image_height)*mm,**text_options)
         if question['type']!='subjective':
             count=int(question.get('options',4))
-            if count not in (3,4,5) or not set(question.get('answer',[]))<=set('ABCDE'[:count]):
+            if count not in (3,4,5,6,7) or not set(question.get('answer',[]))<=set('ABCDEFG'[:count]):
                 raise ValueError('选项或标准答案无效')
     areas=template.get('forbidden_regions',[])
     if not isinstance(areas,list) or len(areas)>100:raise ValueError('禁答区应为不超过100项的区域列表')

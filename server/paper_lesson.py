@@ -93,7 +93,7 @@ def class_questions(db,questions,rows,submissions,template,holds):
     output=[]
     for q in questions:
         title=label(q);values=[];correct=0;graded=0;respondents=0
-        buckets={c:[] for c in 'ABCDE'[:q.get('options',4)]}
+        buckets={c:[] for c in 'ABCDEFG'[:q.get('options',4)]}
         buckets['blank']=[]
         for row in rows:
             sid=row['student_id']
