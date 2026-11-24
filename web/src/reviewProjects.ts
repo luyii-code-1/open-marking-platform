@@ -7,7 +7,7 @@ export type ReviewProject = {
 }
 export type AssignedQuestion = {
   template_id:string; question_id:string; template_name:string; subject_name?:string; grade_name?:string; card_name?:string
-  question_label:string; points:number; review_mode:string; published?:boolean; cached?:boolean
+  question_label:string; points:number; review_mode:string; published?:boolean; reopened?:boolean; cached?:boolean
   ordinary_total?:number; ordinary_completed?:number; ordinary_pending?:number
   arbitration_total?:number; arbitration_completed?:number; arbitration_pending?:number; can_arbitrate?:boolean
 }

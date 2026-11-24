@@ -119,6 +119,23 @@ def history(template_id:str|None=None,question_id:str|None=None,current=Depends(
         return sorted(output,key=lambda t:(t['created_at'],t['id']))
 
 
+def _group_lock_flags(group: dict) -> tuple[bool, bool]:
+    published = bool(group.get('frozen'))
+    reopened = bool(not published and group.get('reopened_at') and group.get('published_at'))
+    return published, reopened
+
+def _group_lock_dict(group: dict) -> dict[str, bool]:
+    published, reopened = _group_lock_flags(group)
+    return {'published': published, 'reopened': reopened}
+
+def _ensure_group_unlocked(group: dict) -> None:
+    if group.get('frozen'):
+        raise HTTPException(409, f'成绩已锁定，{RESULTS_REVIEW_GUIDE}')
+
+def _ensure_task_group_unlocked(db, task: dict) -> None:
+    template, _ = question_for(db, task['template_id'], task['question_id'])
+    _ensure_group_unlocked(require(db, template['group_id'], 'groups'))
+
 @router.get('/review-progress')
 def progress(template_id:str,question_id:str,current=Depends(user)):
     from .allocation import read_progress
@@ -127,6 +144,7 @@ def progress(template_id:str,question_id:str,current=Depends(user)):
     def read(db, prepare):
         nonlocal shared
         template,question=question_for(db,template_id,question_id)
+        group=require(db,template['group_id'],'groups')
         assignments=find(db,'assignments',template_id=template_id,question_id=question_id)
         if current['role'] not in ('admin','manager') and not any(current['id'] in participants(a) for a in assignments):raise HTTPException(403,'未分配此题')
         if shared is None:
@@ -139,7 +157,7 @@ def progress(template_id:str,question_id:str,current=Depends(user)):
         regrade_count=db.execute('SELECT COUNT(*) FROM regrade_queue WHERE user_id=? AND template_id=? AND question_id=?',(current['id'],template_id,question_id)).fetchone()[0]
         objective=sum(1 for q in template['questions'] if q['type']!='subjective' and q.get('answer'))
         personal=next(iter(allocation_progress(db,template_id,question_id,assignments[-1],user_id=current['id'])),{}) if assignments else {}
-        return {**{'my_'+key:value for key,value in personal.items() if key!='user_id'},'can_arbitrate':bool(assignments and current['id'] in pools(assignments[-1])[1]),'my_regrade_pending':regrade_count,'my_total':my_total,'my_progress':round(100*sum(t['status']=='completed' for t in mine)/my_total,1) if my_total else 0,'total_submissions':count,'my_completed':sum(t['status']=='completed' for t in mine),'my_in_progress':sum(t['status']=='claimed' and t['expires_at']>time.time() for t in mine),'question_completed':finalized,'question_progress':round(100*finalized/count,1) if count else 0,'paper_progress':round(100*(all_final+objective*count)/(len(template['questions'])*count),1) if count and template['questions'] else 0}
+        return {**{'my_'+key:value for key,value in personal.items() if key!='user_id'},'can_arbitrate':bool(assignments and current['id'] in pools(assignments[-1])[1]),'my_regrade_pending':regrade_count,'my_total':my_total,'my_progress':round(100*sum(t['status']=='completed' for t in mine)/my_total,1) if my_total else 0,'total_submissions':count,'my_completed':sum(t['status']=='completed' for t in mine),'my_in_progress':sum(t['status']=='claimed' and t['expires_at']>time.time() for t in mine),'question_completed':finalized,'question_progress':round(100*finalized/count,1) if count else 0,'paper_progress':round(100*(all_final+objective*count)/(len(template['questions'])*count),1) if count and template['questions'] else 0,**_group_lock_dict(group)}
     result = read_progress(read)
     shared.publish()
     return result
@@ -215,11 +233,12 @@ def task_summary(project_id: str | None = None, current=Depends(user)):
                 SELECT a.body, json_extract(s.body,'$.name'),
                        (SELECT json_extract(gr.body,'$.name') FROM objects gr
                         WHERE gr.id=json_extract(g.body,'$.grade_id') AND gr.kind='grades' AND gr.deleted=0),
-                       json_extract(g.body,'$.name'), json_extract(g.body,'$.frozen')
+                       json_extract(g.body,'$.name'), g.body
             """ + _PERSONAL_PROJECT_ASSIGNMENTS + ' AND p.id=? ORDER BY s.rowid,g.rowid,a.rowid',
                 (current['id'], current['id'], project_id))
             scoped = ((json.loads(body), {'project_id': project_id, 'subject_name': subject, 'grade_name': grade,
-                       'card_name': card, 'published': bool(frozen)}) for body, subject, grade, card, frozen in matches)
+                       'card_name': card, **_group_lock_dict(json.loads(group_body or '{}'))})
+                      for body, subject, grade, card, group_body in matches)
         templates = {}
         for assignment, context in scoped:
             tid = assignment['template_id']
@@ -394,7 +413,7 @@ def score_in_transaction(db, prepared, current, identifier, body):
         group = require(db, template['group_id'], 'groups')
         config = prepared[config_key] = question, group
     question, group = config
-    if group.get('frozen'): raise HTTPException(409,RESULTS_REVIEW_GUIDE)
+    _ensure_group_unlocked(group)
     if task['status'] not in ('claimed','completed') or (task['status']=='claimed' and task['expires_at']<time.time()): raise HTTPException(409,'任务已失效，请重新领取')
     if 'offline_protocol' in body:
         if type(body['offline_protocol']) is not int or body['offline_protocol']!=1:raise HTTPException(422,'离线评分协议不受支持')
@@ -428,7 +447,7 @@ def regrade_from(identifier:str,body:dict,current=Depends(user)):
         first=own_task(db,identifier,current)
         if first['user_id']!=current['id'] or first['status']!='completed':raise HTTPException(409,'请选择本人已完成的一份评分')
         template,_=question_for(db,first['template_id'],first['question_id'])
-        if require(db,template['group_id'],'groups').get('frozen'):raise HTTPException(409,RESULTS_REVIEW_GUIDE)
+        _ensure_group_unlocked(require(db,template['group_id'],'groups'))
         tasks=sorted(find(db,'tasks',user_id=current['id'],template_id=template['id'],question_id=first['question_id'],status='completed'),key=lambda t:(t['created_at'],t['id']))
         tasks=[t for t in tasks if (t['created_at'],t['id'])>=(first['created_at'],first['id'])]
         position=time.time_ns()
@@ -443,6 +462,7 @@ def skip(identifier:str,current=Depends(user)):
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
         task=own_task(db,identifier,current)
+        _ensure_task_group_unlocked(db,task)
         queued=db.execute('SELECT 1 FROM regrade_queue WHERE task_id=? AND user_id=?',(identifier,current['id'])).fetchone()
         if task['status']=='completed' and queued:
             db.execute('UPDATE regrade_queue SET position=? WHERE task_id=?',(time.time_ns(),identifier))
@@ -457,6 +477,7 @@ def report(identifier:str,body:dict,current=Depends(user)):
     if body.get('kind') not in ('exception','excellent'): raise HTTPException(422,'报告类型无效')
     with connect() as db:
         task=own_task(db,identifier,current)
+        _ensure_task_group_unlocked(db,task)
         return put(db,'exceptions',{'task_id':identifier,'submission_id':task['submission_id'],'kind':body['kind'],'reason':str(body.get('reason','')),'status':'open'},current['id'])
 
 

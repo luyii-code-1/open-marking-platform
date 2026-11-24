@@ -94,10 +94,10 @@ function ProjectTasks({projectId,project,cached,catalogPending,catalogError,onBa
       locale={{emptyText:'本场暂无分配给你的阅卷任务'}} columns={[
         {title:'科目 / 题卡',render:(_,r)=><Space direction="vertical" size={0}><strong>{r.subject_name||r.template_name}</strong>
           <Typography.Text type="secondary">{[r.grade_name,r.card_name&&r.card_name!=='Default'?r.card_name:r.template_name].filter(Boolean).join(' · ')}</Typography.Text></Space>},
-        {title:'评阅题目',render:(_,r)=><Space wrap>第 {r.question_label} 题 · {r.points} 分<Tag>{r.review_mode==='double'?'双评':'单评'}</Tag></Space>},
+        {title:'评阅题目',render:(_,r)=><Space wrap>第 {r.question_label} 题 · {r.points} 分<Tag>{r.review_mode==='double'?'双评':'单评'}</Tag>{r.published&&<Tag color="red">成绩已锁定</Tag>}{!r.published&&r.reopened&&<Tag color="blue">复核中 · 可回评</Tag>}</Space>},
         {title:'我的进度',render:(_,r)=><TaskProgress row={r}/>},
-        {title:'操作',width:120,render:(_,r)=><Button type={r.published?'default':'primary'} onClick={()=>onOpen(r.template_id,r.question_id)}>
-          {r.published?'评分记录':r.arbitration_pending?'进入仲裁':r.cached?'继续阅卷':r.ordinary_pending?'进入阅卷':'查看任务'}</Button>},
+        {title:'操作',width:140,render:(_,r)=><Button type={r.published?'default':'primary'} onClick={()=>onOpen(r.template_id,r.question_id)}>
+          {r.published?'查看记录':r.arbitration_pending?'进入仲裁':r.cached?'继续阅卷':r.ordinary_pending?'进入阅卷':r.reopened?'复核回评':'历史与回评'}</Button>},
       ]}/>
   </Card>
 }

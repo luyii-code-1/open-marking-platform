@@ -31,7 +31,8 @@ export function Marking({ admin, groupId, initialProjectId, initialTemplateId, i
   const record=workspace.records.find(r=>r.task.id===task?.id)
   const template = templates.data.find(t => t.id === templateId), question = record?.question||template?.questions.find(q => q.id === questionId)
   const group=groups.data.find(g=>g.id===template?.group_id),subject=subjects.data.find(s=>s.id===group?.subject_id),project=projects.data.find(p=>p.id===subject?.project_id)
-  const published=!!group?.frozen
+  const published=group?.frozen!==undefined?Boolean(group.frozen):Boolean((progress.data as Row|undefined)?.published)
+  const reopened=!published&&Boolean(((group as Row|undefined)?.reopened_at&&(group as Row|undefined)?.published_at)||(progress.data as Row|undefined)?.reopened)
   function leave(){onExit?.(subject?.project_id||record?.template.project_id||initialProjectId)}
   const [saveState,setSaveState]=useState(''),saveVersion=useRef(0),restored=useRef(false),submitted=useRef<string|null>(null)
   const ahead=useRef<{from:string;work:Promise<ReviewRecord|null>}|null>(null)
@@ -161,6 +162,7 @@ export function Marking({ admin, groupId, initialProjectId, initialTemplateId, i
     await action.run('skip',async()=>{try{await settleReviewWrites();if(task.status==='claimed'||task.regrading)await send(`/tasks/${task.id}/skip`);await forgetReview(workspace.user.id,task.id);await advance(task.id,true)}catch(e){setError((e as Error).message)}})
   }
   function regradeFrom(row:Row) {
+    if(published){message.warning('成绩已锁定，不可从此处重阅');return}
     let reason=''
     Modal.confirm({title:'从这份评分起顺序重阅',content:<Space direction="vertical"><Typography.Text>按评分历史的时间顺序，将这份及之后本题的本人评分加入重阅。提交新评分前保留原分，全部重阅完成后才能发布成绩。</Typography.Text><Input.TextArea placeholder="填写重阅原因" onChange={e=>reason=e.target.value}/></Space>,onOk:async()=>{
       if(!reason.trim()){message.error('请填写重阅原因');throw new Error('请填写重阅原因')}
@@ -168,15 +170,18 @@ export function Marking({ admin, groupId, initialProjectId, initialTemplateId, i
     }})
   }
   useEffect(()=>watchChanges(roots=>{if(templateId&&questionId&&historyOpen&&(!roots||roots.includes('tasks')))void loadHistory()}),[templateId,questionId,historyOpen])
+  useEffect(()=>watchChanges(roots=>{if(!roots||roots.includes('groups')||roots.includes('results')){void groups.reload();if(templateId&&questionId)void progress.reload()}}),[templateId,questionId])
   async function loadHistory() { const context=historyContext.current,version=++historyVersion.current;try { const rows=(await request<Row[]>(`/tasks/history?template_id=${templateId}&question_id=${questionId}`)).reverse();if(context===historyContext.current&&version===historyVersion.current){setHistory(rows);return rows} } catch (e) { if(context===historyContext.current&&version===historyVersion.current)setError((e as Error).message) } }
   const origin=[project?.name,subject?.name,group?.grade_name,group?.name,template?.name].filter(Boolean).join(' / ')
   const myCompleted=progress.data.my_completed??0,myTotal=progress.data.my_total??0
   function openHistory(){setHistoryOpen(true);void loadHistory()}
   async function reviewHistory(row:Row){
+    if(published){message.warning('成绩已锁定，不可回评');return}
     if(record?.status==='draft'&&value!==null&&record.task.id!==row.id&&!window.confirm('当前给分尚未提交，确认先回评历史作答？本地草稿会保留。'))return
     await action.run(`history:${row.id}`,async()=>{try{await openTask(await request<Row>(`/tasks/${row.id}`));setHistoryOpen(false)}catch(e){setError((e as Error).message)}})
   }
   async function previous(){
+    if(published){message.warning('成绩已锁定，不可回评上一份');return}
     if(record?.status==='draft'&&value!==null&&!window.confirm('当前给分尚未提交，确认回评上一份？本地草稿会保留。'))return
     await action.run('previous',async()=>{try{
       const rows=await loadHistory();if(!rows)return
@@ -193,16 +198,18 @@ export function Marking({ admin, groupId, initialProjectId, initialTemplateId, i
       </div>
       <Space size={4} wrap>
         <WorkspaceNotificationButton compact onlyWhenActive/>
-        {onExit&&<Button onClick={leave}>退出阅卷</Button>}<Button icon={<HistoryOutlined/>} disabled={!question||workspace.offline||locked} onClick={openHistory}>历史</Button>
+        {onExit&&<Button onClick={leave}>退出阅卷</Button>}<Button icon={<HistoryOutlined/>} disabled={!question||workspace.offline||locked} onClick={openHistory}>{published?'评分记录':'历史'}</Button>
         <Button icon={<BarChartOutlined/>} disabled={!question} onClick={()=>setProgressOpen(true)}>进度</Button>
         <Button icon={<SettingOutlined/>} onClick={()=>setSettingsOpen(true)}>设置</Button>
       </Space>
     </header>
     <div className="marking-notices">
       <ErrorNotice error={error||workspace.storageError||(workspace.offline?'':templates.error||assignments.error)} />
+      {published&&<Alert type="warning" showIcon message="成绩已锁定：题卡成绩已发布，教师端不可改回评；如需更正评分，请联系管理员在成绩页发起成绩复核。"/>}
+      {reopened&&<Alert type="info" showIcon message="复核中 · 可回评：管理员已发起成绩复核，当前可继续评分、回评历史作答或从此处重阅。"/>}
       {workspace.offline&&<Alert type="info" showIcon message="离线评阅：评分保存在本机，恢复连接后上传。"/>}
     </div>
-    <div className="marking-context"><span title={origin}>{origin||'请选择阅卷任务'}{question&&` / 第 ${questionLabel(question)} 题`}{task?.grade_name&&` · ${task.grade_name}`}{task?.room_tags?.length?` · ${task.room_tags.map((t:Row)=>t.label||t.name).join('、')}`:''}</span>{task?.review_role==='arbitration'&&<Tag color="orange">仲裁</Tag>}{record?.status==='draft'&&saveState&&<Tag>{saveState}</Tag>}</div>
+    <div className="marking-context"><span title={origin}>{origin||'请选择阅卷任务'}{question&&` / 第 ${questionLabel(question)} 题`}{task?.grade_name&&` · ${task.grade_name}`}{task?.room_tags?.length?` · ${task.room_tags.map((t:Row)=>t.label||t.name).join('、')}`:''}</span>{published&&<Tag color="red">成绩已锁定</Tag>}{reopened&&<Tag color="blue">复核中 · 可回评</Tag>}{task?.review_role==='arbitration'&&<Tag color="orange">仲裁</Tag>}{record?.status==='draft'&&saveState&&<Tag>{saveState}</Tag>}</div>
 
     {task&&question?<main className="marking-layout">
       <section className="marking-image-panel" aria-label="作答图像区">
@@ -217,26 +224,26 @@ export function Marking({ admin, groupId, initialProjectId, initialTemplateId, i
         </div>
       </section>
       <aside className="marking-score-panel" aria-label="评分板">
-        <div className="marking-score-heading"><strong>评分板</strong><span>{question.review_mode==='double'?'双评盲评':'单评'} · 满分 {question.points}</span>{task.regrading&&<Tag color="orange">重阅</Tag>}</div>
+        <div className="marking-score-heading"><strong>评分板</strong><span>{question.review_mode==='double'?'双评盲评':'单评'} · 满分 {question.points}</span>{published&&<Tag color="red">成绩已锁定</Tag>}{reopened&&<Tag color="blue">复核中 · 可回评</Tag>}{task.regrading&&<Tag color="orange">重阅</Tag>}</div>
         <div className="marking-score-body">
           <div className="marking-score-entry" ref={scoreRef}>
             <label htmlFor="marking-score">给分 <span>Enter 提交</span></label>
             <Input id="marking-score" aria-label="给分" aria-describedby="marking-score-hint" aria-invalid={!!scoreError||skipWarn}
               readOnly={!editable} status={scoreError||skipWarn?'error':undefined} size="large" inputMode="decimal" autoComplete="off"
               value={scoreText} onChange={e=>editScore(e.target.value)} onPressEnter={e=>{e.preventDefault();if(!e.nativeEvent.isComposing&&!e.repeat)void submit()}}/>
-            <div id="marking-score-hint" className={scoreError||skipWarn?'marking-score-hint error':'marking-score-hint'} role={scoreError||skipWarn?'alert':undefined}>{scoreError||(skipWarn?'再次点下一份可跳过当前作答':'输入分数或选择预设，然后按 Enter')}</div>
+            <div id="marking-score-hint" className={published||scoreError||skipWarn?'marking-score-hint error':'marking-score-hint'} role={scoreError||skipWarn?'alert':undefined}>{published?'成绩已锁定，不可修改评分或回评':scoreError||(skipWarn?'再次点下一份可跳过当前作答':'输入分数或选择预设，然后按 Enter')}</div>
           </div>
           <div className="score-presets" aria-label="预设分值">{scorePresets(question.points,Math.max(step,question.step??.5)).filter(n=>!scoreInputError(String(n),question.points,question.step)).map(n=><Button key={n} type={value===n?'primary':'default'} disabled={!editable} onClick={()=>{editScore(String(n));refocusScore()}}>{n}</Button>)}</div>
           <Checkbox checked={automatic} onChange={e=>{setAutomatic(e.target.checked);refocusScore()}}>评分后自动下一份</Checkbox>
           <Button className="marking-submit" block type="primary" size="large" disabled={!editable} loading={action.pending==='score'} onClick={submit}>评分 / Enter</Button>
           <div className="marking-page-actions">
-            <Button icon={<ArrowLeftOutlined/>} disabled={locked||workspace.offline||record?.status==='queued'||record?.status==='conflict'} loading={action.pending==='previous'} onClick={previous}>上一份</Button>
+            <Button icon={<ArrowLeftOutlined/>} disabled={published||locked||workspace.offline||record?.status==='queued'||record?.status==='conflict'} loading={action.pending==='previous'} onClick={previous}>上一份</Button>
             <Button icon={<ArrowRightOutlined/>} disabled={published||locked||(workspace.offline&&editable)} loading={action.pending==='skip'} onClick={()=>record?.status==='draft'?skip():next()}>下一份</Button>
           </div>
 
         </div>
       </aside>
-    </main>:<div className="marking-empty"><Empty description={published?'题卡成绩已发布。如需更正评分，请联系系统管理员或管理教师，在该题卡的「成绩」中点击「发起成绩复核」。':onExit?(busy||templateResource.loading?"正在加载作答":"当前没有可领取的作答"):"选择题目，进入阅卷"}>{onExit&&<Space>{published?<Button onClick={openHistory}>评分记录</Button>:<Button disabled={!question||locked||workspace.offline} onClick={next}>重新领取</Button>}<Button onClick={leave}>返回任务列表</Button></Space>}</Empty></div>}
+    </main>:<div className="marking-empty"><Empty description={published?'成绩已锁定：题卡成绩已发布，教师端不可改回评。如需更正评分，请联系系统管理员或管理教师，在该题卡的「成绩」中点击「发起成绩复核」。':reopened?(busy||templateResource.loading?'正在加载作答':'复核中 · 可回评：当前没有待领作答，可通过「复核回评」查看并回评历史作答'):onExit?(busy||templateResource.loading?"正在加载作答":"当前没有可领取的作答"):"选择题目，进入阅卷"}>{onExit&&<Space>{published?<Button disabled={!question||locked||workspace.offline} onClick={openHistory}>查看记录</Button>:<><Button disabled={!question||locked||workspace.offline} onClick={openHistory}>{reopened?'复核回评':'历史与回评'}</Button><Button disabled={!question||locked||workspace.offline} onClick={next}>重新领取</Button></>}<Button onClick={leave}>返回任务列表</Button></Space>}</Empty></div>}
     {osd&&<div className="score-osd" role="status">{osd.text}</div>}
     <footer className="marking-progress-footer">
       <div className="marking-progress-summary"><strong>我的进度 <b>{myCompleted}</b> / {myTotal} 份</strong><span>{Number(progress.data.my_progress||0).toFixed(0)}%</span></div>
@@ -244,8 +251,8 @@ export function Marking({ admin, groupId, initialProjectId, initialTemplateId, i
       <div className="marking-session"><span>本次完成 {count} 份 · 平均 {count?(seconds/count).toFixed(1):'—'} 秒/份</span><Button size="small" type="text" icon={<ReloadOutlined/>} loading={progress.loading} disabled={!question||workspace.offline} onClick={progress.reload}>刷新进度</Button></div>
       <div ref={workspace.setQueueTarget} className="marking-queue-slot"/>
     </footer>
-    <Drawer title="我的历史与回评" width={840} open={historyOpen} onClose={()=>setHistoryOpen(false)}>
-      <ErrorNotice error={error}/>{published&&<Typography.Paragraph>如需更正已发布的评分，请联系系统管理员或管理教师，在该题卡的「成绩」中发起复核。</Typography.Paragraph>}<Table rowKey="id" dataSource={history} pagination={{defaultPageSize:50}} scroll={{x:700}} locale={{emptyText:'暂无历史评分'}} columns={[{title:'作答',dataIndex:'id',ellipsis:true},{title:'我的给分',dataIndex:'score'},{title:'实际给分',dataIndex:'final_score',render:v=>v??'待汇总'},{title:'评分时间',dataIndex:'created_at',render:v=>new Date(v*1000).toLocaleString()},{title:'操作',render:(_,row)=><Space><Button disabled={published||workspace.offline||locked||record?.status==='queued'||record?.status==='conflict'} loading={action.pending===`history:${row.id}`} onClick={()=>reviewHistory(row)}>回评</Button><Button disabled={published||workspace.offline||locked} onClick={()=>regradeFrom(row)}>从此处重阅</Button></Space>}]}/>
+    <Drawer title={published?'我的评分记录（成绩已锁定）':reopened?'我的历史与回评（复核中）':'我的历史与回评'} width={840} open={historyOpen} onClose={()=>setHistoryOpen(false)}>
+      <ErrorNotice error={error}/>{published&&<Alert type="warning" showIcon style={{marginBottom:12}} message="成绩已锁定" description="题卡成绩已发布，教师端不可改回评。如需更正评分，请联系系统管理员或管理教师，在该题卡的「成绩」中发起复核。"/>}{reopened&&<Alert type="info" showIcon style={{marginBottom:12}} message="复核中 · 可回评" description="管理员已发起成绩复核，当前可回评历史作答或从指定份数起顺序重阅；重新发布成绩后将再次锁定。"/>}<Table rowKey="id" dataSource={history} pagination={{defaultPageSize:50}} scroll={{x:700}} locale={{emptyText:'暂无历史评分'}} columns={[{title:'作答',dataIndex:'id',ellipsis:true},{title:'我的给分',dataIndex:'score'},{title:'实际给分',dataIndex:'final_score',render:v=>v??'待汇总'},{title:'评分时间',dataIndex:'created_at',render:v=>new Date(v*1000).toLocaleString()},{title:'操作',render:(_,row)=>published?<Tag color="red">成绩已锁定</Tag>:<Space><Button disabled={workspace.offline||locked||record?.status==='queued'||record?.status==='conflict'} loading={action.pending===`history:${row.id}`} onClick={()=>reviewHistory(row)}>回评</Button><Button disabled={workspace.offline||locked} onClick={()=>regradeFrom(row)}>从此处重阅</Button></Space>}]}/>
     </Drawer>
     <Drawer title="评阅进度" width={400} open={progressOpen} onClose={()=>setProgressOpen(false)}>
       <ErrorNotice error={progress.error}/><p>我的任务 {myCompleted} / {myTotal} 份</p><p>正在评阅 {progress.data.my_in_progress||0} · 待重阅 {progress.data.my_regrade_pending||0} · 本题作答 {progress.data.total_submissions||0}</p>
@@ -254,7 +261,7 @@ export function Marking({ admin, groupId, initialProjectId, initialTemplateId, i
     </Drawer>
     <Drawer title="阅卷设置" width={360} open={settingsOpen} onClose={()=>setSettingsOpen(false)}>
       <Space direction="vertical" size={20} style={{width:'100%'}}><label>评分步进 <InputNumber aria-label="评分步进" min={.01} max={10} value={step} onChange={n=>setStep(n||.5)}/></label><Typography.Text type="secondary">预设分值只填入给分框，按 Enter 或“评分”后提交。</Typography.Text>
-      {task&&question&&<div className="marking-report-actions">{(['exception','excellent'] as const).map(kind=><Button size="small" type="text" key={kind} disabled={workspace.offline||locked} onClick={()=>Modal.confirm({title:kind==='exception'?'报告异常卷':'标记优秀卷',content:'将当前作答交由管理员查看。',afterClose:refocusScore,onOk:async()=>{await send(`/tasks/${task.id}/report`,{kind,reason:''});message.success('已报告')}})}>{kind==='exception'?'报告异常卷':'标记优秀卷'}</Button>)}</div>}
+      {task&&question&&<div className="marking-report-actions">{(['exception','excellent'] as const).map(kind=><Button size="small" type="text" key={kind} disabled={published||workspace.offline||locked} onClick={()=>Modal.confirm({title:kind==='exception'?'报告异常卷':'标记优秀卷',content:'将当前作答交由管理员查看。',afterClose:refocusScore,onOk:async()=>{await send(`/tasks/${task.id}/report`,{kind,reason:''});message.success('已报告')}})}>{kind==='exception'?'报告异常卷':'标记优秀卷'}</Button>)}</div>}
       {admin&&group&&subject&&project&&<Button href={examPath({projectId:project.id,subjectId:subject.id,gradeId:group.grade_id,groupId:group.id,section:'marking'})}>阅卷分配</Button>}</Space>
     </Drawer>
   </div>
