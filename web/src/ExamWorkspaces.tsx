@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { PlusOutlined, RightOutlined } from '@ant-design/icons'
-import { Alert, App, Card, Dropdown, Empty, Form, Input, Modal, Popconfirm, Progress, Space, Tabs, Tag, Tooltip, Typography } from 'antd'
+import { Alert, App, Card, Dropdown, Empty, Form, Input, Modal, Popconfirm, Progress, Select, Space, Tabs, Tag, Tooltip, Typography } from 'antd'
 import { Button } from './Button'
 import { CardConversionFields, ConversionWorkspace } from './ConversionWorkspace'
 import { Table } from './DataTable'
@@ -8,7 +8,7 @@ import { ErrorNotice } from './EntityTable'
 import { HierarchyDelete } from './HierarchyDelete'
 import { gradeColor } from './SchoolTags'
 import { GRADE_PRESETS, TagPicker } from './TagPicker'
-import { announceChanges, send, useResource, type Row, type Template } from './api'
+import { announceChanges, send, templateCreationOptions, useResource, type Row, type Template } from './api'
 import { examPath, subjectGrades, unassignedGrade } from './examNavigation'
 import { loadPage } from './loadPage'
 import { rowNavigation } from './rowNavigation'
@@ -326,6 +326,9 @@ export function SubjectGrades({
           </Form.Item>
           <Form.Item name="grade_id" label="所属年级" rules={[{ required: true, message: '请选择年级' }]}>
             <TagPicker options={available.map(g => ({ label: g.name, value: g.id, color: gradeColor(g.name) }))} />
+          </Form.Item>
+          <Form.Item name="template_creation" label="制卡方式" initialValue="native">
+            <Select options={templateCreationOptions} />
           </Form.Item>
           <CardConversionFields projectId={subject.project_id} />
         </Form>

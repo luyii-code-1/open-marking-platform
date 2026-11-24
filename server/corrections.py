@@ -77,6 +77,8 @@ def correct_page(identifier:str,body:dict,current=Depends(admin)):
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
         page=require(db,identifier,'pages'); batch=require(db,page['batch_id'],'scan-batches')
+        from .lifecycle import writable
+        writable(db,'pages',page)
         if batch['status']=='paired': raise HTTPException(409,'已配对页面请使用答卷补扫替换')
         if 'excluded' in body: page['excluded']=bool(body['excluded'])
         if 'sequence' in body:
@@ -108,6 +110,16 @@ def correct_page(identifier:str,body:dict,current=Depends(admin)):
         if 'absent_mark' in body:
             if page['side']!='front' or type(body['absent_mark']) is not bool:raise HTTPException(422,'缺考标记只用于正面，值需为布尔值')
             page['absent_mark']=body['absent_mark'];page['absent_mark_corrected']=True
+        pending=page.get('external_mark_review')
+        if pending and not page.get('excluded'):
+            if not set(pending['questions']) <= set(body.get('selections',{})) or pending['absent'] and 'absent_mark' not in body:
+                raise HTTPException(422,'请确认所有待核对的填涂结果')
+            page.pop('external_mark_review')
+            page['status']='recognized'
+            for issue in find(db,'exceptions',page_id=identifier):
+                if issue['kind']=='recognition' and issue['status']=='open':
+                    issue.update(status='resolved',resolution=body['reason'],resolved_at=time.time())
+                    put(db,'exceptions',issue,current['id'])
         page['correction_reason']=body['reason']
         from .anomalies import check_candidate
         check_candidate(db,page,current['id'])

@@ -8,6 +8,7 @@ from fastapi import APIRouter,Depends,HTTPException
 from fastapi.responses import Response
 from .lifecycle import RESULTS_REVIEW_GUIDE
 from . import paper
+from .compatible_omr import UncertainMarks, profile
 from .db import connect,put,find
 from .dependencies import admin,require
 from .storage import local_path,materialize
@@ -21,7 +22,7 @@ def load(identifier,rotation):
     with connect() as db:
         page=require(db,identifier,'pages');batch=require(db,page['batch_id'],'scan-batches');template=require(db,batch['template_id'],'templates')
     relative=normalized_relative(page) if page.get('upload_format')=='jpeg-sheet-1' else 'pages/'+identifier+'.image'
-    try:image,value=paper.decode(materialize(relative).read_bytes())
+    try:image,value=paper.decode(materialize(relative).read_bytes(),template if profile(template) else None)
     except (ValueError,FileNotFoundError) as error:raise HTTPException(409,str(error))
     if rotation:image=np.ascontiguousarray(np.rot90(image,-rotation))
     return page,batch,template,image,value
@@ -59,7 +60,11 @@ def align_page(identifier:str,body:dict,current=Depends(admin)):
     page,batch,template,image,value=load(identifier,body.get('rotation',0))
     if value.startswith('OMP1:') and value!=paper.code(template,page['side']):raise HTTPException(409,'原图二维码属于其他考卷或面，请排除混卷后处理')
     if value!=paper.code(template,page['side']) and body.get('confirm_template') is not True:raise HTTPException(422,'缺少可匹配的题卡二维码，需人工确认所选考卷和正反面')
+    uncertain=None
     try:normalized,candidate,selections=paper.recognize(image,template,page['side'],body['corners'])
+    except UncertainMarks as error:
+        uncertain=error
+        normalized,candidate,selections=error.image,error.candidate,error.selections
     except (ValueError,KeyError,TypeError) as error:raise HTTPException(422,str(error))
     suffix='.jpg' if page.get('upload_format')=='jpeg-sheet-1' else '.png'
     content=cv2.imencode(suffix,normalized,[cv2.IMWRITE_JPEG_QUALITY,80,cv2.IMWRITE_JPEG_OPTIMIZE,1] if suffix=='.jpg' else [])[1].tobytes();path=local_path(normalized_relative(page))
@@ -82,11 +87,15 @@ def align_page(identifier:str,body:dict,current=Depends(admin)):
                 old_asset=put(db,'assets',{'id':asset_id,'width':normalized.shape[1],'height':normalized.shape[0],'sha256':hashlib.sha256(history_content).hexdigest(),'purpose':'alignment_history','image_url':f'/api/v1/assets/{asset_id}'},current['id'])
             temporary.replace(path);replaced=True
             put(db,'page-alignments',{'id':body['request_id'],'page_id':identifier,'fingerprint':fingerprint,'corners':body['corners'],'rotation':body.get('rotation',0),'reason':body['reason'],'previous_asset_id':old_asset['id'] if old_asset else None,'previous_recognition':{k:page.get(k) for k in ('candidate_number','selections','absent_mark','status')},'created_at':time.time()},current['id'])
-            page.update(status='recognized',candidate_number=candidate,selections=selections,absent_mark=paper.absent_mark(normalized,page['side'],template),normalized_sha256=hashlib.sha256(content).hexdigest(),alignment_request_id=body['request_id'],alignment_reason=body['reason'])
+            page.update(status='needs_review' if uncertain else 'recognized',candidate_number=candidate,selections=selections,absent_mark=paper.absent_mark(normalized,page['side'],template),normalized_sha256=hashlib.sha256(content).hexdigest(),alignment_request_id=body['request_id'],alignment_reason=body['reason'])
+            if uncertain:
+                page['external_mark_review']={'questions':uncertain.questions,'absent':uncertain.absent_uncertain}
+                put(db,'exceptions',{'page_id':identifier,'batch_id':batch['id'],'kind':'recognition','status':'open','reason':str(uncertain)},current['id'])
+            else:page.pop('external_mark_review',None)
             if old_asset:page.setdefault('alignment_history',[]).append(old_asset['id'])
             result=put(db,'pages',page,current['id'])
             for issue in find(db,'exceptions',page_id=identifier):
-                if issue['status']=='open' and issue['kind'] in ('recognition','wrong_paper'):
+                if not uncertain and issue['status']=='open' and issue['kind'] in ('recognition','wrong_paper'):
                     issue.update(status='resolved',resolution='人工确认考卷并完成四点定位和重新识读',resolved_at=time.time());put(db,'exceptions',issue,current['id'])
             from .anomalies import check_candidate
             check_candidate(db,page,current['id'])

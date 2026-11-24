@@ -12,6 +12,7 @@ from .db import connect, find, get, objects, put
 from .dependencies import require, scan_admin, scan_batch
 from .lifecycle import writable
 from .omr import ENGINE_VERSION, dimensions
+from . import compatible_omr
 from .storage import local_path
 from .exam_status import ExamStatusFilter, STATUS_FIELDS, project_views, filter_projects
 
@@ -26,6 +27,11 @@ def configuration(template):
     fields = ('id', 'name', 'paper', 'sides', 'revision', 'layout_version', 'candidate_length', 'sheet_columns')
     result = {k: template[k] for k in fields if k in template}
     result['questions'] = [{k: q[k] for k in ('id', 'number', 'type', 'options', 'regions', 'choice_style') if k in q} for q in template['questions']]
+    if compatible_omr.profile(template):
+        result['external_sheet'] = template['external_sheet']
+        for question, configured in zip(template['questions'], result['questions']):
+            if 'external_options' in question:
+                configured['external_options'] = question['external_options']
     return result
 
 
@@ -51,7 +57,7 @@ def catalog(exam_status: ExamStatusFilter='all', current=Depends(scan_admin)):
 
 
 @router.get('/projects/{identifier}/package')
-def project_package(identifier: str, current=Depends(scan_admin)):
+def project_package(identifier: str, capability: str = '', current=Depends(scan_admin)):
     with connect() as db:
         db.execute('BEGIN'); project = require(db, identifier, 'projects'); writable(db, 'projects', project)
         project=project_views(db,[project])[0]
@@ -61,6 +67,7 @@ def project_package(identifier: str, current=Depends(scan_admin)):
         for group in groups:
             template = get(db, group.get('template_id'), 'templates')
             if not template or template['status'] != 'published': continue
+            if compatible_omr.profile(template) and capability != compatible_omr.CAPABILITY: continue
             from .school import group_students
             roster = group_students(db,group)
             is_open_roster = group.get('roster_mode') == 'open' or not roster
@@ -140,6 +147,10 @@ def image_bytes(file, expected_shape=None, image_format='PNG'):
 def verified_absence(template, side, result, normalized):
     # Recheck moved marks on the corrected image supplied by existing scanner engines.
     if side=='front' and 'operator_correction' in result:return result['absent_mark']
+    if compatible_omr.profile(template):
+        if side != 'front' or not compatible_omr.page_profile(template, side).get('absent'):
+            return False
+        return result['absent_mark']
     from . import sheet_notices
     if template.get('notice_layout',1)==2 and sheet_notices.enabled(template):
         from .omr import absent_mark
@@ -151,6 +162,8 @@ def verified_absence(template, side, result, normalized):
 
 def verify_result(template, side, result, original, normalized, cuts):
     supported={ENGINE_VERSION} if template.get('layout_version',2)>=3 or any(q.get('choice_style')=='compact' for q in template['questions']) else {ENGINE_VERSION,'omp-omr-2'} if any(q.get('choice_style')=='bracket' for q in template['questions']) else {ENGINE_VERSION,'omp-omr-2','omp-omr-1'}
+    if compatible_omr.profile(template):
+        supported = {compatible_omr.ENGINE_VERSION}
     if result.get('engine_version') not in supported or result.get('template_id') != template['id'] or result.get('template_revision') != template['revision'] or result.get('config_sha256') != config_hash(template): raise HTTPException(409, '本地识读引擎或题卡版本不匹配，请更新扫描端并下载配置')
     checks = (('normalized_sha256', normalized),) if result.get('upload_format') == 'jpeg-sheet-1' else (('source_sha256', original), ('normalized_sha256', normalized), ('local_cuts_sha256', cuts))
     if any(result.get(key) != checksum(data) for key, data in checks): raise HTTPException(422, '上传文件与本地识读校验值不一致')

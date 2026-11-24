@@ -69,6 +69,7 @@ def project_for_page(db,page):
 def process_page(identifier,ownership=None):
     import cv2
     from .paper import decode,recognize,absent_mark
+    from .compatible_omr import UncertainMarks
     from .storage import materialize,mirror
     with connect() as db:
         guard(db,ownership)
@@ -84,7 +85,11 @@ def process_page(identifier,ownership=None):
         if (database.ROOT/'pages'/(identifier+'.png')).exists():mirror('pages/'+identifier+'.png',project_id)
         return
     image,_=decode(materialize('pages/'+identifier+'.image').read_bytes(),template)
+    uncertain = None
     try:normalized,candidate,selections=recognize(image,template,page['side'])
+    except UncertainMarks as error:
+        uncertain = error
+        normalized,candidate,selections = error.image,error.candidate,error.selections
     except ValueError as error:
         with connect() as db:
             db.execute('BEGIN IMMEDIATE')
@@ -104,7 +109,12 @@ def process_page(identifier,ownership=None):
         page=get(db,identifier,'pages')
         if not page:return
         if page['status']=='received':
-            page.update(status='recognized',candidate_number=candidate,selections=selections,absent_mark=absent_mark(normalized,page['side'],template),normalized_sha256=normalized_digest);put(db,'pages',page)
+            page.update(status='needs_review' if uncertain else 'recognized',candidate_number=candidate,selections=selections,
+                        absent_mark=absent_mark(normalized,page['side'],template),normalized_sha256=normalized_digest)
+            if uncertain:
+                page['external_mark_review']={'questions':uncertain.questions,'absent':uncertain.absent_uncertain}
+                put(db,'exceptions',{'batch_id':page['batch_id'],'page_id':identifier,'kind':'recognition','status':'open','reason':str(uncertain)})
+            put(db,'pages',page)
             from .anomalies import check_candidate
             check_candidate(db,page)
     mirror('pages/'+identifier+'.image',project_id);mirror('pages/'+identifier+'.png',project_id)

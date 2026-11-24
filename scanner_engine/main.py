@@ -17,6 +17,7 @@ from server.scan_files import write_atomic
 import cv2
 import numpy as np
 from server.omr import ENGINE_VERSION, absent_mark, code, decode, dimensions, recognize, manual_binding
+from server import compatible_omr
 
 MAX_MESSAGE = 2 * 1024 * 1024
 
@@ -55,7 +56,8 @@ def process(root, request):
                                 'region': region, 'sha256': digest(data), 'size': len(data),
                                 'width': cut.shape[1], 'height': cut.shape[0]})
     cuts = packed.getvalue(); write_atomic(directory / 'cuts.zip', cuts)
-    result = {'engine_version': ENGINE_VERSION, 'template_id': template['id'], 'template_revision': template['revision'],
+    result = {'engine_version': compatible_omr.ENGINE_VERSION if compatible_omr.profile(template) else ENGINE_VERSION,
+              'template_id': template['id'], 'template_revision': template['revision'],
               'config_sha256': request['config_sha256'], 'source_sha256': digest(content),
               'candidate_number': candidate, 'selections': selections, 'absent_mark': absent_mark(normalized, side, template),
               'absence_layout_known': 'notice_layout' in template or not manual_binding(template),

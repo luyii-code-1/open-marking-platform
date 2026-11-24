@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { ArrowLeftOutlined, PlusOutlined, RightOutlined, SearchOutlined } from '@ant-design/icons'
-import { Alert, App, Breadcrumb, Card, Collapse, Empty, Form, Input, Modal, Popconfirm, Radio, Segmented, Space, Spin, Tabs, Tag, Tooltip, Typography } from 'antd'
+import { Alert, App, Breadcrumb, Card, Collapse, Empty, Form, Input, Modal, Popconfirm, Radio, Segmented, Select, Space, Spin, Tabs, Tag, Tooltip, Typography } from 'antd'
 import { Button } from './Button'
 import { Table } from './DataTable'
 import { CatalogPicker } from './Electives'
@@ -22,7 +22,7 @@ import { HierarchyDelete } from './HierarchyDelete'
 import { useReviewWorkspace } from './ReviewWorkspace'
 import { WorkspaceNotificationButton } from './WorkspaceNotifications'
 import { jobDetailText, jobKindLabel, jobStatusColor, jobStatusLabel } from './jobDisplay'
-import { send, useResource, type Row } from './api'
+import { send, templateCreationOptions, useResource, type Row } from './api'
 import {
   cardName,
   examPath,
@@ -176,6 +176,7 @@ function ProjectCollapsibleTree({
     cardForm.resetFields()
     cardForm.setFieldsValue({
       grade_id: gradeId && gradeId !== unassignedGrade ? gradeId : availableGrades[0]?.id,
+      template_creation: 'native',
     })
   }
 
@@ -427,6 +428,9 @@ function ProjectCollapsibleTree({
               options={availableGrades.map(g => ({ label: g.name, value: g.id, color: gradeColor(g.name) }))}
               emptyText={<a href="#/people/grades">请先创建年级</a>}
             />
+          </Form.Item>
+          <Form.Item name="template_creation" label="制卡方式">
+            <Select options={templateCreationOptions} />
           </Form.Item>
           <CardConversionFields projectId={project.id} />
         </Form>

@@ -8,10 +8,19 @@ export type Row = Record<string, any> & { id: string }
 export type User = { id: string; username: string; name: string; role: string }
 export type Region = { page: number; x: number; y: number; width: number; height: number; part_number?:number;min_height?:number;anchor_page?:number;anchor_x?:number;anchor_y?:number }
 export type ImageBox = { x: number; y: number; width: number; height: number }
+export type ExternalMode = 'blank' | 'completed'
+export const templateCreationOptions = [
+  { value: 'native', label: '系统制卡' },
+  { value: 'blank', label: '已有题卡兼容制版' },
+  { value: 'completed', label: '已完成答卷兼容扫描' },
+]
+export type ExternalAnchor = ImageBox & { pattern: string }
+export type ExternalPage = { anchors: ExternalAnchor[]; candidate?: ImageBox[][]; absent?: ImageBox }
+export type ExternalSheet = { version: 1; mode: ExternalMode; pages: Record<string, ExternalPage> }
 export type PrintNote = Region & { id:string; html:string }
 export type QuestionPart = Pick<Question,'number'|'points'|'style'|'lines'|'cell_size'|'content_html'|'image_asset_id'|'image_height'|'image_box'|'review_layout'|'review_frames'>
-export type Question = { id: string; number: number; parts?:QuestionPart[]; type: 'single' | 'multiple' | 'subjective'; options: number; answer: string[]; points: number; step?:number; regions: Region[]; rule: Record<string, unknown>; review_mode: 'single' | 'double'; review_layout?: 'stack' | 'paper'; review_frames?: Region[]; threshold: number; threshold_inclusive?:boolean; choice_group?:string; choice_style?: 'bracket' | 'compact'; style?:string; lines?:number; cell_size?:number; content_html?:string; image_asset_id?:string; image_height?:number; image_box?:ImageBox }
-export type Template = { id: string; group_id: string; name: string; subtitle?:string; font_size?:number; leading?:number; background_assets?:Record<string,string>; background_boxes?:Record<string,ImageBox>; paper: 'A3' | 'A4'; sheet_columns?:number; layout_version?:number; notice_template?:'standard-v1'|'none'; notice_layout?:number; print_style?:'standard-v2'; column_frame?:boolean; uniform_subjective?:boolean;auto_subjective_layout?:boolean; print_notes?:PrintNote[]; forbidden_regions?:Region[]; sides: number; candidate_length: number; revision: number; draft_version?:number; status?: string; questions: Question[] }
+export type Question = { id: string; number: number; parts?:QuestionPart[]; type: 'single' | 'multiple' | 'subjective'; options: number; answer: string[]; points: number; step?:number; regions: Region[]; rule: Record<string, unknown>; review_mode: 'single' | 'double'; review_layout?: 'stack' | 'paper'; review_frames?: Region[]; threshold: number; threshold_inclusive?:boolean; choice_group?:string; choice_style?: 'bracket' | 'compact'; style?:string; lines?:number; cell_size?:number; content_html?:string; image_asset_id?:string; image_height?:number; image_box?:ImageBox; external_options?:ImageBox[] }
+export type Template = { id: string; group_id: string; name: string; subtitle?:string; font_size?:number; leading?:number; background_assets?:Record<string,string>; background_boxes?:Record<string,ImageBox>; paper: 'A3' | 'A4'; sheet_columns?:number; layout_version?:number; notice_template?:'standard-v1'|'none'; notice_layout?:number; print_style?:'standard-v2'; column_frame?:boolean; uniform_subjective?:boolean;auto_subjective_layout?:boolean; print_notes?:PrintNote[]; forbidden_regions?:Region[]; sides: number; candidate_length: number; revision: number; draft_version?:number; status?: string; questions: Question[]; external_sheet?:ExternalSheet }
 const session=new SharedSession(localStorage,sessionStorage)
 window.addEventListener('storage',event=>{if(event.key===sessionKey||event.key===null)session.refresh()})
 export function setToken(value:string,lease?:SessionLease){if(value)session.login(value,lease);else session.clear()}

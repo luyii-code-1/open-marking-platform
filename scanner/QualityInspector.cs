@@ -74,8 +74,8 @@ public static class QualityInspector
             else if (codes[0] != $"OMP1:{batch.TemplateId}:{batch.TemplateRevision}:{side}") issues.Add("wrong_paper");
         }
         var gray = Grayscale(bitmap);
-        var corners = CountCorners(gray, bitmap.Width, bitmap.Height, paperWidth, paperHeight);
-        if (options.CheckCorners && corners != 4) issues.Add("missing_markers");
+        var corners = batch.ExternalSheet ? 0 : CountCorners(gray, bitmap.Width, bitmap.Height, paperWidth, paperHeight);
+        if (!batch.ExternalSheet && options.CheckCorners && corners != 4) issues.Add("missing_markers");
         var sharpness = Sharpness(gray, bitmap.Width, bitmap.Height);
         if (options.CheckSharpness && sharpness < options.MinSharpness) issues.Add("blur");
         return new QualityReport(issues.ToArray(), Math.Round(dpi, 2), Math.Round(sharpness, 2), corners, options);

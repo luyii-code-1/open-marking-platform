@@ -13,6 +13,8 @@ import { HierarchyPicker } from './HierarchyPicker'
 import { useUnsavedChanges } from './useNavigation'
 import { ObjectiveEditor } from './ObjectiveEditor'
 import { QuestionSettings } from './QuestionSettings'
+import { CompatibleTemplateEditor } from './CompatibleTemplateEditor'
+import type { ExternalMode } from './api'
 import { TagPicker } from './TagPicker'
 
 import { mergeQuestions, splitQuestions, questionNumbers, questionLabel } from './mergeQuestions'
@@ -21,9 +23,13 @@ import {subjectiveLayoutKey} from './subjectiveLayout'
 
 const { Text } = Typography
 const emptyTemplate = (groupId = ''): Template => ({ id: crypto.randomUUID(), name: '新答题卡', font_size:13, leading:20, group_id: groupId, paper: 'A4', sides: 2, layout_version: 3, sheet_columns: 1, notice_template:'standard-v1', notice_layout:2, column_frame:true, uniform_subjective:true, auto_subjective_layout:true, print_style:'standard-v2', forbidden_regions:[], candidate_length: 9, revision: 0, questions: [] })
+const externalTemplate = (groupId: string, mode: ExternalMode, name?: string): Template => ({
+  ...emptyTemplate(groupId), name: name || '新兼容题卡', sides: 1, notice_template: 'none',
+  auto_subjective_layout: false, uniform_subjective: false, external_sheet: { version: 1, mode, pages: {} },
+})
 const lockedVersion=(t:Template)=>t.status==='published'||t.status==='superseded'
 const versionLabel=(t:Template)=>t.status==='superseded'?'历史版本':t.status==='published'?'已发布':'草稿'
-const editableCopy=(t:Template):Template=>lockedVersion(t)?structuredClone(t):uniformSubjectiveWidths({
+const editableCopy=(t:Template):Template=>lockedVersion(t)||t.external_sheet?structuredClone(t):uniformSubjectiveWidths({
   ...structuredClone(t),layout_version:3,uniform_subjective:true,auto_subjective_layout:t.auto_subjective_layout??false,column_frame:t.column_frame??true,notice_layout:2,notice_template:t.notice_template||'standard-v1',
   print_style:'standard-v2',forbidden_regions:t.forbidden_regions||[],
 })
@@ -104,12 +110,15 @@ export function TemplateEditor({ groupId }: { groupId?: string }) {
     if (!group) return
     initialized.current = groupId
     const existing = saved.find(t => t.id === group.template_id) || saved.find(t => t.status === 'draft')
-    saver.load(existing ? editableCopy(existing) : emptyTemplate(groupId))
+    const mode = group.template_creation
+    saver.load(existing ? editableCopy(existing) : mode === 'blank' || mode === 'completed'
+      ? externalTemplate(groupId, mode, group.name) : emptyTemplate(groupId))
     if(existing&&!lockedVersion(existing)&&JSON.stringify(existing)!==JSON.stringify(saver.value))saver.edit(saver.value)
   }, [groupId, templates.loaded, groups.loaded, templates.data, groups.data])
   function change(update: Partial<Template>) {
     if (readOnly || saving) return
-    saver.edit(uniformSubjectiveWidths({ ...saver.value, ...update }))
+    const next = { ...saver.value, ...update }
+    saver.edit(next.external_sheet ? next : uniformSubjectiveWidths(next))
   }
   function select(id: string, edit = false) {
     setEditing(null);setQuestionId(id);setForbiddenMode(false)
@@ -250,6 +259,8 @@ export function TemplateEditor({ groupId }: { groupId?: string }) {
     <Card className="template-action-bar"><div className="template-actions">
       <Space wrap><Select disabled={saving||saver.saving} className="template-select" showSearch optionFilterProp="label" placeholder="选择版式草稿" value={value.id || undefined} options={[...saved.filter(t=>t.id!==value.id),value].map(t => ({ label: `${t.name} · ${versionLabel(t)}`, value: t.id }))} onChange={id => { const item = saved.find(t => t.id === id); if (item) load(item) }} /><Dropdown menu={{ items: [
         { key: 'new', label: '新建版式草稿', icon: <PlusOutlined />, onClick: () => load(emptyTemplate(groupId)) },
+        { key: 'external-blank', label: '已有题卡兼容制版', disabled: templateLocked || !value.group_id, onClick: () => load(externalTemplate(value.group_id, 'blank', group?.name)) },
+        { key: 'external-completed', label: '已完成答卷兼容扫描', disabled: templateLocked || !value.group_id, onClick: () => load(externalTemplate(value.group_id, 'completed', group?.name)) },
         ...(groupId||value.group_id ? [{ key: 'task', label: '创建任务题卡（分配给教师）', disabled: !!group?.frozen, onClick: () => { taskForm.setFieldsValue({ name: value.name || '', description: '' }); setTaskModalOpen(true) } }] : []),
         { key: 'copy', label: '复制为新草稿', icon: <CopyOutlined />, disabled: !value.id, onClick: () => load({ ...structuredClone(value), id: crypto.randomUUID(), draft_version:0, name: `${value.name}（副本）`, status: 'draft', revision: 0, layout_version:3, sheet_columns:value.paper==='A3'?(value.sheet_columns||2):1, notice_template:value.notice_template||'standard-v1', print_style:'standard-v2', forbidden_regions:value.forbidden_regions||[], group_id: groupId || value.group_id, questions: value.questions.map(q => ({ ...q, id: crypto.randomUUID() })) }) },
         {key:'delete',label:'删除当前版式',danger:true,disabled:templateLocked&&value.id===official,onClick:removeVersion},
@@ -258,7 +269,8 @@ export function TemplateEditor({ groupId }: { groupId?: string }) {
     </div></Card>
     {layoutError&&<Alert type="error" showIcon message="题区需要调整" description={layoutError} action={<Button disabled={readOnly||layoutBusy} onClick={()=>void arrange(saver.value).catch(error=>setLayoutError((error as Error).message))}>重新排版</Button>}/>}
     {saver.error&&<Alert type="error" showIcon message="草稿未保存" description={saver.error} action={<Space><Button onClick={()=>void saver.flush().catch(()=>{})}>重试保存</Button><Button onClick={()=>modal.confirm({title:"重新载入服务器草稿？",content:"当前未保存的修改将被替换。",onOk:async()=>{const rows=await request<Template[]>('/templates');const latest=rows.find(t=>t.id===value.id);if(!latest)throw new Error("服务器尚无该草稿，请重试保存");saver.load(editableCopy(latest));await templates.reload()}})}>重新载入</Button></Space>}/>}
-    <div className="template-workbench">
+    {value.external_sheet ? <CompatibleTemplateEditor key={value.id + ':' + versionLabel(value)} value={value} disabled={saving}
+      readOnly={readOnly} change={change} flush={() => saver.flush()} settings={id => select(id, true)} /> : <div className="template-workbench">
       <Card className="template-config"><Tabs activeKey={pane} onChange={key=>{setEditing(null);setPane(key);setForbiddenMode(false);setAnswerMode(false);setDraw(false);if(key==='subjective'&&question?.type!=='subjective')setQuestionId(subjective[0]?.id||'')}} items={[
         { key: 'setup', label: '底版', children: setup },
         { key: 'objective', label: '选择题', children: <ObjectiveEditor value={value} page={page} readOnly={readOnly || saving} selected={questionId} onChange={questions => change({ questions, layout_version:3 })} onSelect={id => select(id)} onEdit={id => select(id, true)} /> },
@@ -277,7 +289,7 @@ export function TemplateEditor({ groupId }: { groupId?: string }) {
         }} onBackgroundBox={(p,box)=>change({background_boxes:{...value.background_boxes,[String(p)]:box}})} onQuestionImageBox={(id,box)=>change({questions:value.questions.map(q=>q.id===id?{...q,image_box:box}:q)})} value={value} page={page} selected={questionId} draw={draw&&!answerMode&&!forbiddenMode&&!question?.parts} forbiddenMode={forbiddenMode} onForbidden={forbidden_regions=>change({forbidden_regions})} answerMode={answerMode} readOnly={readOnly || saving} onAnswer={answerOnCard} onSelect={(id,targetPage)=>{setQuestionId(id);const q=value.questions.find(q=>q.id===id);if(q){setPane(q.type==='subjective'?'subjective':'objective');if(q.type==='subjective')setAnswerMode(false)}if(targetPage)setPage(targetPage)}} onRegion={(id, region, index) => change({ questions: value.questions.map(q => q.id === id ? { ...q, regions: index === undefined ? [...q.regions, region] : q.regions.map((r, i) => i === index ? region : r) } : q) })} onBatchRegions={updates => { const byId = new Map<string, Map<number, typeof updates[number]['region']>>(); for (const u of updates) { const m = byId.get(u.id) || new Map(); m.set(u.index, u.region); byId.set(u.id, m) } change({ questions: value.questions.map(q => { const m = byId.get(q.id); return m ? { ...q, regions: q.regions.map((r, i) => m.get(i) ?? r) } : q }) }) }} />
         {!readOnly && !editing && pane!=='notes' && <Text type="secondary" className="preview-selection">{forbiddenMode?'禁答区保存到当前题卡，与打印稿一致。':answerMode?'点选图卡选项，或按1–7/A–G设答案；单选自动下一题，多选按Enter继续。':draw?(question?`当前选择第 ${question.number} 题 · 在预览上拖动可添加答题区`:'请在左侧选择题目后在画布上框选题区'):`${question?`当前选择第 ${question.number} 题 · `:''}在空白处拖动可框选多题整体移动（Shift+点击增减多选），直接拖动题目可移动位置`}</Text>}
       </Card>
-    </div>
+    </div>}
     <QuestionSettings template={value} onText={()=>{if(!question?.regions.length)return;const index=Math.max(0,question.regions.findIndex(r=>r.page===page));setPage(question.regions[index].page);editText({kind:'question',id:question.id,index})}} onSplit={()=>{if(!question?.parts)return;change({questions:value.questions.flatMap(q=>q.id===question.id?splitQuestions(q):[q])});setSettingsOpen(false);setMergeIds([])}} question={question} open={settingsOpen} readOnly={readOnly || saving} onClose={() => setSettingsOpen(false)} onChange={patchQuestion} onDraw={() => { setForbiddenMode(false); setDraw(true); setAnswerMode(false); setSettingsOpen(false) }} onDelete={() => { if (!question) return; change({ questions: value.questions.filter(q => q.id !== question.id) }); setQuestionId(''); setSettingsOpen(false) }} />
     <Modal title="创建任务题卡（分配给教师）" open={taskModalOpen} onCancel={()=>!taskBusy&&setTaskModalOpen(false)} onOk={()=>taskForm.submit()} confirmLoading={taskBusy} okText="创建并分配">
       <Alert type="info" showIcon style={{marginBottom:14}} message="创建后将分配到指定教师账号，对方教师端通知中心会显示一键进入制卡入口；制作完成后可保存、复制内部链接或推送给管理员审核。"/>

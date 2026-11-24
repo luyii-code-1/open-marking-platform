@@ -117,7 +117,8 @@ def main():
             build=http.get(url+'/api/v1/system/build');build.raise_for_status()
             if build.json()!=local_build:raise RuntimeError('Deployed build differs from local verified bundle')
             schema=http.get(url+'/openapi.json');schema.raise_for_status()
-            for route in ('/api/v1/gradebook','/api/v1/comparison','/api/v1/conversion-bindings','/api/v1/projects/{identifier}/files','/api/v1/system/service-status'):
+            for route in ('/api/v1/gradebook','/api/v1/comparison','/api/v1/conversion-bindings','/api/v1/projects/{identifier}/files','/api/v1/system/service-status',
+                          '/api/v1/groups/{group_id}/compatible/reference','/api/v1/templates/{identifier}/compatible/trial'):
                 if route not in schema.json()['paths']:raise RuntimeError('Missing deployed route: '+route)
         if args.clear_existing_archives:
             clear_script=Path(__file__).with_name('reset_archives.py').read_text(encoding='utf-8')

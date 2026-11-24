@@ -1,0 +1,112 @@
+import io
+from uuid import uuid4
+
+import cv2
+import numpy as np
+import pytest
+from reportlab.lib.pagesizes import A3, A4, landscape
+from reportlab.pdfgen import canvas
+
+from scanner_engine.main import digest, process
+from server import compatible_omr as external
+from server.compatible_templates import input_pages, prep_dimensions
+from server.omr import recognize
+from server.scanner_pipeline import config_hash, configuration
+from server.template_checks import issues
+
+
+def box(x, y, width, height):
+    return dict(x=x, y=y, width=width, height=height)
+
+
+def fill(image, region, value=30):
+    x, y, r, b = external.bounds(region)
+    image[y + 2:b - 2, x + 2:r - 2] = value
+
+
+def sheet(paper, sides):
+    width, height = prep_dimensions(paper)
+    candidate = [[box(24 + c * 8, 31 + d * 6, 5, 4) for d in range(10)] for c in range(3)]
+    choices = [box(25 + i * 10, 115, 5, 4) for i in range(4)]
+    qid = str(uuid4())
+    subject_id = str(uuid4())
+    template = {
+        'id': str(uuid4()), 'revision': 1, 'layout_version': 3, 'name': 'External',
+        'paper': paper, 'sides': sides, 'candidate_length': 3,
+        'external_sheet': {'version': 1, 'mode': 'completed', 'pages': {}},
+        'questions': [
+            {'id': qid, 'number': 1, 'type': 'single', 'points': 2, 'options': 4,
+             'regions': [{**box(25, 115, 35, 4), 'page': 1}], 'external_options': choices},
+            {'id': subject_id, 'number': 2, 'type': 'subjective', 'points': 8,
+             'regions': [{**box(47, 160, 85, 64), 'page': sides}]},
+        ],
+    }
+    images = []
+    for face in range(1, sides + 1):
+        image = np.full((height, width), 245, np.uint8)
+        anchor_boxes = [box(x, y, 25, 13) for x, y in ((8, 8), (width / 4 - 33, 8), (width / 4 - 33, 274), (8, 274))]
+        for i, region in enumerate(anchor_boxes):
+            x, y, _, _ = external.bounds(region)
+            cv2.putText(image, ('FR' if face == 1 else 'B8') + str(i), (x + 4, y + 39), cv2.FONT_HERSHEY_SIMPLEX, 1.1, 15, 3)
+        definition = {'anchors': [external.make_anchor(external.grayscale(image), region) for region in anchor_boxes]}
+        if face == 1:
+            definition['candidate'] = candidate
+            definition['absent'] = box(124, 45, 5, 4)
+            for cells in [*candidate, choices]:
+                for region in cells:
+                    x, y, r, b = external.bounds(region)
+                    cv2.rectangle(image, (x, y), (r - 1, b - 1), 60, 1)
+            for column, digit in zip(candidate, (0, 1, 2)):
+                fill(image, column[digit])
+            fill(image, choices[2])
+        template['external_sheet']['pages'][str(face)] = definition
+        images.append(image)
+    return template, images
+
+
+@pytest.mark.parametrize('paper,sides', [('A4', 1), ('A3', 2)])
+def test_external_reading_preserves_identity_options_and_cuts(tmp_path, paper, sides):
+    template, images = sheet(paper, sides)
+    assert issues(template, complete=True, require_answers=False) == []
+    batch, capture = str(uuid4()), str(uuid4())
+    original = tmp_path / 'pages' / batch / (capture + '.jpg')
+    original.parent.mkdir(parents=True)
+    w, h = prep_dimensions(paper)
+    skew = np.float32([[1, .012, -4], [-.009, 1, 4]])
+    rotated = np.rot90(cv2.warpAffine(images[0], skew, (w, h), borderValue=235), 1)
+    original.write_bytes(cv2.imencode('.jpg', rotated)[1].tobytes())
+    result = process(tmp_path, {'batch_id': batch, 'capture_id': capture, 'template': configuration(template),
+                               'side': 'front', 'source_sha256': digest(original.read_bytes()), 'config_sha256': config_hash(template)})
+    assert result['engine_version'] == external.ENGINE_VERSION
+    assert result['candidate_number'] == '012'
+    assert result['selections'] == {template['questions'][0]['id']: ['C']}
+    assert len(result['cuts']) == (2 if sides == 1 else 1)
+    assert not result['absent_mark']
+    if sides == 2:
+        assert recognize(images[1], template, 'back')[0].shape == (h, w)
+        with pytest.raises(ValueError, match='正反面'):
+            recognize(images[1], template, 'front')
+
+
+def test_external_rejects_other_layout_and_uncertain_fill():
+    template, (image,) = sheet('A4', 1)
+    with pytest.raises(ValueError, match='版式'):
+        recognize(np.full_like(image, 250), template, 'front')
+    x, y, r, b = external.bounds(template['questions'][0]['external_options'][0])
+    image[y + 3:b - 3, x + 6:x + 10] = 20
+    with pytest.raises(ValueError, match='填涂难判'):
+        recognize(image, template, 'front')
+
+
+@pytest.mark.parametrize('paper,pdf_page', [('A4', A4), ('A3', landscape(A3))])
+def test_reference_import_reads_both_pdf_faces(paper, pdf_page):
+    output = io.BytesIO()
+    pdf = canvas.Canvas(output, pagesize=pdf_page)
+    for face in ('Front', 'Back'):
+        pdf.drawString(50, 80, face)
+        pdf.showPage()
+    pdf.save()
+    images = input_pages(output.getvalue(), *prep_dimensions(paper))
+    assert len(images) == 2
+    assert (images[0].shape[1] > images[0].shape[0]) == (paper == 'A3')
+    assert np.min(images[0]) < 50

@@ -10,6 +10,7 @@ from .jobs import guard
 
 def perform(job,progress):
     from .paper import decode,recognize
+    from . import compatible_omr
     from .storage import materialize
     ownership=(job['id'],job['run_token'])
     group_id=job['payload']['group_id']
@@ -35,7 +36,10 @@ def perform(job,progress):
             sheet_only=page.get('upload_format')=='jpeg-sheet-1'
             image,_=decode(materialize(normalized_relative(page) if sheet_only else 'pages/'+page['id']+'.image').read_bytes(),template)
             if not sheet_only and alignment.get('rotation'):image=np.ascontiguousarray(np.rot90(image,-alignment['rotation']))
-            _,_,selections=recognize(image,template,page['side'],None if sheet_only else alignment.get('corners'))
+            if sheet_only and compatible_omr.profile(template):
+                _,selections=compatible_omr.read(image,template,page['side'])
+            else:
+                _,_,selections=recognize(image,template,page['side'],None if sheet_only else alignment.get('corners'))
         except (ValueError,FileNotFoundError) as error:
             failed.append({'page_id':page['id'],'reason':str(error)})
             progress(index+1,len(pages),'重新识别客观题填涂');continue

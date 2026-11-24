@@ -60,6 +60,7 @@ def build(args):
             assert (recognition/'OMP.RecognitionWorker.exe').is_file()
             info=json.loads((recognition/'BUILD-INFO.json').read_text(encoding='utf-8'))
             assert info['engine_version']=='omp-omr-3'
+            assert 'external-sheet-1' in info.get('capabilities', []), '请重新构建支持兼容题卡的识读引擎'
             shutil.copytree(recognition,native/'recognition')
         else:
             from tools.build_recognition import build as build_recognition

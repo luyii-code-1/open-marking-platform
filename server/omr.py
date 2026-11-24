@@ -4,6 +4,7 @@ from itertools import product
 import cv2
 import numpy as np
 import zxingcpp
+from . import compatible_omr
 
 ABSENT_X, ABSENT_Y = 124, 45
 ENGINE_VERSION = "omp-omr-3"
@@ -48,6 +49,8 @@ def decode(data,template=None):
     array=np.frombuffer(data,dtype=np.uint8)
     image=cv2.imdecode(array,cv2.IMREAD_GRAYSCALE)
     if image is None or image.size>40_000_000:raise ValueError('图片无效或像素超过4000万')
+    if template and compatible_omr.profile(template):
+        return image, ''
     if template and manual_binding(template):
         width,height=dimensions(template)
         if (image.shape[1]>image.shape[0]) != (width>height):image=cv2.rotate(image,cv2.ROTATE_90_CLOCKWISE)
@@ -138,6 +141,8 @@ def manual_align(image,template,corners):
 
 
 def absent_mark(normalized,side,template=None):
+    if template and compatible_omr.profile(template):
+        return compatible_omr.absent(normalized, template, side)
     if side!='front':return False
     if template is not None and template.get('layout_version',1)<2:return False
     x,y=absent_position(template)
@@ -177,6 +182,10 @@ def normalize_scan(image, template, side):
 
 
 def recognize(image,template,side,corners=None):
+    if compatible_omr.profile(template):
+        normalized = compatible_omr.normalize(image, template, side, corners)
+        candidate, selections = compatible_omr.read(normalized, template, side)
+        return normalized, candidate, selections
     normalized=manual_align(image,template,corners) if corners is not None else normalize_scan(image,template,side)
     calibrated=135
     if any(q.get('choice_style') in ('bracket','compact') for q in template.get('questions',[])):

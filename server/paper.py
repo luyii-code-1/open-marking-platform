@@ -10,7 +10,7 @@ from .paper_fonts import FONT
 from reportlab.lib.utils import ImageReader
 from . import db as database
 from .richtext import PaperCanvas,layout as rich_layout
-from . import sheet_notices, sheet_style
+from . import compatible_omr, sheet_notices, sheet_style
 
 from .omr import ABSENT_X, ABSENT_Y, dimensions, code, bubbles, decode, align, manual_align, absent_mark, recognize, manual_binding, panels, absent_position
 
@@ -28,6 +28,8 @@ def text_layout_options(template):
 
 
 def validate(template):
+    if 'external_sheet' in template:
+        return compatible_omr.validate(template)
     text_options = text_layout_options(template)
     w,h=dimensions(template)
     compact=any(q.get('choice_style') in ('bracket','compact') for q in template.get('questions',[]))
@@ -156,6 +158,15 @@ def pdf(template, only_page=None):
     for page in pages_to_draw:
         side='front' if page==1 else 'back'
         background_id=template.get('background_assets',{}).get(str(page)) or (template.get('background_asset_id') if page==1 else None)
+        if compatible_omr.profile(template):
+            if not background_id:
+                raise ValueError('请使用同版空白原稿打印')
+            from .storage import materialize
+            try:background=materialize('assets/'+background_id+'.png')
+            except FileNotFoundError:raise ValueError('题卡底图不存在')
+            c.drawImage(str(background),0,0,width=w*mm,height=h*mm)
+            c.showPage()
+            continue
         if background_id:
             from .storage import materialize
             try:background=materialize('assets/'+background_id+'.png')

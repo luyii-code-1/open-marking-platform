@@ -237,6 +237,8 @@ def create_route(kind):
             if kind=='groups':
                 value['template_id']=None
                 value.setdefault('roster_mode','open')
+                if value.get('template_creation','native') not in ('native','blank','completed'):
+                    raise HTTPException(422,'制卡方式无效')
                 if value.get('grade_id'):require(db,value['grade_id'],'grades')
                 enabled=bool(value.pop('conversion_enabled',False))
                 cid=value.get('conversion_id') or None
@@ -365,6 +367,8 @@ def edit_template(identifier:str,body:dict,current=Depends(admin)):
         if old['status'] in ('published','superseded'): raise HTTPException(409,'已发布版式不能直接编辑，请复制新题卡')
         if body.get('draft_version',0)!=old.get('draft_version',0):raise HTTPException(409,'草稿已更新，请重新载入后编辑')
         body={**old,**body,'id':identifier,'group_id':old['group_id'],'status':'draft','revision':old['revision'],'layout_version':3,'draft_version':old.get('draft_version',0)+1}
+        body['external_trials']=old.get('external_trials',{}) if 'external_sheet' in body else None
+        if body['external_trials'] is None:body.pop('external_trials')
         body.pop('draft_request_id',None);body.pop('draft_signature',None)
         body.setdefault('notice_template','standard-v1')
         from .sheet_style import defaults
@@ -389,6 +393,9 @@ def publish(identifier:str,body:dict|None=None,current=Depends(admin)):
         from .template_checks import issues,asset_ids
         errors=issues(template,complete=True,require_answers=False)
         if errors:raise HTTPException(422,'；'.join(errors))
+        if template['status']!='published' and template.get('external_sheet'):
+            from .compatible_templates import trials_current
+            if not trials_current(template):raise HTTPException(422,'请对当前标定配置逐面试扫并核对识读结果')
         try:assets=asset_ids(template)
         except (ValueError,KeyError,TypeError) as error:raise HTTPException(422,str(error))
         for asset_id in assets:require(db,asset_id,'assets')
@@ -611,6 +618,8 @@ from .scanner_auth import router as scanner_auth_router
 app.include_router(scanner_auth_router)
 from .templates import router as templates_router
 app.include_router(templates_router)
+from .compatible_templates import router as compatible_templates_router
+app.include_router(compatible_templates_router)
 from .teacher_templates import router as teacher_templates_router
 app.include_router(teacher_templates_router)
 from .realtime import router as realtime_router

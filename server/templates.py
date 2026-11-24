@@ -22,7 +22,7 @@ _render_slots=threading.BoundedSemaphore(4)
 _preview_cache_lock=threading.Lock()
 _preview_cache:OrderedDict[tuple[str,int],tuple[bytes,str]]=OrderedDict()
 _PREVIEW_CACHE_MAX=64
-DEFINITION_FIELDS=('name','subtitle','font_size','leading','paper','sides','candidate_length','layout_version','sheet_columns','notice_template','notice_layout','print_style','column_frame','uniform_subjective','auto_subjective_layout','print_notes','forbidden_regions','background_assets','background_boxes','background_asset_id','questions')
+DEFINITION_FIELDS=('name','subtitle','font_size','leading','paper','sides','candidate_length','layout_version','sheet_columns','notice_template','notice_layout','print_style','column_frame','uniform_subjective','auto_subjective_layout','print_notes','forbidden_regions','background_assets','background_boxes','background_asset_id','external_sheet','questions')
 
 
 @router.put('/groups/{group_id}/drafts/{identifier}')
@@ -49,6 +49,9 @@ def save_draft(group_id:str,identifier:str,body:dict,current=Depends(admin)):
         if definition.get('paper') not in ('A3','A4') or definition.get('sides') not in (1,2) or not isinstance(definition.get('name'),str):raise HTTPException(422,'纸型、面数或标题无效')
         value={k:deepcopy(definition[k]) for k in DEFINITION_FIELDS if k in definition}
         value.update(id=identifier,group_id=group_id,status='draft',revision=(old or {}).get('revision',0),draft_version=version+1,draft_request_id=body['request_id'],draft_signature=signature)
+        if 'external_sheet' in value:
+            value.update(layout_version=3, notice_template='none', auto_subjective_layout=False,
+                         external_trials=(old or {}).get('external_trials', {}))
         value.setdefault('notice_template','standard-v1')
         from .sheet_style import defaults
         defaults(value);prepare_questions(value)
