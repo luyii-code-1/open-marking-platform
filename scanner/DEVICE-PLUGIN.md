@@ -23,4 +23,6 @@
 
 ## 测试示例
 
+佳能 imageCLASS MF752Cdw II 使用[专用外部插件](../scanner-plugins/CanonMF752CdwII/README.md)，支持 A4 输稿器和平板。
+
 tools/example_scanner_plugin.py 从 OMP_TEST_IMAGES 指定目录读取按文件名排序的 PNG 图片。用 PyInstaller 的 --onefile 参数打包成 EXE 后，在设备设置里选择它，即可重复测试相同的试卷。

@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../scanner/ScannerService.cs;../../scanner/ScanCaptureSettings.cs" />
+    <PackageReference Include="NAPS2.Sdk" Version="1.2.1" />
+    <PackageReference Include="NAPS2.Images.Gdi" Version="1.2.1" />
+    <PackageReference Include="NAPS2.Sdk.Worker.Win32" Version="1.2.1" />
+    <Content Include="../../scanner/third-party-licenses/naps2*.txt" Link="licenses/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>
