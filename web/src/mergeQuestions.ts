@@ -15,10 +15,10 @@ export function mergeQuestions(rows:Question[],ids:string[]):Question {
   if(selected.some(q=>!q.regions.length))throw Error('请先为每道题框选作答区域')
   const first=selected[0]
   const parts=selected.map(q=>{
-    const {number,points,style,lines,cell_size,content_html,image_asset_id,image_height,review_layout,review_frames}=q
-    return {number,points,style,lines,cell_size,content_html,image_asset_id,image_height,review_layout,review_frames} satisfies QuestionPart
+    const {number,points,style,lines,cell_size,content_html,image_asset_id,image_height,image_box,review_layout,review_frames}=q
+    return {number,points,style,lines,cell_size,content_html,image_asset_id,image_height,image_box,review_layout,review_frames} satisfies QuestionPart
   })
-  const {style,lines,cell_size,content_html,image_asset_id,image_height,review_frames,...scoring}=first
+  const {style,lines,cell_size,content_html,image_asset_id,image_height,image_box,review_frames,...scoring}=first
   return {...scoring,review_layout:selected.every(q=>q.review_layout==='paper')?'paper':'stack',parts,points:selected.reduce((sum,q)=>sum+Math.round(q.points*100),0)/100,
     regions:selected.flatMap(q=>q.regions.map(r=>({...r,part_number:q.number})))}
 }

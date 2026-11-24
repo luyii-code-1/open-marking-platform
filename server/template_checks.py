@@ -62,6 +62,10 @@ def issues(template,complete=False,*,require_answers=True):
         if q.get('image_asset_id'):
             value=q.get('image_height',25)
             if type(value) not in (int,float) or not math.isfinite(value) or value<=0:errors.append(label+'插图高度应为有限正数')
+            if 'image_box' in q and q['image_box'] is not None:
+                box=q['image_box']
+                if not isinstance(box,dict) or any(type(box.get(k)) not in (int,float) or not math.isfinite(box[k]) for k in ('x','y','width','height')) or box['x']<0 or box['y']<0 or box['width']<=0 or box['height']<=0:
+                    errors.append(label+'插图位置或尺寸无效')
         if q.get('type')!='subjective':
             answers=q.get('answer',[]);count=q.get('options',4)
             if type(count) is not int or count not in (3,4,5):errors.append(label+'选项数量应为3、4或5')

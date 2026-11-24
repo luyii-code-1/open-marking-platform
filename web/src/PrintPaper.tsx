@@ -2,14 +2,20 @@ import { ZoomInOutlined, ZoomOutOutlined } from '@ant-design/icons'
 import { useEffect, useRef, useState } from 'react'
 import { Alert, App, Space, Typography } from 'antd'
 import { Button } from './Button'
-import { requestBlob, type PrintNote, type Region, type Template } from './api'
+import { requestBlob, type ImageBox, type PrintNote, type Region, type Template } from './api'
 import { RichEditor } from './RichEditor'
 import { choiceCenters, compactChoice } from './objectiveLayout'
 import { forbiddenRegion, forbiddenConflict, subjectiveRegion, noteRegion, intersects } from './sheetRegions'
 
 export type TextTarget={kind:'question'|'note';id:string;index:number}
-type Drag = { x:number;y:number;qid:string;index?:number;region?:Region;forbidden?:boolean;note?:boolean;resize?:boolean }
-export function Paper({value,page,selected,draw,answerMode=false,forbiddenMode=false,readOnly=false,noteMode=false,selectedNote,editing,onEdit,onTextChange,onNoteSelect,onNoteRegion,onSelect,onRegion,onAnswer,onForbidden}:{value:Template;page:number;selected?:string;draw:boolean;answerMode?:boolean;forbiddenMode?:boolean;readOnly?:boolean;noteMode?:boolean;selectedNote?:string;editing?:TextTarget|null;onEdit?:(target:TextTarget|null)=>void;onTextChange?:(target:TextTarget,html:string)=>void;onNoteSelect?:(id:string)=>void;onNoteRegion?:(region:Region,id?:string)=>void;onSelect:(id:string,page?:number)=>void;onRegion:(id:string,region:Region,index?:number)=>void;onAnswer?:(id:string,letter:string)=>void;onForbidden?:(regions:Region[])=>void}) {
+type Drag = { x:number;y:number;qid:string;index?:number;region?:Region;forbidden?:boolean;note?:boolean;resize?:boolean;qImage?:{region:Region;box:ImageBox};bgImage?:{box:ImageBox} }
+function defaultQuestionImageBox(r:Region,imageHeight?:number):ImageBox{
+  const h=Math.max(8,Math.min(Math.max(8,r.height-12),imageHeight??25))
+  const w=Math.max(8,r.width-6)
+  return {x:3,y:Math.max(9,r.height-3-h),width:w,height:h}
+}
+const roundBox=(b:ImageBox):ImageBox=>({x:Math.round(b.x*100)/100,y:Math.round(b.y*100)/100,width:Math.round(b.width*100)/100,height:Math.round(b.height*100)/100})
+export function Paper({value,page,selected,draw,answerMode=false,forbiddenMode=false,readOnly=false,noteMode=false,bgMode=false,selectedNote,editing,onEdit,onTextChange,onNoteSelect,onNoteRegion,onSelect,onRegion,onAnswer,onForbidden,onQuestionImageBox,onBackgroundBox}:{value:Template;page:number;selected?:string;draw:boolean;answerMode?:boolean;forbiddenMode?:boolean;readOnly?:boolean;noteMode?:boolean;bgMode?:boolean;selectedNote?:string;editing?:TextTarget|null;onEdit?:(target:TextTarget|null)=>void;onTextChange?:(target:TextTarget,html:string)=>void;onNoteSelect?:(id:string)=>void;onNoteRegion?:(region:Region,id?:string)=>void;onSelect:(id:string,page?:number)=>void;onRegion:(id:string,region:Region,index?:number)=>void;onAnswer?:(id:string,letter:string)=>void;onForbidden?:(regions:Region[])=>void;onQuestionImageBox?:(id:string,box:ImageBox)=>void;onBackgroundBox?:(page:number,box:ImageBox)=>void}) {
   const width=value.paper==='A3'?420:210,height=297,svg=useRef<SVGSVGElement>(null),start=useRef<Drag|null>(null)
   const [toolsHost,setToolsHost]=useState<HTMLDivElement|null>(null)
   const editQ=editing?.kind==='question'?value.questions.find(q=>q.id===editing.id):undefined
@@ -85,15 +91,40 @@ export function Paper({value,page,selected,draw,answerMode=false,forbiddenMode=f
   }
   const visible=preview?.paper===value.paper&&preview.page===page?preview:null,pending=preview?.key!==key
   function minimumY(x:number){const panels=value.paper==='A3'?(value.sheet_columns||2):1,panelWidth=(width-24-(panels-1)*8)/panels;return (value.layout_version||2)>=3&&(page!==1||x>=12+panelWidth)?35:100}
-  function point(event:React.PointerEvent){const rect=svg.current!.getBoundingClientRect(),x=Math.max(0,Math.min(width-8,(event.clientX-rect.left)/rect.width*width));return{x,y:Math.max(0,Math.min(height-8,(event.clientY-rect.top)/rect.height*height))}}
-  function regionAt(p:{x:number;y:number},s:Drag):Region{if(s.note)return noteRegion(value,page,s,p,s.region,s.resize);if(!s.forbidden&&value.questions.find(q=>q.id===s.qid)?.type==='subjective')return subjectiveRegion(value,page,s,p,s.region,s.resize);if(s.forbidden)return forbiddenRegion(value,page,s,p,s.region,s.resize);const bottom=value.print_style==='standard-v2'?270:height-8,x=s.region?Math.max(0,Math.min(width-8-s.region.width,s.region.x+p.x-s.x)):Math.min(s.x,p.x);return s.region?{...s.region,x,y:Math.max(minimumY(x),Math.min(bottom-s.region.height,s.region.y+p.y-s.y))}:{page,x,y:Math.max(minimumY(x),Math.min(s.y,p.y)),width:Math.abs(s.x-p.x),height:Math.abs(Math.min(s.y,bottom)-Math.min(p.y,bottom))}}
+  function point(event:React.PointerEvent){const rect=svg.current!.getBoundingClientRect(),x=Math.max(0,Math.min(width,(event.clientX-rect.left)/rect.width*width));return{x,y:Math.max(0,Math.min(height,(event.clientY-rect.top)/rect.height*height))}}
+  function computeImageBox(p:{x:number;y:number},s:Drag,maxW:number,maxH:number,base:ImageBox):ImageBox{
+    if(s.resize){
+      const w=Math.max(8,Math.min(maxW-base.x,base.width+(p.x-s.x)))
+      const h=Math.max(8,Math.min(maxH-base.y,base.height+(p.y-s.y)))
+      return {x:base.x,y:base.y,width:w,height:h}
+    }
+    const nx=Math.max(0,Math.min(maxW-base.width,base.x+(p.x-s.x)))
+    const ny=Math.max(0,Math.min(maxH-base.height,base.y+(p.y-s.y)))
+    return {x:nx,y:ny,width:base.width,height:base.height}
+  }
+  function regionAt(p:{x:number;y:number},s:Drag):Region{
+    if(s.bgImage){const b=computeImageBox(p,s,width,height,s.bgImage.box);return {page,x:b.x,y:b.y,width:b.width,height:b.height}}
+    if(s.qImage){const r=s.qImage.region,b=computeImageBox(p,s,r.width,r.height,s.qImage.box);return {page,x:r.x+b.x,y:r.y+b.y,width:b.width,height:b.height}}
+    if(s.note)return noteRegion(value,page,s,p,s.region,s.resize);if(!s.forbidden&&value.questions.find(q=>q.id===s.qid)?.type==='subjective')return subjectiveRegion(value,page,s,p,s.region,s.resize);if(s.forbidden)return forbiddenRegion(value,page,s,p,s.region,s.resize);const bottom=value.print_style==='standard-v2'?270:height-8,x=s.region?Math.max(0,Math.min(width-8-s.region.width,s.region.x+p.x-s.x)):Math.min(s.x,p.x);return s.region?{...s.region,x,y:Math.max(minimumY(x),Math.min(bottom-s.region.height,s.region.y+p.y-s.y))}:{page,x,y:Math.max(minimumY(x),Math.min(s.y,p.y)),width:Math.abs(s.x-p.x),height:Math.abs(Math.min(s.y,bottom)-Math.min(p.y,bottom))}
+  }
   function finish(event:React.PointerEvent){
     const s=start.current
     start.current=null
     setDraft(null)
     if(!s||readOnly)return
     const p=point(event)
-    if(s.region && Math.abs(p.x-s.x)+Math.abs(p.y-s.y)<.5)return
+    if((s.region||s.qImage||s.bgImage) && Math.abs(p.x-s.x)+Math.abs(p.y-s.y)<.5)return
+    if(s.bgImage){
+      const b=roundBox(computeImageBox(p,s,width,height,s.bgImage.box))
+      onBackgroundBox?.(page,b)
+      return
+    }
+    if(s.qImage){
+      const r=s.qImage.region
+      const b=roundBox(computeImageBox(p,s,r.width,r.height,s.qImage.box))
+      onQuestionImageBox?.(s.qid,b)
+      return
+    }
     const next=regionAt(p,s)
     if(s.note){
       const protectedRegions=[...value.questions.filter(q=>q.type!=='subjective').flatMap(q=>q.regions),...(value.forbidden_regions||[])]
@@ -131,9 +162,23 @@ export function Paper({value,page,selected,draw,answerMode=false,forbiddenMode=f
     <div ref={scroll} className="paper-scroll"><svg ref={svg} tabIndex={answerMode?0:undefined} onDoubleClick={editAt} onKeyDown={e=>{if(!editorBox)answerKey(e)}} style={{width:`${scale}%`,minWidth:0,marginInline:'auto'}} className={`paper-svg ${draw||forbiddenMode||noteMode?'drawing':''}`} viewBox={`0 0 ${width} ${height}`} aria-label={answerMode?'点击选项或使用数字键设置标准答案':'题卡打印预览与答题区域编辑'} onPointerDown={e=>{if(editorBox){onEdit?.(null);return}if(answerMode){e.currentTarget.focus();return}if(readOnly||(!noteMode&&!forbiddenMode&&(!draw||!selected)))return;start.current={...point(e),qid:selected||'',forbidden:forbiddenMode,note:noteMode};setDraft(null);e.currentTarget.setPointerCapture(e.pointerId)}} onPointerMove={e=>{if(start.current)setDraft(regionAt(point(e),start.current))}} onPointerUp={finish} onPointerCancel={()=>{start.current=null;setDraft(null)}}>
       <rect width={width} height={height} fill="white"/>
       {visible&&<image href={visible.url} x={0} y={0} width={width} height={height} preserveAspectRatio="none" pointerEvents="none"/>}
+      {bgMode&&!readOnly&&!forbiddenMode&&!noteMode&&!editorBox&&value.background_assets?.[String(page)]&&(()=>{
+        const box=value.background_boxes?.[String(page)]||{x:0,y:0,width,height}
+        return <g>
+          <rect x={box.x} y={box.y} width={box.width} height={box.height} fill="#0866ff0d" stroke="#0866ff" strokeWidth={.5} strokeDasharray="3 1.5" style={{cursor:'move'}} onPointerDown={e=>{e.stopPropagation();start.current={...point(e),qid:'',bgImage:{box}};svg.current!.setPointerCapture(e.pointerId)}}><title>拖动移动底图位置</title></rect>
+          <rect aria-label="缩放当前面底图" x={box.x+box.width-3} y={box.y+box.height-3} width={6} height={6} rx={.8} fill="#0866ff" style={{cursor:'nwse-resize'}} onPointerDown={e=>{e.stopPropagation();start.current={...point(e),qid:'',bgImage:{box},resize:true};svg.current!.setPointerCapture(e.pointerId)}}><title>拖动右下角自由缩放底图</title></rect>
+        </g>
+      })()}
       {value.questions.flatMap(q=>q.regions.map((r,index)=>r.page!==page?null:<g key={`${q.id}-${index}`} pointerEvents={forbiddenMode||noteMode||draw&&!readOnly?'none':undefined}>
         <rect data-question-id={q.id} x={r.x} y={r.y} width={r.width} height={r.height} fill={selected===q.id?'#0866ff12':'transparent'} stroke={selected===q.id?'#0866ff':'transparent'} strokeWidth={.4} onPointerDown={e=>{e.stopPropagation();onSelect(q.id);svg.current?.focus();if(!editorBox&&!readOnly&&!draw&&!answerMode){start.current={...point(e),qid:q.id,index,region:r};svg.current!.setPointerCapture(e.pointerId)}}}><title>第{q.number}题 · 区域{index+1}</title></rect>
         {selected===q.id&&q.type==='subjective'&&!readOnly&&!draw&&!answerMode&&!editorBox&&<rect aria-label={`调整第${q.number}题区域高度`} x={r.x+r.width/2-8} y={r.y+r.height-1.5} width={16} height={3} rx={1} fill="#0866ff" style={{cursor:'ns-resize'}} onPointerDown={event=>{event.stopPropagation();start.current={...point(event),qid:q.id,index,region:r,resize:true};svg.current!.setPointerCapture(event.pointerId)}}><title>上下拖动调整题区高度</title></rect>}
+        {selected===q.id&&q.type==='subjective'&&q.image_asset_id&&!readOnly&&!draw&&!answerMode&&!editorBox&&(()=>{
+          const box=q.image_box||defaultQuestionImageBox(r,q.image_height)
+          return <>
+            <rect aria-label={`移动第${q.number}题插图`} x={r.x+box.x} y={r.y+box.y} width={box.width} height={box.height} fill="#722ed112" stroke="#722ed1" strokeWidth={.45} strokeDasharray="2 1" style={{cursor:'move'}} onPointerDown={event=>{event.stopPropagation();start.current={...point(event),qid:q.id,index,qImage:{region:r,box}};svg.current!.setPointerCapture(event.pointerId)}}><title>拖动移动插图位置</title></rect>
+            <rect aria-label={`缩放第${q.number}题插图`} x={r.x+box.x+box.width-2.5} y={r.y+box.y+box.height-2.5} width={5} height={5} rx={.6} fill="#722ed1" style={{cursor:'nwse-resize'}} onPointerDown={event=>{event.stopPropagation();start.current={...point(event),qid:q.id,index,qImage:{region:r,box},resize:true};svg.current!.setPointerCapture(event.pointerId)}}><title>拖动右下角自由缩放插图</title></rect>
+          </>
+        })()}
         {answerMode&&q.type!=='subjective'&&choiceCenters(q,r).map(({letter,x,y})=><rect key={letter} role="button" aria-label={`第${q.number}题选项${letter}`} aria-pressed={q.answer.includes(letter)} x={x-(q.choice_style==='bracket'?4:2)} y={y-1.5} width={q.choice_style==='bracket'?8:compactChoice.width} height={3} rx={.4} fill={q.answer.includes(letter)?'#0866ff35':'transparent'} stroke={q.answer.includes(letter)?'#0866ff':'transparent'} strokeWidth={.3} style={{cursor:readOnly?'default':'pointer'}} onPointerDown={e=>{e.stopPropagation();svg.current?.focus()}} onClick={()=>{if(!readOnly)onAnswer?.(q.id,letter)}}><title>第{q.number}题 · {letter}</title></rect>)}
       </g>))}
       {noteMode&&<>

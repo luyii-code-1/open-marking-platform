@@ -1,7 +1,7 @@
 """A single scoring item may print several individually numbered prompts."""
 from .scoring import cents
 
-PRINT_FIELDS=('number','points','style','lines','cell_size','content_html','image_asset_id','image_height')
+PRINT_FIELDS=('number','points','style','lines','cell_size','content_html','image_asset_id','image_height','image_box')
 
 
 def label(question):

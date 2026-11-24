@@ -160,8 +160,16 @@ def pdf(template):
             try:background=materialize('assets/'+background_id+'.png')
             except FileNotFoundError:raise ValueError('题卡底图不存在')
             if not background.exists():raise ValueError('题卡底图不存在')
-            c.drawImage(str(background),0,0,width=w*mm,height=h*mm)
-            c.setFillColorRGB(1,1,1);c.rect(0,(h-100)*mm,w*mm,100*mm,fill=1,stroke=0);c.setFillColorRGB(0,0,0)
+            bg_box=(template.get('background_boxes') or {}).get(str(page))
+            if isinstance(bg_box,dict) and all(isinstance(bg_box.get(k),(int,float)) for k in ('x','y','width','height')):
+                bx=max(0.0,min(float(w)-5.0,float(bg_box['x'])))
+                by=max(0.0,min(float(h)-5.0,float(bg_box['y'])))
+                bw=max(5.0,min(float(w)-bx,float(bg_box['width'])))
+                bh=max(5.0,min(float(h)-by,float(bg_box['height'])))
+                c.drawImage(str(background),bx*mm,(h-by-bh)*mm,width=bw*mm,height=bh*mm,preserveAspectRatio=True,anchor='c',mask='auto')
+            else:
+                c.drawImage(str(background),0,0,width=w*mm,height=h*mm)
+                c.setFillColorRGB(1,1,1);c.rect(0,(h-100)*mm,w*mm,100*mm,fill=1,stroke=0);c.setFillColorRGB(0,0,0)
         title_width=(w-24-(panels(template)-1)*8)/panels(template) if manual_binding(template) else w-65
         title_size=min(16,16*(title_width-6)/max(1,pdfmetrics.stringWidth(template['name'],FONT,16)/mm))
         if page==1 or not manual_binding(template):
@@ -265,13 +273,21 @@ def pdf(template):
                         for row in range(rows):
                             for col in range(cols):c.rect((x+3+col*cell)*mm,(h-grid_top-(row+1)*cell)*mm,cell*mm,cell*mm)
                     c.setStrokeColorRGB(0,0,0)
-                    image_height=min(rh-12,question.get('image_height',25)) if question.get('image_asset_id') else 0
+                    custom_img_box=question.get('image_box') if isinstance(question.get('image_box'),dict) and all(isinstance(question['image_box'].get(k),(int,float)) for k in ('x','y','width','height')) else None
+                    image_height=0 if custom_img_box else (min(rh-12,question.get('image_height',25)) if question.get('image_asset_id') else 0)
                     if question.get('content_html'):rich_layout(question['content_html'],(rw-6)*mm,(rh-12-image_height)*mm,c,(x+3)*mm,(h-y-9)*mm,**text_options)
                     if question.get('image_asset_id'):
                         from .storage import materialize
                         try:asset=materialize('assets/'+question['image_asset_id']+'.png')
                         except FileNotFoundError:raise ValueError('题卡插图不存在')
-                        c.drawImage(str(asset),(x+3)*mm,(h-y-rh+3)*mm,width=(rw-6)*mm,height=min(rh-12,question.get('image_height',25))*mm,preserveAspectRatio=True,anchor='c',mask='auto')
+                        if custom_img_box:
+                            ix=max(0.0,min(float(rw)-4.0,float(custom_img_box['x'])))
+                            iy=max(0.0,min(float(rh)-4.0,float(custom_img_box['y'])))
+                            iw=max(4.0,min(float(rw)-ix,float(custom_img_box['width'])))
+                            ih=max(4.0,min(float(rh)-iy,float(custom_img_box['height'])))
+                            c.drawImage(str(asset),(x+ix)*mm,(h-(y+iy+ih))*mm,width=iw*mm,height=ih*mm,preserveAspectRatio=True,anchor='c',mask='auto')
+                        else:
+                            c.drawImage(str(asset),(x+3)*mm,(h-y-rh+3)*mm,width=(rw-6)*mm,height=min(rh-12,question.get('image_height',25))*mm,preserveAspectRatio=True,anchor='c',mask='auto')
         if template.get('column_frame'):
             sheet_style.draw_choice_frames(c,template,page,h,panels(template),w)
         if sheet_style.enabled(template):

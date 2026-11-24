@@ -56,10 +56,18 @@ export function Personnel({
   const [batchPwd, setBatchPwd] = useState('')
   const [batchRoleOpen, setBatchRoleOpen] = useState(false)
   const [batchRole, setBatchRole] = useState<'teacher' | 'manager'>('teacher')
+  const [teacherFilters, setTeacherFilters] = useState<FilterValues>({})
   const [classFilters, setClassFilters] = useState<FilterValues>({})
   const [studentFilters, setStudentFilters] = useState<FilterValues>({})
   const { message, modal } = App.useApp()
 
+  const applyTeacherFilter = (key: string, val: string) => {
+    if (!val) return
+    setTeacherFilters(prev => {
+      const cur = prev[key] || []
+      return { ...prev, [key]: cur.includes(val) ? cur : [...cur, val] }
+    })
+  }
   const applyClassFilter = (key: string, val: string) => {
     if (!val) return
     setClassFilters(prev => {
@@ -124,24 +132,91 @@ export function Personnel({
     { key: 'tag', label: '班级标签', options: classTagOptions, values: c => c.tags || [] },
     { key: 'teacher', label: '任教教师', options: teacherOptions, values: c => c.teacher_ids || [] },
   ]
+  const teacherMetaById = useMemo(() => {
+    const gradeById = new Map(grades.data.map(g => [g.id, g.name]))
+    const map = new Map<
+      string,
+      {
+        subjects: string[]
+        gradeIds: string[]
+        tags: string[]
+        classes: { id: string; label: string; homeroom: boolean }[]
+      }
+    >()
+    const ensure = (uid: string) => {
+      let item = map.get(uid)
+      if (!item) {
+        item = { subjects: [], gradeIds: [], tags: [], classes: [] }
+        map.set(uid, item)
+      }
+      return item
+    }
+    for (const c of classes.data) {
+      const gName = gradeById.get(c.grade_id) || ''
+      const label = [gName, c.name].filter(Boolean).join(' · ')
+      const teaching = (c.teaching || {}) as Record<string, { subjects?: string[]; homeroom?: boolean | null }>
+      const uids = new Set<string>([...(c.teacher_ids || []), ...Object.keys(teaching)])
+      for (const uid of uids) {
+        const meta = ensure(uid)
+        const roleInfo = teaching[uid] || {}
+        for (const s of roleInfo.subjects || []) {
+          if (s && !meta.subjects.includes(s)) meta.subjects.push(s)
+        }
+        if (c.grade_id && !meta.gradeIds.includes(c.grade_id)) meta.gradeIds.push(c.grade_id)
+        for (const t of (c.tags || []) as string[]) {
+          if (t && !meta.tags.includes(t)) meta.tags.push(t)
+        }
+        if (!meta.classes.some(item => item.id === c.id)) {
+          meta.classes.push({ id: c.id, label, homeroom: roleInfo.homeroom === true })
+        }
+      }
+    }
+    return map
+  }, [classes.data, grades.data])
+
+  const taughtSubjectOptions = useMemo(() => {
+    const names = new Set<string>()
+    for (const meta of teacherMetaById.values()) {
+      for (const s of meta.subjects) names.add(s)
+    }
+    for (const c of subjectChoices) names.add(c.value)
+    return [...names].sort().map(value => ({ value, label: value }))
+  }, [teacherMetaById, subjectChoices])
+
   const teacherFields: FilterField<Row>[] = [
+    {
+      key: 'role',
+      label: '角色',
+      options: [
+        { value: 'teacher', label: '阅卷教师' },
+        { value: 'manager', label: '管理教师' },
+        { value: 'admin', label: '系统管理员' },
+      ],
+      values: u => [u.role || 'teacher'],
+    },
+    {
+      key: 'subject',
+      label: '任课科目',
+      options: taughtSubjectOptions,
+      values: u => teacherMetaById.get(u.id)?.subjects || [],
+    },
     {
       key: 'grade',
       label: '任教年级',
       options: gradeOptions,
-      values: u => classes.data.filter(c => (c.teacher_ids || []).includes(u.id)).map(c => c.grade_id),
+      values: u => teacherMetaById.get(u.id)?.gradeIds || [],
     },
     {
       key: 'tag',
       label: '班级标签',
       options: classTagOptions,
-      values: u => classes.data.filter(c => (c.teacher_ids || []).includes(u.id)).flatMap(c => c.tags || []),
+      values: u => teacherMetaById.get(u.id)?.tags || [],
     },
     {
       key: 'class',
-      label: '行政班',
+      label: '关联班级',
       options: classes.data.map(c => ({ value: c.id, label: classLabel(c.id) })),
-      values: u => classes.data.filter(c => (c.teacher_ids || []).includes(u.id)).map(c => c.id),
+      values: u => (teacherMetaById.get(u.id)?.classes || []).map(c => c.id),
     },
   ]
   const studentFields: FilterField<Row>[] = [
@@ -306,6 +381,20 @@ export function Personnel({
               <EntityTable
                 hideTitle
                 filterFields={teacherFields}
+                filterValues={teacherFilters}
+                onFilterValuesChange={setTeacherFilters}
+                searchText={u => {
+                  const meta = teacherMetaById.get(u.id)
+                  return [
+                    u.username,
+                    u.name,
+                    u.role === 'admin' ? '系统管理员' : u.role === 'manager' ? '管理教师' : '阅卷教师',
+                    ...(meta?.subjects || []),
+                    ...(meta?.gradeIds.map(id => gradeName(id) || '') || []),
+                    ...(meta?.tags || []),
+                    ...(meta?.classes.map(c => c.label) || []),
+                  ]
+                }}
                 resource={users}
                 allowImport={false}
                 extra={
@@ -388,11 +477,90 @@ export function Personnel({
                 ]}
                 columns={[
                   { title: '账号', dataIndex: 'username' },
-                  { title: '姓名', dataIndex: 'name' },
+                  {
+                    title: '姓名',
+                    dataIndex: 'name',
+                    render: (value: string, row: Row) => {
+                      const meta = teacherMetaById.get(row.id)
+                      const isHomeroom = meta?.classes.some(c => c.homeroom)
+                      return (
+                        <Space size={6} wrap>
+                          <span>{value}</span>
+                          {isHomeroom && <Tag color="gold" style={{ marginInlineEnd: 0 }}>班主任</Tag>}
+                        </Space>
+                      )
+                    },
+                  },
                   {
                     title: '角色',
                     dataIndex: 'role',
-                    render: (value: string) => (value === 'admin' ? '系统管理员' : value === 'manager' ? '管理教师' : '阅卷教师'),
+                    render: (value: string) => {
+                      const label = value === 'admin' ? '系统管理员' : value === 'manager' ? '管理教师' : '阅卷教师'
+                      return (
+                        <Tag
+                          color={value === 'admin' ? 'red' : value === 'manager' ? 'purple' : 'default'}
+                          style={{ cursor: 'pointer', marginInlineEnd: 0 }}
+                          onClick={() => applyTeacherFilter('role', value || 'teacher')}
+                        >
+                          {label}
+                        </Tag>
+                      )
+                    },
+                  },
+                  {
+                    title: '任课科目',
+                    render: (_, row) => {
+                      const list = teacherMetaById.get(row.id)?.subjects || []
+                      return list.length ? (
+                        <ClassTags tags={list} colorMap={tagColors} onTagClick={s => applyTeacherFilter('subject', s)} />
+                      ) : (
+                        '—'
+                      )
+                    },
+                  },
+                  {
+                    title: '任教年级',
+                    render: (_, row) => {
+                      const gids = teacherMetaById.get(row.id)?.gradeIds || []
+                      return gids.length ? (
+                        <Space size={4} wrap>
+                          {gids.map(gid => (
+                            <GradeTag key={gid} name={gradeName(gid)} onClick={() => applyTeacherFilter('grade', gid)} />
+                          ))}
+                        </Space>
+                      ) : (
+                        '—'
+                      )
+                    },
+                  },
+                  {
+                    title: '标签',
+                    render: (_, row) => {
+                      const tags = teacherMetaById.get(row.id)?.tags || []
+                      return tags.length ? (
+                        <ClassTags tags={tags} colorMap={tagColors} onTagClick={t => applyTeacherFilter('tag', t)} />
+                      ) : (
+                        '—'
+                      )
+                    },
+                  },
+                  {
+                    title: '关联班级',
+                    render: (_, row) => {
+                      const cls = teacherMetaById.get(row.id)?.classes || []
+                      if (!cls.length) return '—'
+                      const labels = cls.map(c => (c.homeroom ? `${c.label}（班主任）` : c.label))
+                      const labelToId = new Map(cls.map((c, idx) => [labels[idx], c.id]))
+                      return (
+                        <ClassTags
+                          tags={labels}
+                          onTagClick={label => {
+                            const cid = labelToId.get(label)
+                            if (cid) applyTeacherFilter('class', cid)
+                          }}
+                        />
+                      )
+                    },
                   },
                   {
                     title: '操作',
