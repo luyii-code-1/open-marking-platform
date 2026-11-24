@@ -933,8 +933,8 @@ function TeacherTemplateWorkbench({
     const q = value.questions.find(item => item.id === id)
     if (q) {
       setPane(q.type === 'subjective' ? 'subjective' : 'objective')
-      setAnswerMode(q.type !== 'subjective')
-      setDraw(q.type === 'subjective' && !q.parts)
+      setAnswerMode(false)
+      setDraw(false)
       if (q.regions[0]) setPage(q.regions[0].page)
     }
     if (edit) setSettingsOpen(true)
@@ -991,7 +991,7 @@ function TeacherTemplateWorkbench({
     change({ questions: [...value.questions, q] })
     setEditing(null)
     setQuestionId(q.id)
-    setDraw(!starter)
+    setDraw(false)
     setAnswerMode(false)
     setForbiddenMode(false)
   }
@@ -1275,8 +1275,8 @@ function TeacherTemplateWorkbench({
               setEditing(null)
               setPane(key)
               setForbiddenMode(false)
-              setAnswerMode(key === 'objective')
-              setDraw(key === 'subjective')
+              setAnswerMode(false)
+              setDraw(false)
               if (key === 'subjective' && question?.type !== 'subjective') setQuestionId(subjective[0]?.id || '')
             }}
             items={[
@@ -1368,7 +1368,7 @@ function TeacherTemplateWorkbench({
                         onClick: () => {
                           setEditing(null)
                           setQuestionId(q.id)
-                          setDraw(!q.parts && !q.regions.length)
+                          setDraw(false)
                           if (q.regions.length) setPage(q.regions[0].page)
                         },
                       })}
@@ -1504,9 +1504,9 @@ function TeacherTemplateWorkbench({
                     setDraw(event.target.value === 'draw')
                   }}
                   options={[
+                    { label: '移动位置', value: 'move' },
                     ...(pane === 'objective' ? [{ label: '设答案', value: 'answer' }] : []),
                     ...(pane === 'subjective' ? [{ label: '框选题区', value: 'draw' }] : []),
-                    { label: '移动', value: 'move' },
                     ...(pane === 'setup' ? [{ label: '禁答区', value: 'forbidden' }] : []),
                   ]}
                 />

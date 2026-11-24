@@ -36,6 +36,8 @@ type Props<T extends object>=TableProps<T>&{totalRows?:number;searchText?:(row:T
 export function Table<T extends object = any>({totalRows,pagination,footer,searchText,query,filterFields=[],filterValues,onFilterValuesChange,columnChooser=true,exportable=true,serverSort=false,toolbar,...props}:Props<T>){
   const [text,setText]=useState(''),[internalFilters,setInternalFilters]=useState<FilterValues>({}),[searchField,setSearchField]=useState(''),[hidden,setHidden]=useState<string[]>([])
   const [exportBusy,setExportBusy]=useState(false)
+  const [pageSize,setPageSize]=useState<number>(()=>(pagination&&typeof pagination==='object'?(pagination.pageSize??pagination.defaultPageSize):undefined)??50)
+  const [showAll,setShowAll]=useState(false)
   const {message}=App.useApp()
   const filters=filterValues??internalFilters
   const setFilters=(updater:FilterValues|((prev:FilterValues)=>FilterValues))=>{
@@ -82,10 +84,28 @@ export function Table<T extends object = any>({totalRows,pagination,footer,searc
   const filtered=filterRecords(props.dataSource||[],filterFields,filters,searchField?term:'',searchField)
   const rows=term&&!searchField?filtered.filter(row=>textMatches(row,term)||textMatches(searchText?.(row),term)):filtered
   const total=active?rows.length:totalRows??options.total??rows.length
-  const countInFooter=pagination===false||total===0||
-    (options.hideOnSinglePage&&total<=(options.pageSize??options.defaultPageSize??50))
-  const pager=pagination===false?false:{defaultPageSize:50,showSizeChanger:true,pageSizeOptions:[15,30,50,100],...options,...(active?{total,...(options.total!==undefined?{current:1}:{})}:{}),showTotal:countLabel}
   const remote=totalRows!==undefined||options.total!==undefined
+  const controlledSize=options.pageSize!==undefined
+  const effectivePageSize=!remote&&!controlledSize?(showAll?Math.max(total,1):pageSize):(options.pageSize??options.defaultPageSize??50)
+  const countInFooter=pagination===false||total===0||
+    (!showAll&&options.hideOnSinglePage&&total<=effectivePageSize)
+  const pager=pagination===false?false:{
+    defaultPageSize:50,
+    showSizeChanger:true,
+    pageSizeOptions:[15,30,50,100,200],
+    ...options,
+    ...(!remote&&!controlledSize?{
+      pageSize:effectivePageSize,
+      ...(showAll?{current:1,hideOnSinglePage:false}:{}),
+      onShowSizeChange:(cur:number,size:number)=>{setShowAll(false);setPageSize(size);options.onShowSizeChange?.(cur,size)},
+      onChange:(page:number,size:number)=>{if(size!==effectivePageSize&&!showAll)setPageSize(size);options.onChange?.(page,size)},
+    }:{}),
+    ...(active?{total,...(options.total!==undefined?{current:1}:{})}:{}),
+    showTotal:(count:number)=><Space size={6} align="center">
+      <span className="table-total">共 {count} 条数据{showAll?'（全部）':''}</span>
+      {!remote&&!controlledSize&&count>0&&<Button size="small" type="link" style={{paddingInline:4,height:'auto'}} onClick={()=>setShowAll(v=>!v)}>{showAll?'恢复分页':'全部'}</Button>}
+    </Space>,
+  }
   const filteredEmpty=active&&!!props.dataSource?.length&&rows.length===0
   const locale=filteredEmpty?{...props.locale,emptyText:<Space wrap>
     {remote?'当前页没有符合条件的记录。':'没有符合条件的记录。'}
