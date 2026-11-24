@@ -48,6 +48,10 @@ def main():
     if remote!=revision:raise RuntimeError('Push or merge the current main revision before deploying')
     if not args.skip_verify:
         subprocess.run(['powershell','-NoProfile','-ExecutionPolicy','Bypass','-File',str(REPO/'deploy/verify.ps1')],cwd=REPO,check=True)
+    local_build=json.loads((REPO/'web/dist/version.json').read_text(encoding='utf-8'))
+    build_commit=local_build.get('commit','')
+    if not re.fullmatch(r'[0-9a-f]{10,40}',build_commit) or not revision.startswith(build_commit):
+        raise RuntimeError('Frontend build does not match HEAD. Run deploy/verify.ps1 after committing, then retry.')
     out=REPO/'dist'/'cloud-release';out.mkdir(parents=True,exist_ok=True)
     ssh=connect();sftp=ssh.open_sftp();changed=False;old=None
 
@@ -111,7 +115,6 @@ def main():
         with httpx.Client(timeout=25,trust_env=False) as http:
             health=http.get(url+'/api/v1/health');health.raise_for_status()
             build=http.get(url+'/api/v1/system/build');build.raise_for_status()
-            local_build=json.loads((REPO/'web/dist/version.json').read_text())
             if build.json()!=local_build:raise RuntimeError('Deployed build differs from local verified bundle')
             schema=http.get(url+'/openapi.json');schema.raise_for_status()
             for route in ('/api/v1/gradebook','/api/v1/comparison','/api/v1/conversion-bindings','/api/v1/projects/{identifier}/files','/api/v1/system/service-status'):
