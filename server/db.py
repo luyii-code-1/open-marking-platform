@@ -81,8 +81,8 @@ def put(db, kind, body, actor=None):
     from .lifecycle import writable
     if old: writable(db, kind, json.loads(old['body']))
     writable(db, kind, body)
-    from .identifiers import reserve,template_questions
-    reserve(db,body['id'],kind,body['id'])
+    from .identifiers import canonical,template_questions
+    canonical(body['id'])
     if kind=='templates':template_questions(db,body,json.loads(old['body']) if old else None)
     encoded=json.dumps(body,ensure_ascii=False)
     if old:

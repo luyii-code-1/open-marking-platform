@@ -24,6 +24,16 @@ const statusColors: Record<string, string> = {
 const numericKeys = new Set(['total', 'rank'])
 
 function formatCell(value: unknown, row: Row, key: string, metric: string, showConversionFlow = true) {
+  if (key === 'answer') {
+    const label = value === null || value === undefined ? '未设' : String(value)
+    return <Tag color={label === '未设' ? 'default' : 'green'}>{label}</Tag>
+  }
+  if (key.startsWith('opt_') && key !== 'opt_blank') {
+    const letter = key.slice(4)
+    const isCorrect = Array.isArray(row._option_meta?.answers) && row._option_meta.answers.includes(letter)
+    const textVal = value === null || value === undefined || value === '' ? '—' : String(value)
+    return isCorrect && textVal !== '—' ? <Tag color="green">{textVal}</Tag> : <span className="numeric-cell">{textVal}</span>
+  }
   if (key === 'status') {
     const label = value === null || value === undefined ? '—' : String(value)
     return <Tag color={statusColors[label] || 'default'}>{label}</Tag>
@@ -97,7 +107,7 @@ export function Gradebook({ projectId, subjectId, gradeId, groupId }: Scope) {
 }
 
 function GradebookScope({ projectId, subjectId, gradeId, groupId }: Scope) {
-  const [view, setView] = useState<'totals' | 'items'>('totals')
+  const [view, setView] = useState<'totals' | 'items' | 'options'>('totals')
   const [metric, setMetric] = useState<'raw' | 'converted'>('raw')
   const [page, setPage] = useState(1)
   const [filters, setFilters] = useState<Record<string, string[]>>({})
@@ -105,7 +115,7 @@ function GradebookScope({ projectId, subjectId, gradeId, groupId }: Scope) {
   const [q, setQ] = useState('')
   const [exporting, setExporting] = useState(false)
 
-  const activeMetric = view === 'items' ? 'raw' : metric
+  const activeMetric = view === 'totals' ? metric : 'raw'
   const baseParams = useMemo(() => {
     const params = new URLSearchParams({ project_id: projectId!, view, metric: activeMetric, q })
     if (subjectId) params.set('subject_id', subjectId)
@@ -167,8 +177,8 @@ function GradebookScope({ projectId, subjectId, gradeId, groupId }: Scope) {
     const cols = data.data.columns
     const pinIdentity = cols.length > 7
     return cols.map(c => {
-      const identity = c.key === 'candidate_number' || c.key === 'name'
-      const isMeta = identity || c.key === 'grade' || c.key === 'class_name' || c.key === 'status'
+      const identity = c.key === 'candidate_number' || c.key === 'name' || c.key === 'subject' || c.key === 'number'
+      const isMeta = identity || c.key === 'grade' || c.key === 'class_name' || c.key === 'status' || c.key === 'group' || c.key === 'question_type' || c.key === 'answer'
       return {
         key: c.key,
         title: c.label,
@@ -294,7 +304,7 @@ function GradebookScope({ projectId, subjectId, gradeId, groupId }: Scope) {
           <FilterSummaryBar
             chips={filterChips}
             onReset={resetAll}
-            summary={data.loaded ? `共 ${data.data.total} 名学生` : undefined}
+            summary={data.loaded ? (view === 'options' ? `共 ${data.data.total} 道客观题` : `共 ${data.data.total} 名学生`) : undefined}
           />
         </Space>
       </Card>
@@ -303,14 +313,17 @@ function GradebookScope({ projectId, subjectId, gradeId, groupId }: Scope) {
         <Space direction="vertical" size={10} style={{ width: '100%' }}>
           <ErrorNotice error={data.error} retry={data.reload} />
           <Typography.Text type="secondary" style={{ fontSize: 13 }}>
-            {groupId
-              ? '当前题卡自身成绩，总分按可见范围混合排名；默认裸分，小题分始终显示原始得分，同分并列跳号。'
-              : '汇总已发布成绩，同一学生同科多份题卡按异常卷处理；默认裸分，小题分始终显示原始得分，同分并列跳号。'}
+            {view === 'options'
+              ? '按当前可见班级与筛选条件统计各客观题选项分布及正答率（绿色高亮为标准答案选项）。'
+              : groupId
+                ? '当前题卡自身成绩，总分按可见范围混合排名；默认裸分，小题分始终显示原始得分，同分并列跳号。'
+                : '汇总已发布成绩，同一学生同科多份题卡按异常卷处理；默认裸分，小题分始终显示原始得分，同分并列跳号。'}
           </Typography.Text>
           <Table
           query=""
           columnChooser
-          rowKey="student_id"
+          exportable={false}
+          rowKey={view === 'options' ? 'row_key' : 'student_id'}
           loading={data.loading}
           dataSource={data.loading ? [] : data.data.rows}
           columns={columns}
@@ -329,12 +342,13 @@ function GradebookScope({ projectId, subjectId, gradeId, groupId }: Scope) {
                 size="small"
                 activeKey={view}
                 onChange={v => {
-                  setView(v as 'totals' | 'items')
+                  setView(v as 'totals' | 'items' | 'options')
                   setPage(1)
                 }}
                 items={[
                   { key: 'totals', label: groupId ? (metric === 'converted' ? '总分（赋分）' : '总分（裸分）') : '概览成绩' },
                   { key: 'items', label: '小题分' },
+                  { key: 'options', label: '选项分布' },
                 ]}
               />
               <Space wrap>
@@ -375,8 +389,8 @@ function GradebookScope({ projectId, subjectId, gradeId, groupId }: Scope) {
           columns={data.data.columns}
           previewPath="/gradebook"
           baseParams={baseParams}
-          rowKey="student_id"
-          filenameBase="成绩"
+          rowKey={view === 'options' ? 'row_key' : 'student_id'}
+          filenameBase={view === 'options' ? '选项分布' : '成绩'}
           renderCell={(value, row, key) => formatCell(value, row, key, activeMetric, false)}
         />
       )}

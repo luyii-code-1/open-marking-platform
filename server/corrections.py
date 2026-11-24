@@ -9,7 +9,7 @@ from PIL import Image
 from .lifecycle import RESULTS_REVIEW_GUIDE
 from . import db as database
 from .db import connect,objects,put,find
-from .dependencies import admin,require
+from .dependencies import admin,user,require
 from .answer_slices import sync as sync_answer_slices
 
 router=APIRouter(prefix='/api/v1')
@@ -236,7 +236,7 @@ def correct_attendance(identifier:str,body:dict,current=Depends(admin)):
 
 
 @router.post('/assets')
-def upload_asset(file:UploadFile=File(),current=Depends(admin)):
+def upload_asset(file:UploadFile=File(),current=Depends(user)):
     data=file.file.read(30*1024*1024+1)
     if len(data)>30*1024*1024: raise HTTPException(413,'图片超过30MB')
     try:
@@ -254,7 +254,7 @@ def upload_asset(file:UploadFile=File(),current=Depends(admin)):
 
 
 @router.get('/assets/{identifier}')
-def asset(identifier:str,current=Depends(admin)):
+def asset(identifier:str,current=Depends(user)):
     with connect() as db: require(db,identifier,'assets')
     from .storage import materialize
     return FileResponse(materialize('assets/'+identifier+'.png'))

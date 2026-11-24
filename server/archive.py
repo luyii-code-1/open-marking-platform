@@ -101,10 +101,8 @@ def collect(db,identifier):
     for record in records:
         if record['kind']=='assignments':user_ids.update(record['data'].get('user_ids',[])+record['data'].get('arbitrator_ids',[]))
     people=[dict(r) for r in db.execute('SELECT id,username,name,role FROM users') if r['id'] in user_ids]
-    owners=selected|user_ids
-    identifiers=[dict(r) for r in db.execute('SELECT * FROM identifiers') if r['owner_id'] in owners]
     results=[dict(r) for r in db.execute('SELECT * FROM review_results') if r['submission_id'] in selected]
-    return project,records,{'format':'omp-project-2','project_id':identifier,'records':records,'score_history':scores,'review_results':results,'audit':audit,'people':people,'identifiers':identifiers}
+    return project,records,{'format':'omp-project-2','project_id':identifier,'records':records,'score_history':scores,'review_results':results,'audit':audit,'people':people,'identifiers':[]}
 
 
 def create(identifier,actor,progress=None,archive_id=None,ownership=None,preserve_status=False):

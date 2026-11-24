@@ -1,13 +1,5 @@
 -- Object bodies are JSON text so exports and signed payloads retain their original representation.
 CREATE TABLE schema_migrations (name text PRIMARY KEY);
-CREATE TABLE identifiers (
-    id text PRIMARY KEY,
-    kind text NOT NULL,
-    owner_id text NOT NULL,
-    retired integer NOT NULL DEFAULT 0 CHECK (retired IN (0, 1)),
-    CHECK (id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
-);
-CREATE INDEX identifier_owner ON identifiers(owner_id,kind);
 
 CREATE TABLE users (
     id text PRIMARY KEY, username text NOT NULL UNIQUE, name text NOT NULL,
@@ -73,20 +65,7 @@ CREATE INDEX student_candidate_lookup ON objects((body::jsonb #>> '{candidate_nu
 CREATE INDEX received_scan_pages ON objects(id) WHERE kind='pages' AND deleted=0 AND body::jsonb #>> '{status}'='received';
 CREATE INDEX page_processing_jobs ON objects((body::jsonb #>> '{payload,page_id}')) WHERE kind='jobs' AND deleted=0 AND body::jsonb #>> '{kind}'='process-page';
 
--- Reservation is shared by object, user and question identifiers. A conflicting
--- insert waits for the current owner before checking its kind and retirement.
-CREATE FUNCTION omp_register_identifier() RETURNS trigger LANGUAGE plpgsql AS $$
-DECLARE entity_kind text;
-BEGIN
-    IF TG_TABLE_NAME='users' THEN entity_kind:='users'; ELSE entity_kind:=NEW.kind; END IF;
-    INSERT INTO identifiers(id,kind,owner_id) VALUES(NEW.id,entity_kind,NEW.id) ON CONFLICT(id) DO NOTHING;
-    PERFORM 1 FROM identifiers WHERE id=NEW.id AND kind=entity_kind AND owner_id=NEW.id AND retired=0 FOR SHARE;
-    IF NOT FOUND THEN RAISE EXCEPTION 'identifier conflict' USING ERRCODE='23505'; END IF;
-    RETURN NEW;
-END $$;
-CREATE TRIGGER object_identifier_insert BEFORE INSERT ON objects FOR EACH ROW EXECUTE FUNCTION omp_register_identifier();
-CREATE TRIGGER user_identifier_insert BEFORE INSERT ON users FOR EACH ROW EXECUTE FUNCTION omp_register_identifier();
-
+-- Ensure primary keys remain immutable after creation.
 CREATE FUNCTION omp_immutable_identifier() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
     IF OLD.id<>NEW.id THEN RAISE EXCEPTION 'identifier immutable' USING ERRCODE='23514'; END IF;
@@ -99,15 +78,6 @@ BEGIN
 END $$;
 CREATE TRIGGER object_identifier_update BEFORE UPDATE OF id,kind,deleted ON objects FOR EACH ROW EXECUTE FUNCTION omp_immutable_identifier();
 CREATE TRIGGER user_identifier_update BEFORE UPDATE OF id ON users FOR EACH ROW EXECUTE FUNCTION omp_immutable_identifier();
-
-CREATE FUNCTION omp_retire_identifier() RETURNS trigger LANGUAGE plpgsql AS $$
-BEGIN
-    UPDATE identifiers SET retired=1 WHERE id=OLD.id OR (kind='questions' AND owner_id=OLD.id);
-    RETURN NULL;
-END $$;
-CREATE TRIGGER object_identifier_retire AFTER UPDATE OF deleted ON objects FOR EACH ROW WHEN (OLD.deleted=0 AND NEW.deleted<>0) EXECUTE FUNCTION omp_retire_identifier();
-CREATE TRIGGER object_identifier_delete AFTER DELETE ON objects FOR EACH ROW EXECUTE FUNCTION omp_retire_identifier();
-CREATE TRIGGER user_identifier_delete AFTER DELETE ON users FOR EACH ROW EXECUTE FUNCTION omp_retire_identifier();
 
 CREATE FUNCTION omp_check_candidate_number() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE number text := NEW.body::jsonb #>> '{candidate_number}';
@@ -161,4 +131,4 @@ CREATE TRIGGER allocation_ready_insert AFTER INSERT ON objects FOR EACH ROW WHEN
 CREATE TRIGGER allocation_ready_delete AFTER DELETE ON objects FOR EACH ROW WHEN (OLD.kind='submissions') EXECUTE FUNCTION omp_invalidate_allocations();
 CREATE TRIGGER allocation_ready_update AFTER UPDATE OF body,deleted ON objects FOR EACH ROW WHEN (NEW.kind='submissions') EXECUTE FUNCTION omp_invalidate_allocations();
 
-INSERT INTO schema_migrations VALUES('identifiers-v1');
+INSERT INTO schema_migrations VALUES('drop-identifiers-v1');

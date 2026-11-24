@@ -604,6 +604,8 @@ from .scanner_auth import router as scanner_auth_router
 app.include_router(scanner_auth_router)
 from .templates import router as templates_router
 app.include_router(templates_router)
+from .teacher_templates import router as teacher_templates_router
+app.include_router(teacher_templates_router)
 from .realtime import router as realtime_router
 app.include_router(realtime_router)
 from .audit import router as audit_router

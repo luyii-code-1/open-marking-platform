@@ -33,6 +33,7 @@ const Personnel = loadPage(() => import('./Personnel').then(module => ({ default
 const Settings = loadPage(() => import('./Management').then(module => ({ default: module.Settings })))
 const ScannerDesk = loadPage(() => import('./ScannerDesk').then(module => ({ default: module.ScannerDesk })))
 const Account = loadPage(() => import('./Account').then(module => ({ default: module.Account })))
+const TeacherTemplates = loadPage(() => import('./TeacherTemplates').then(module => ({ default: module.TeacherTemplates })))
 
 type Props = ReturnType<typeof useNavigation> & {
   user: User; authToken: string; offlineAccess: boolean; management: boolean; page: string
@@ -56,8 +57,8 @@ function Workspace({ user, authToken, offlineAccess, management, page, location,
   const items = [
     { key: 'dashboard', icon: <ApartmentOutlined />, label: '工作概览' },
     { type: 'group' as const, key: 'work', label: '考试工作', children: [
-      ...(management ? [{key:'scanner',icon:<ScanOutlined/>,label:'扫描台'},{ key: 'exams', icon: <BookOutlined />, label: '考试项目' },{key:'subject-catalog',icon:<BookOutlined/>,label:'科目管理'}] : []),
-      ...(!management ? [{ key: 'marking', icon: <AuditOutlined />, label: '阅卷中心' }] : []),
+      ...(management ? [{key:'scanner',icon:<ScanOutlined/>,label:'扫描台'},{ key: 'exams', icon: <BookOutlined />, label: '考试项目' },{ key: 'teacher-templates', icon: <BookOutlined />, label: '教师制卡审核' },{key:'subject-catalog',icon:<BookOutlined/>,label:'科目管理'}] : []),
+      ...(!management ? [{ key: 'marking', icon: <AuditOutlined />, label: '阅卷中心' },{ key: 'teacher-templates', icon: <BookOutlined />, label: '独立制卡' }] : []),
       ...(management ? [{ key: 'exceptions', icon: <FileSearchOutlined />, label: '异常总览' }] : []),
       { key: 'results', icon: <ReadOutlined />, label: '成绩总览' },
       ...(management && user.role==='admin' ? [{key:'conversions',icon:<ReadOutlined/>,label:'赋分方案'}] : []),
@@ -82,6 +83,7 @@ function Workspace({ user, authToken, offlineAccess, management, page, location,
         {page === 'subject-catalog'&&management&&<SubjectCatalog/>}
         {page === 'electives'&&management&&<Personnel systemAdmin={user.role==='admin'} tab="tags" onTab={key=>navigate('#/people/'+key)}/>}
         {page === 'exams' && <Exams location={location} navigate={navigate} />}
+        {page === 'teacher-templates' && <TeacherTemplates management={management} onNavigate={hash => navigate(hash)} />}
         {page === 'marking' && <ReviewTasks projectId={location.projectId} filter={reviewFilter} onFilter={setReviewFilter}
           onProject={id=>navigate(markingPath(id))} onOpen={(tid,qid)=>navigate(markingPath(location.projectId,tid,qid))}/>}
         {page === 'exceptions' && <Exceptions />}

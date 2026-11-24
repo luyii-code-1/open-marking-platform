@@ -507,7 +507,6 @@ def _execute_plan(db, plan, current, cascade: bool):
             audit_name = row.get('name', oid)
         else:
             db.execute('UPDATE objects SET deleted=1 WHERE id=?', (oid,))
-            db.execute('UPDATE identifiers SET retired=1 WHERE id=?', (oid,))
             audit_name = row.get('subject') if item_kind == 'electives' else row.get('name', oid)
         db.execute(
             'INSERT INTO audit(id,actor,action,object_id,body) VALUES(?,?,?,?,?)',

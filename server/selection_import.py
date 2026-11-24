@@ -6,7 +6,8 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import Response
 from openpyxl import Workbook
 from .db import connect, objects
-from .dependencies import admin
+from .dependencies import admin, user
+from .export_tables import ExportTable, FileFormat, table_response
 from .roster_import import table_rows
 
 router=APIRouter(prefix='/api/v1')
@@ -88,3 +89,18 @@ def match_records(kind:str,file:UploadFile=File(),current=Depends(admin)):
             if kind in ('users','students') and values.get('name') and values['name']!=record['name']:raise HTTPException(422,f'第{number}行姓名与现有记录不一致')
             if record['id'] not in chosen:chosen.append(record['id'])
         return {'ids':chosen,'matched':len(chosen)}
+
+
+@router.post('/table-export')
+def export_table_rows(body:dict,current=Depends(user)):
+    title=str(body.get('title') or '列表导出').strip()[:50] or '列表导出'
+    fmt:FileFormat='csv' if body.get('format')=='csv' else 'xlsx'
+    headers=body.get('headers')
+    rows=body.get('rows')
+    if not isinstance(headers,list) or not 1<=len(headers)<=200 or any(not isinstance(h,(str,int,float)) for h in headers):
+        raise HTTPException(422,'导出表头无效')
+    if not isinstance(rows,list) or len(rows)>50000:
+        raise HTTPException(422,'导出数据行数过多或格式无效')
+    clean_headers=[str(h) for h in headers]
+    clean_rows=[['' if cell is None else str(cell) for cell in (row if isinstance(row,list) else [])[:len(clean_headers)]] for row in rows]
+    return table_response(ExportTable(title,clean_headers,clean_rows),'table-export',fmt)

@@ -16,7 +16,7 @@ from psycopg.rows import tuple_row
 
 TABLES = ('users', 'sessions', 'objects', 'audit', 'request_log', 'scores',
           'review_results', 'review_allocations', 'allocation_state', 'regrade_queue',
-          'deletion_locks', 'deletion_files', 'identifiers', 'scanned_groups', 'schema_migrations')
+          'deletion_locks', 'deletion_files', 'scanned_groups', 'schema_migrations')
 SEQUENCES = {'objects': 'rowid', 'audit': 'rowid', 'request_log': 'seq'}
 CORE = ('users', 'objects', 'audit', 'scores')
 FORMAT = 'omp-postgresql-copy-v1'
@@ -32,9 +32,10 @@ def columns(cur, table):
 def manifest(archive):
     try:
         data = json.loads(archive.read('manifest.json'))
-        if data['format'] != FORMAT or set(data['tables']) != set(TABLES):
+        if data['format'] != FORMAT or set(data['tables']) - {'identifiers'} != set(TABLES):
             raise ValueError('不支持的 OMP 备份版本')
-        names = [table + '.copy' for table in TABLES] + ['manifest.json']
+        extra = {'identifiers.copy'} if 'identifiers' in data['tables'] else set()
+        names = [table + '.copy' for table in TABLES] + list(extra) + ['manifest.json']
         if sorted(archive.namelist()) != sorted(names):
             raise ValueError('备份文件清单不一致')
         return data
@@ -113,7 +114,7 @@ def import_archive(cur, path):
 
 def check_sqlite(source):
     tables = {r[0] for r in source.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT GLOB 'sqlite_*'")}
-    if not set(CORE) <= tables or tables - set(TABLES):
+    if not set(CORE) <= tables or (tables - {'identifiers'}) - set(TABLES):
         raise ValueError('文件不是受支持的 OMP SQLite 数据库')
     if source.execute('PRAGMA integrity_check').fetchall() != [('ok',)] or source.execute('PRAGMA foreign_key_check').fetchone():
         raise ValueError('SQLite 数据完整性检查失败')
@@ -161,30 +162,12 @@ def import_sqlite(cur, db, path):
             row = source.execute("SELECT seq FROM sqlite_sequence WHERE name='request_log'").fetchone()
             if row:
                 seqs['request_log'] = row[0] + 1
-        if 'identifiers' not in tables:
-            from .identifiers import backfill_identifiers
-            backfill_identifiers(db)
         cur.execute("""INSERT INTO scanned_groups(group_id)
             SELECT body::jsonb->>'group_id' FROM objects WHERE kind='submissions'
             UNION SELECT b.body::jsonb->>'group_id' FROM objects p JOIN objects b
             ON b.id=p.body::jsonb->>'batch_id' AND b.kind='scan-batches' WHERE p.kind='pages'
             ON CONFLICT DO NOTHING""")
     return seqs
-
-
-def verify_identifiers(cur):
-    # Loading skips registration triggers to preserve hard-deleted IDs. Check that
-    # every live object and every current question still has its permanent owner.
-    cur.execute("""WITH owners(id,kind,owner_id,retired) AS (
-        SELECT id,'users',id,0 FROM users
-        UNION ALL SELECT id,kind,id,deleted FROM objects
-        UNION ALL SELECT q->>'id','questions',t.id,t.deleted
-          FROM objects t CROSS JOIN LATERAL jsonb_array_elements(t.body::jsonb->'questions') q
-          WHERE t.kind='templates'
-    ) SELECT 1 FROM owners o LEFT JOIN identifiers i ON i.id=o.id
-      WHERE i.id IS NULL OR i.kind<>o.kind OR i.owner_id<>o.owner_id OR i.retired<>o.retired LIMIT 1""")
-    if cur.fetchone():
-        raise ValueError('数据库编号登记与业务记录不一致')
 
 
 @contextmanager
@@ -203,7 +186,7 @@ def import_database(path, dsn):
             raise ValueError('目标 PostgreSQL 数据库已有业务数据，导入需要空库')
         cur.execute('SELECT name FROM schema_migrations')
         schema_seeds = {r[0] for r in cur}
-        if schema_seeds - {'postgres-v1', 'identifiers-v1'}:
+        if schema_seeds - {'postgres-v1', 'identifiers-v1', 'drop-identifiers-v1'}:
             raise ValueError('目标 PostgreSQL 迁移记录与空库不一致')
         cur.execute('DELETE FROM schema_migrations')
         for table in ('objects', 'users'):
@@ -213,7 +196,6 @@ def import_database(path, dsn):
         if not legacy and not zipfile.is_zipfile(path):
             raise ValueError('文件不是受支持的 OMP 数据库备份')
         seqs = import_sqlite(cur, db, path) if legacy else import_archive(cur, path)
-        verify_identifiers(cur)
         if legacy:
             schema_seeds.add('sqlite-import-v1')
         for seed in schema_seeds:

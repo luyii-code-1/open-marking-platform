@@ -24,22 +24,24 @@ _SENSITIVE_KEYS = {
     'public_key', 'private_key', 'api_key', 'access_key', 'credential', 'credentials',
     'credential_id', 'assertion', 'clientdatajson', 'attestationobject',
 }
-_TEMPLATE_ROUTE = re.compile(r'/api/v1/(?:templates(?:/[^/]+)?|groups/[^/]+/drafts/[^/]+)')
+_TEMPLATE_ROUTE = re.compile(r'/api/v1/(?:templates(?:/[^/]+)?|teacher-templates(?:/[^/]+)?|groups/[^/]+/drafts/[^/]+)')
 # None marks an array item, which cannot collide with a JSON object key.
 _TEMPLATE_TEXT = frozenset({('questions', None, 'content_html'),
                             ('questions', None, 'parts', None, 'content_html'), ('print_notes', None, 'html')})
 _QUESTION_TEXT = frozenset({('question', 'content_html')})
 _FOOTER_TEXT = frozenset({('html',)})
-_LEGACY_TEMPLATE_TEXT = _TEMPLATE_TEXT | _QUESTION_TEXT
+_LEGACY_TEMPLATE_TEXT = _TEMPLATE_TEXT | _QUESTION_TEXT | frozenset(('definition', *keys) for keys in _TEMPLATE_TEXT)
 _MANAGERS = frozenset({'admin', 'manager'})
 _ACCOUNTS = _MANAGERS | {'teacher'}
 _BUSINESS_ROUTES = (
     ('POST', '/templates', _MANAGERS, _TEMPLATE_TEXT),
     ('PUT', '/templates/{identifier}', _MANAGERS, _TEMPLATE_TEXT),
-    ('POST', '/templates/check', _MANAGERS, _TEMPLATE_TEXT),
-    ('POST', '/templates/preview', _MANAGERS, _TEMPLATE_TEXT),
-    ('POST', '/templates/subjective-layout', _MANAGERS, _TEMPLATE_TEXT),
-    ('POST', '/templates/objective-preview', _MANAGERS, _QUESTION_TEXT),
+    ('POST', '/templates/check', _ACCOUNTS, _TEMPLATE_TEXT),
+    ('POST', '/templates/preview', _ACCOUNTS, _TEMPLATE_TEXT),
+    ('POST', '/templates/subjective-layout', _ACCOUNTS, _TEMPLATE_TEXT),
+    ('POST', '/templates/objective-preview', _ACCOUNTS, _QUESTION_TEXT),
+    ('POST', '/teacher-templates', _ACCOUNTS, frozenset(('definition', *keys) for keys in _TEMPLATE_TEXT)),
+    ('PUT', '/teacher-templates/{identifier}', _ACCOUNTS, frozenset(('definition', *keys) for keys in _TEMPLATE_TEXT)),
     ('PUT', '/groups/{group_id}/drafts/{identifier}', _MANAGERS,
      frozenset(('value', *keys) for keys in _TEMPLATE_TEXT)),
     ('POST', '/tasks/{identifier}/report', _ACCOUNTS, frozenset({('reason',)})),

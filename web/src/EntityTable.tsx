@@ -52,7 +52,7 @@ export function EntityTable({ path, title, fields, columns, extra, creationField
   return <Card title={hideTitle ? undefined : title}>
     <ErrorNotice error={resource.error} retry={resource.reload} />
     {selectionBar}
-    <Table rowSelection={rowSelection} toolbar={<div className="entity-toolbar">
+    <Table exportable={{ filename: title }} rowSelection={rowSelection} toolbar={<div className="entity-toolbar">
       <Input.Search className="entity-search" placeholder={`搜索${title}`} allowClear value={search} onChange={e => setSearch(e.target.value)} />
       <Space wrap>{extra}<Dropdown menu={{ items: [{ key: 'refresh', label: '刷新列表', onClick: resource.reload }, ...allowImport?[{ key: 'import', label: '批量导入', onClick: () => setImporting(true) }]:[]] }}><Button icon={<MoreOutlined />} aria-label={`${title}更多操作`} /></Dropdown><Button type="primary" icon={<PlusOutlined />} onClick={() => setOpen(true)}>新建{title}</Button></Space>
     </div>} filterFields={filterFields} filterValues={filterValues} onFilterValuesChange={onFilterValuesChange} query={search} searchText={searchText} rowKey="id" onRow={onEnter?row=>rowNavigation(()=>onEnter(row),row.name):undefined} dataSource={rows} loading={resource.loading} columns={columns || fields.filter(f => f.type !== 'password').map(f => ({ title: f.label, dataIndex: f.name, render: (value: unknown) => f.options?.find(o => o.value === value)?.label || String(value ?? '—') }))} pagination={{ defaultPageSize:50, showSizeChanger: true }} scroll={{ x: 'max-content' }} locale={{ emptyText: search ? '没有匹配的记录' : `尚未创建${title}` }} />

@@ -10,7 +10,7 @@ from fastapi.responses import Response
 from .lifecycle import RESULTS_REVIEW_GUIDE
 from . import paper
 from .db import connect,get,find,objects,put
-from .dependencies import admin,require
+from .dependencies import admin,user,require
 from .template_checks import issues,asset_ids
 from .identifiers import prepare_questions
 
@@ -77,7 +77,6 @@ def delete_template(identifier:str,draft_version:int|None=None,expected_status:s
         for q in value['questions']:
             db.execute('DELETE FROM allocation_state WHERE question_id=?',(q['id'],))
             db.execute('DELETE FROM review_allocations WHERE question_id=?',(q['id'],))
-        db.execute("UPDATE identifiers SET retired=1 WHERE owner_id=? AND kind='questions'",(identifier,))
     return {'status':'deleted'}
 
 
@@ -146,7 +145,7 @@ def check_assets(template):
 
 
 @router.post('/templates/check')
-def check_template(body:dict,current=Depends(admin)):
+def check_template(body:dict,current=Depends(user)):
     errors=issues(body,complete=True,require_answers=False)
     if not errors:
         try:check_assets(body)
@@ -155,8 +154,9 @@ def check_template(body:dict,current=Depends(admin)):
 
 
 @router.post('/templates/subjective-layout')
-def subjective_layout(body:dict,current=Depends(admin)):
+def subjective_layout(body:dict,current=Depends(user)):
     if body.get('group_id'):
+        if current['role'] not in ('admin','manager'):raise HTTPException(403,'无权访问考试题卡分组')
         with connect() as db:
             group=require(db,body['group_id'],'groups')
             existing=get(db,body.get('id'),'templates')
@@ -169,7 +169,7 @@ def subjective_layout(body:dict,current=Depends(admin)):
 
 
 @router.post('/templates/objective-preview')
-def objective_preview(body:dict,current=Depends(admin)):
+def objective_preview(body:dict,current=Depends(user)):
     from .scoring import objective_score
     if not isinstance(body.get('question'),dict):raise HTTPException(422,'题目配置应为对象')
     question={**body.get('question',{}),'regions':[]}
@@ -185,7 +185,7 @@ def objective_preview(body:dict,current=Depends(admin)):
 
 
 @router.post('/templates/preview')
-def preview_template(body:dict,page:int=1,current=Depends(admin)):
+def preview_template(body:dict,page:int=1,current=Depends(user)):
     errors=issues(body)
     if errors:raise HTTPException(422,'；'.join(errors))
     if not 1<=page<=body['sides']:raise HTTPException(422,'预览页码超出题卡范围')

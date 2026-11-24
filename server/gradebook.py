@@ -3,11 +3,12 @@ import hashlib
 import json
 from collections import Counter
 from fastapi import APIRouter, Depends, HTTPException, Query
-from .db import connect, get
+from .db import connect, find, get, objects
 from .dependencies import user, require
 from .analysis import project_result_groups
-from .review import results_for
+from .review import objective_selections, results_for
 from .result_filters import selected, STATUS_NAMES
+from .scoring import objective_score
 from .export_tables import ExportTable, FileFormat, table_response
 
 router = APIRouter(prefix='/api/v1')
@@ -22,10 +23,123 @@ def published_rows(db, group, current):
     return [r for r in rows if allowed is None or r['class_id'] in allowed]
 
 
+def _build_option_distribution(db, current, project, subjects, scope, groups, filters, q, choices):
+    class_objects = {c['id']: c for c in objects(db, 'classes')}
+    option_rows = []
+    max_options = 4
+    term = q.strip().casefold()
+
+    for g in scope:
+        rows = published_rows(db, g, current) if g.get('frozen') else results_for(db, g['id'], current)
+        for row in rows:
+            if row.get('class_id'):
+                c_obj = class_objects.get(row['class_id'], {})
+                choices['classes'].append({
+                    'id': row['class_id'],
+                    'name': str(row.get('grade') or '') + ' · ' + row['class_name'],
+                    'grade_name': str(row.get('grade') or ''),
+                    'class_name': row['class_name'],
+                    'tags': c_obj.get('tags', []),
+                })
+            choices['students'].append({'id': row['student_id'], 'name': row['name'] + ' · ' + str(row.get('candidate_number', ''))})
+
+    for g in groups:
+        template = get(db, g.get('template_id'), 'templates')
+        if not template:
+            continue
+        subject = subjects[g['subject_id']]
+        rows = published_rows(db, g, current) if g.get('frozen') else results_for(db, g['id'], current)
+        filtered_students = [
+            r for r in rows
+            if (not filters['classes'] or r.get('class_id') in filters['classes'])
+            and (not filters['students'] or r.get('student_id') in filters['students'])
+            and (not filters['statuses'] or r.get('status') in filters['statuses'])
+            and (not term or any(term in str(r.get(k, '')).casefold() for k in ('name', 'candidate_number')))
+        ]
+        subs_by_student = {s['student_id']: s for s in find(db, 'submissions', group_id=g['id'])}
+        active_subs = []
+        for r in filtered_students:
+            if r.get('status') in ('unscanned', 'absent'):
+                continue
+            sub = subs_by_student.get(r['student_id'])
+            if sub and sub.get('status') != 'absent':
+                active_subs.append(sub)
+        selections_by_sub = {sub['id']: objective_selections(db, sub) for sub in active_subs}
+
+        for question in template.get('questions', []):
+            if question.get('type') == 'subjective':
+                continue
+            opt_count = int(question.get('options', 4) or 4)
+            max_options = max(max_options, opt_count)
+            counts = {ch: 0 for ch in 'ABCDE'}
+            blank_count = 0
+            correct_count = 0
+            analyzed = 0
+            score_sum = 0
+            answers = question.get('answer') or []
+            for sub in active_subs:
+                analyzed += 1
+                chosen = selections_by_sub[sub['id']].get(question['id'], set())
+                if not chosen:
+                    blank_count += 1
+                else:
+                    for ch in chosen:
+                        if ch in counts:
+                            counts[ch] += 1
+                if answers:
+                    score_sum += objective_score(chosen, answers, question['points'], question.get('rule'))
+                    if sorted(chosen) == sorted(answers):
+                        correct_count += 1
+
+            def fmt(cnt: int) -> str:
+                return f'{cnt} ({round(cnt * 100 / analyzed, 1)}%)' if analyzed else '0 (0%)'
+
+            item = {
+                'row_key': f"{g['id']}:{question['id']}",
+                'subject': subject['name'],
+                'group': g['name'],
+                'number': f"第 {question['number']} 题",
+                'question_type': '单选' if question.get('type') == 'single' else '多选',
+                'answer': ''.join(answers) if answers else '未设',
+                'analyzed': analyzed,
+                'correct_rate': f'{round(correct_count * 100 / analyzed, 1)}%' if analyzed and answers else '—',
+                'average': round(score_sum / 100 / analyzed, 2) if analyzed and answers else '—',
+                'opt_A': fmt(counts['A']),
+                'opt_B': fmt(counts['B']),
+                'opt_C': fmt(counts['C']),
+                'opt_D': fmt(counts['D']) if opt_count >= 4 else '—',
+                'opt_E': fmt(counts['E']) if opt_count >= 5 else '—',
+                'opt_blank': fmt(blank_count),
+                '_option_meta': {'answers': answers, 'analyzed': analyzed, 'counts': counts, 'blank': blank_count},
+            }
+            option_rows.append(item)
+
+    columns = [
+        {'key': 'subject', 'label': '科目'},
+        {'key': 'group', 'label': '题卡'},
+        {'key': 'number', 'label': '题号'},
+        {'key': 'question_type', 'label': '题型'},
+        {'key': 'answer', 'label': '标准答案'},
+        {'key': 'analyzed', 'label': '作答人数'},
+        {'key': 'correct_rate', 'label': '正答率'},
+        {'key': 'average', 'label': '平均分'},
+        {'key': 'opt_A', 'label': '选项 A'},
+        {'key': 'opt_B', 'label': '选项 B'},
+        {'key': 'opt_C', 'label': '选项 C'},
+        {'key': 'opt_D', 'label': '选项 D'},
+        *([{'key': 'opt_E', 'label': '选项 E'}] if max_options >= 5 else []),
+        {'key': 'opt_blank', 'label': '未作答'},
+    ]
+    for key, values in choices.items():
+        choices[key] = list({r['id']: r for r in values}.values())
+    choices['statuses'] = [{'id': key, 'name': name} for key, name in STATUS_NAMES.items()]
+    return {'project_name': project['name'], 'columns': columns, 'rows': option_rows, 'options': choices}
+
+
 def build_table(db, current, project_id, subject_id='', grade_id='', group_id='',
                 subject_ids='', grade_ids='', class_ids='', student_ids='', group_ids='',
                 statuses='', q='', view='totals', metric='raw', **unused):
-    if view not in ('totals', 'items') or metric not in ('raw', 'converted'):
+    if view not in ('totals', 'items', 'options') or metric not in ('raw', 'converted'):
         raise HTTPException(422, '成绩视图或口径无效')
     project, subjects, groups = project_result_groups(db, project_id, current)
     if subject_id and subject_id not in subjects:raise HTTPException(404, '科目不属于当前考试')
@@ -49,6 +163,8 @@ def build_table(db, current, project_id, subject_id='', grade_id='', group_id=''
     groups = [g for g in scope if (not filters['subjects'] or g['subject_id'] in filters['subjects'])
               and (not filters['grades'] or g.get('grade_id') in filters['grades'])
               and (not filters['groups'] or g['id'] in filters['groups'])]
+    if view == 'options':
+        return _build_option_distribution(db, current, project, subjects, scope, groups, filters, q, choices)
     columns = [{'key':k, 'label':v} for k,v in [('candidate_number','准考证号'),('name','姓名'),('grade','年级'),('class_name','班级')]]
     students = {}; question_columns = {}; subject_columns = {}
     from .db import objects as db_objects
@@ -138,6 +254,6 @@ def gradebook(project_id:str, subject_id:str='', grade_id:str='', group_id:str='
     version = hashlib.sha256(json.dumps([cols,values],ensure_ascii=False,sort_keys=True).encode()).hexdigest()
     if format:
         if preview_version != version:raise HTTPException(409,'成绩或导出条件已变化，请重新预览')
-        return table_response(ExportTable('小题分' if view=='items' else '概览成绩',[c['label'] for c in cols],([r.get(c['key']) for c in cols] for r in data['rows'])),'exam-results',format)
+        return table_response(ExportTable('选项分布' if view=='options' else '小题分' if view=='items' else '概览成绩',[c['label'] for c in cols],([r.get(c['key']) for c in cols] for r in data['rows'])),'exam-results',format)
     start = (page-1)*page_size
     return {**data,'rows':data['rows'][start:start+page_size],'columns':cols,'total':len(data['rows']),'page':page,'page_size':page_size,'version':version}
