@@ -36,6 +36,9 @@ def bind(body:dict, current=Depends(system_admin)):
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
         target = require(db,identifier,kind)
+        from .lifecycle import project_for
+        project = get(db, project_for(db, kind, target), 'projects') or {}
+        if project.get('category') == 'statistics':raise HTTPException(422,'请选择考试项目设置赋分')
         if mode=='override':
             require(db,cid,'score-conversions')
         if kind=='groups' and target.get('frozen'):raise HTTPException(409,'成绩已发布，请先发起成绩复核')

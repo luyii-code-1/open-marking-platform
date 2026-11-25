@@ -79,7 +79,9 @@ def validate(template):
                 rich_layout(question['content_html'],(region['width']-6)*mm,(region['height']-12-image_height)*mm,**text_options)
         if question['type']!='subjective':
             count=int(question.get('options',4))
-            if count not in (3,4,5,6,7) or not set(question.get('answer',[]))<=set('ABCDEFG'[:count]):
+            if template.get('statistics_mode'):
+                if not 2<=count<=26:raise ValueError('统计题需设置 2 至 26 个选项')
+            elif count not in (3,4,5,6,7) or not set(question.get('answer',[]))<=set('ABCDEFG'[:count]):
                 raise ValueError('选项或标准答案无效')
     areas=template.get('forbidden_regions',[])
     if not isinstance(areas,list) or len(areas)>100:raise ValueError('禁答区应为不超过100项的区域列表')
@@ -263,7 +265,14 @@ def pdf(template, only_page=None):
                             for direction in (-1,1):
                                 edge=bx+direction*(2 if tight else 4);inner=edge-direction*.5
                                 path=c.beginPath();path.moveTo(inner*mm,(h-by+1.15)*mm);path.lineTo(edge*mm,(h-by+1.15)*mm);path.lineTo(edge*mm,(h-by-1.15)*mm);path.lineTo(inner*mm,(h-by-1.15)*mm);c.drawPath(path)
-                            c.setFont('Helvetica',1.95*mm);c.drawCentredString(bx*mm,(h-by-.6)*mm,label);c.setLineWidth(1)
+                            if template.get('statistics_mode'):
+                                # Keep the printed letters above the ink-sampling area.
+                                c.setFont('Helvetica',1.45*mm)
+                                c.drawCentredString(bx*mm,(h-by+1.35)*mm,label)
+                            else:
+                                c.setFont('Helvetica',1.95*mm)
+                                c.drawCentredString(bx*mm,(h-by-.6)*mm,label)
+                            c.setLineWidth(1)
                         else:
                             c.rect((bx-2)*mm,(h-by-1.5)*mm,4*mm,3*mm)
                             c.setFont('Helvetica',6); c.drawCentredString(bx*mm,(h-by-.8)*mm,label)

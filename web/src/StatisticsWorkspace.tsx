@@ -236,10 +236,11 @@ function StatisticsExternalDesigner({ groupId, name, savedDraft, published, lock
   </Space>
 }
 
-function StatisticsResults({ endpoint, name, closed, canChange, onCollectionChange }: {
-  endpoint: string; name: string; closed: boolean; canChange: boolean; onCollectionChange: () => Promise<unknown>
+export function StatisticsResults({ endpoint, groupId, name, closed, canChange, onCollectionChange }: {
+  endpoint: string; groupId?: string; name: string; closed: boolean; canChange: boolean; onCollectionChange: () => Promise<unknown>
 }) {
-  const data = useResource<Results>(endpoint + '/results', { total: 0, rows: [] })
+  const scope = groupId ? '?group_id=' + encodeURIComponent(groupId) : ''
+  const data = useResource<Results>(endpoint + '/results' + scope, { total: 0, rows: [] })
   const [number, setNumber] = useState<number>()
   const [busy, setBusy] = useState(false)
   const { message } = App.useApp()
@@ -248,7 +249,7 @@ function StatisticsResults({ endpoint, name, closed, canChange, onCollectionChan
   async function changeCollection() {
     setBusy(true)
     try {
-      const result = await send<{ closed: boolean }>(endpoint + '/collection', { closed: !closed }, 'PUT')
+      const result = await send<{ closed: boolean }>(endpoint + '/collection' + scope, { closed: !closed }, 'PUT')
       await onCollectionChange()
       announceChanges(['groups', 'projects'])
       message.success(result.closed ? '已结束收集' : '已恢复收集')
@@ -260,7 +261,7 @@ function StatisticsResults({ endpoint, name, closed, canChange, onCollectionChan
     {canChange && (closed || data.data.total > 0) && <Popconfirm title={closed ? '恢复接收统计答卷？' : '结束收集并锁定结果？'}
       onConfirm={changeCollection}><Button loading={busy}>{closed ? '恢复收集' : '结束收集'}</Button></Popconfirm>}
     <Button onClick={() => void data.reload()}>刷新</Button>
-    <Button icon={<DownloadOutlined />} disabled={!result} onClick={() => download(endpoint + '/export', `${name} 选项统计.xlsx`).catch(error => message.error(error.message))}>导出 Excel</Button>
+    <Button icon={<DownloadOutlined />} disabled={!result} onClick={() => download(endpoint + '/export' + scope, `${name} 选项统计.xlsx`).catch(error => message.error(error.message))}>导出 Excel</Button>
   </Space>}>
     <ErrorNotice error={data.error} retry={data.reload} />
     {!result ? <Empty description="发布题卡后可查看逐题统计" /> : <Space direction="vertical" size={16} style={{ width: '100%' }}>

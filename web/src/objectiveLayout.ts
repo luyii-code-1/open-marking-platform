@@ -54,7 +54,7 @@ export function applyAnswers(questions: Question[], input: string) {
 type Layout = { columns: number; startPage: number; order?: 'row'|'column' }
 export const compactChoice = { width: 4, height: 2.3, pitch: 4.8, rowHeight: 4.6, optionPitch: 5 }
 export function choiceCenters(question: Question, region: Region) {
-  if (question.choice_style === 'compact') return [...answerLetters.slice(0, question.options)].map((letter,index)=>({letter,x:region.x+9+index*5,y:region.y+2.4}))
+  if (question.choice_style === 'compact') return [...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.slice(0, question.options)].map((letter,index)=>({letter,x:region.x+9+index*5,y:region.y+2.4}))
   const compact = question.choice_style === 'bracket'
   return [...answerLetters.slice(0, question.options)].map((letter, index) => ({ letter, x: region.x + (compact ? 14 + index * 9.5 : 12 + index * Math.min(12, (region.width - 12) / question.options)), y: region.y + (compact ? 3 : 7) }))
 }
@@ -98,8 +98,15 @@ export function addObjective(template: Template, config: Layout & { numbers: str
   const numbers = parseQuestionNumbers(config.numbers), existing = new Set(template.questions.flatMap(q => q.parts?.map(p=>p.number)??[q.number]))
   const duplicate = numbers.filter(number => existing.has(number))
   if (duplicate.length) throw new Error(`题号已存在：${duplicate.join('、')}`)
-  if (![3, 4, 5, 6, 7].includes(config.options) || !['single', 'multiple'].includes(config.type) || !Number.isFinite(config.points) || config.points <= 0 || Math.abs(config.points * 100 - Math.round(config.points * 100)) > 1e-7) throw new Error('请选择3至7个选项，分值须为最多两位小数的正数')
-  const created: Question[] = numbers.map(number => ({ id: uuid(), number, type: config.type, options: config.options, points: config.points, answer: [], rule: { mode: 'exact' }, regions: [], review_mode: 'single', threshold: 0 }))
+  const statistics = template.statistics_mode
+  if (!['single', 'multiple'].includes(config.type) || !Number.isInteger(config.options) ||
+      config.options < (statistics ? 2 : 3) || config.options > (statistics ? 26 : 7)) {
+    throw new Error(statistics ? '请选择单选或多选，并设置 2 至 26 个选项' : '请选择单选或多选，并设置 3 至 7 个选项')
+  }
+  if (!statistics && (!Number.isFinite(config.points) || config.points <= 0 || Math.abs(config.points * 100 - Math.round(config.points * 100)) > 1e-7)) {
+    throw new Error('分值须为最多两位小数的正数')
+  }
+  const created: Question[] = numbers.map(number => ({ id: uuid(), number, type: config.type, options: config.options, points: statistics ? 0 : config.points, answer: [], rule: { mode: 'exact' }, regions: [], review_mode: 'single', threshold: 0 }))
   if(config.order==='row')for(const question of created)question.choice_group=created[0].id
   return arrangeObjective({ ...template, questions: [...template.questions, ...created].sort((a, b) => a.number - b.number) }, created.map(q => q.id), config)
 }

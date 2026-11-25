@@ -41,8 +41,9 @@ def correct_objective(identifier:str,body:dict,current=Depends(admin)):
         questions={q['id']:q for q in template['questions'] if q['type']!='subjective'}
         changes=body.get('selections')
         if not isinstance(changes,dict) or not changes:raise HTTPException(422,'请提供需更正的客观题选项')
+        alphabet=ascii_uppercase if template.get('statistics_mode') else 'ABCDEFG'
         for qid,answers in changes.items():
-            if qid not in questions or not isinstance(answers,list) or any(not isinstance(a,str) or a not in 'ABCDEFG'[:questions[qid].get('options',4)] or len(a)!=1 for a in answers):raise HTTPException(422,'题目或选项无效')
+            if qid not in questions or not isinstance(answers,list) or any(not isinstance(a,str) or a not in alphabet[:questions[qid].get('options',4)] or len(a)!=1 for a in answers):raise HTTPException(422,'题目或选项无效')
         submission.setdefault('objective_overrides',{}).update({k:sorted(set(v)) for k,v in changes.items()})
         submission['objective_correction_reason']=body['reason']
         from .anomalies import check_submission
@@ -106,11 +107,11 @@ def correct_page(identifier:str,body:dict,current=Depends(admin)):
             page['candidate_number']=candidate
         if 'selections' in body:
             by_id={q['id']:q for q in template['questions'] if q['type']!='subjective'
-                   and (not anonymous or q['regions'][0]['page']==(1 if page['side']=='front' else 2))}
+                   and (not (anonymous or template.get('statistics_mode')) or q['regions'][0]['page']==(1 if page['side']=='front' else 2))}
             selections=body['selections']
             if not isinstance(selections,dict): raise HTTPException(422,'选项数据无效')
             for qid,answers in selections.items():
-                letters=(ascii_uppercase if anonymous else 'ABCDEFG')[:by_id.get(qid,{}).get('options',4)]
+                letters=(ascii_uppercase if anonymous or template.get('statistics_mode') else 'ABCDEFG')[:by_id.get(qid,{}).get('options',4)]
                 if qid not in by_id or not isinstance(answers,list) or any(not isinstance(value,str) or len(value)!=1 or value not in letters for value in answers): raise HTTPException(422,'选项超出题目范围')
                 selections[qid]=sorted(set(answers))
             page['selections']={**page.get('selections',{}),**selections}

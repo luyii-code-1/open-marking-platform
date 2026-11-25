@@ -13,6 +13,7 @@ import {
   ExamStatusMenu,
   ExamStatusTag,
   GroupWorkspace,
+  StatisticsResults,
   Rename,
   ScopedWorkspace,
   SubjectGrades,
@@ -64,6 +65,7 @@ function ProjectCollapsibleTree({
   refresh: () => Promise<void>
 }) {
   const { message } = App.useApp()
+  const statistics = project.category === 'statistics'
   const projectSubjects = subjects.filter(s => s.project_id === project.id)
   const storageKey = `omp-exam-tree-open:${project.id}`
   const [keyword, setKeyword] = useState('')
@@ -360,10 +362,10 @@ function ProjectCollapsibleTree({
                                     {row.template_id ? '版式已发布' : '版式待设计'}
                                   </Tag>
                                   <Tag>{rosterText}</Tag>
-                                  {row.conversion_id && row.conversion_mode !== 'none' && <Tag color="blue">已赋分</Tag>}
-                                  <Tag color={row.frozen ? 'green' : row.reopened_at && row.published_at ? 'blue' : 'default'}>
+                                  {!statistics && row.conversion_id && row.conversion_mode !== 'none' && <Tag color="blue">已赋分</Tag>}
+                                  {!statistics && <Tag color={row.frozen ? 'green' : row.reopened_at && row.published_at ? 'blue' : 'default'}>
                                     {row.frozen ? '成绩已发布' : row.reopened_at && row.published_at ? '复核中' : '成绩未发布'}
-                                  </Tag>
+                                  </Tag>}
                                 </div>
                                 <div className="exam-tree-card-actions">
                                   <Button type="link" size="small" onClick={() => go(cardLoc)}>
@@ -433,11 +435,34 @@ function ProjectCollapsibleTree({
           <Form.Item name="template_creation" label="制卡方式">
             <Select options={templateCreationOptions} />
           </Form.Item>
-          <CardConversionFields projectId={project.id} />
+          {!statistics && <CardConversionFields projectId={project.id} />}
         </Form>
       </Modal>
     </div>
   )
+}
+
+function ProjectStatistics({ project, subjects, groups, grades, reload }: {
+  project: Row
+  subjects: Row[]
+  groups: Row[]
+  grades: Row[]
+  reload: () => Promise<unknown>
+}) {
+  const [groupId, setGroupId] = useState<string>()
+  const cards = groups.filter(g => g.template_id && subjects.some(s => s.id === g.subject_id && s.project_id === project.id))
+  const selected = cards.find(g => g.id === groupId) || cards[0]
+  if (!selected) return <Card><Empty description="发布题卡后可查看统计结果" /></Card>
+  return <Space direction="vertical" size={12} style={{ width: '100%' }}>
+    <Select aria-label="选择统计题卡" value={selected.id} onChange={setGroupId} style={{ minWidth: 240 }}
+      options={cards.map(g => {
+        const subject = subjects.find(s => s.id === g.subject_id)
+        const grade = grades.find(row => row.id === g.grade_id)
+        return { value: g.id, label: [subject?.name, grade?.name, cardName(g, subject)].filter(Boolean).join(' · ') }
+      })} />
+    <StatisticsResults key={selected.id} endpoint={'/projects/'+project.id+'/statistics'} groupId={selected.id}
+      name={selected.name} closed={!!selected.frozen} canChange={!project.scans_purged} onCollectionChange={reload} />
+  </Space>
 }
 
 export function Exams({ location, navigate }: { location: ExamLocation; navigate: (path: string, replace?: boolean) => void }) {
@@ -536,7 +561,8 @@ export function Exams({ location, navigate }: { location: ExamLocation; navigate
       </Card>
     )
   }
-  if (project?.category === 'statistics') {
+  const statistics = project?.category === 'statistics'
+  if (statistics && project.statistics_group_id) {
     return <StatisticsWorkspace project={project} back={() => go({})} />
   }
 
@@ -575,7 +601,7 @@ export function Exams({ location, navigate }: { location: ExamLocation; navigate
           </Button>
           <Breadcrumb items={[...crumbs, { title: '题卡设计' }]} />
           <Space style={{ marginInlineStart: 'auto' }}>
-            {group.frozen && !project?.scans_purged && (
+            {group.frozen && !statistics && !project?.scans_purged && (
               <a href={examPath({ ...base, section: 'results' })} target="_blank" rel="noopener noreferrer">
                 在新标签页打开成绩复核
               </a>
@@ -583,14 +609,14 @@ export function Exams({ location, navigate }: { location: ExamLocation; navigate
             <WorkspaceNotificationButton compact onlyWhenActive />
           </Space>
         </header>
-        <TemplateEditor key={group.id} groupId={group.id} />
+        <TemplateEditor key={group.id} groupId={group.id} statistics={statistics} />
       </div>
     )
   }
 
   const children = groups.data.filter(g => g.subject_id === subject?.id && (g.grade_id || unassignedGrade) === gradeId)
   const enterCard = (row: Row) => go({ ...base, groupId: row.id })
-  const cardStatusText = (row: Row) => (row.frozen ? '成绩已发布' : row.reopened_at && row.published_at ? '成绩复核中' : '成绩未发布')
+  const cardStatusText = (row: Row) => statistics ? (row.frozen ? '收集已结束' : '收集中') : (row.frozen ? '成绩已发布' : row.reopened_at && row.published_at ? '成绩复核中' : '成绩未发布')
   const cardColumns = [
     {
       title: '题卡名称',
@@ -599,7 +625,7 @@ export function Exams({ location, navigate }: { location: ExamLocation; navigate
     },
     { title: '版式', render: (_: unknown, row: Row) => (row.template_id ? '已发布' : '待设计') },
     { title: '应考名单', render: (_: unknown, row: Row) => (row.roster_mode === 'selected' ? '指定名单' : row.roster_mode === 'open' ? '开放扫入' : row.grade_id ? '年级全体' : '开放扫入') },
-    {
+    ...(!statistics ? [{
       title: '赋分',
       render: (_: unknown, row: Row) =>
         row.conversion_id && row.conversion_mode !== 'none' ? <Tag color="blue">已启用</Tag> : <Tag>不赋分</Tag>,
@@ -611,7 +637,7 @@ export function Exams({ location, navigate }: { location: ExamLocation; navigate
           {row.frozen ? '已发布' : row.reopened_at && row.published_at ? '复核中' : '未发布'}
         </Tag>
       ),
-    },
+    }] : []),
     {
       title: '操作',
       className: 'row-actions',
@@ -764,10 +790,7 @@ export function Exams({ location, navigate }: { location: ExamLocation; navigate
                             <Radio.Button value="statistics">统计</Radio.Button>
                           </Radio.Group>
                         </Form.Item>
-                        <Form.Item noStyle shouldUpdate={(before, after) => before.category !== after.category}>
-                          {({ getFieldValue }) => getFieldValue('category') === 'statistics' ? null :
-                            <Form.Item name="catalog_ids" label="同时创建科目" preserve={false}><CatalogPicker /></Form.Item>}
-                        </Form.Item>
+                        <Form.Item name="catalog_ids" label="同时创建科目"><CatalogPicker /></Form.Item>
                       </>
                     }
                     fields={[{ name: 'name', label: '考试名称' }]}
@@ -783,7 +806,7 @@ export function Exams({ location, navigate }: { location: ExamLocation; navigate
                         dataIndex: 'name',
                         render: (name: string, row: Row) => <Space><a href={examPath({ projectId: row.id })}>{name}</a>{row.category === 'statistics' && <Tag>统计</Tag>}</Space>,
                       },
-                      { title: '科目', render: (_: unknown, row: Row) => row.category === 'statistics' ? '—' : `${subjects.data.filter(s => s.project_id === row.id).length} 门` },
+                      { title: '科目', render: (_: unknown, row: Row) => `${subjects.data.filter(s => s.project_id === row.id).length} 门` },
                       {
                         title: '后台任务',
                         render: (_: unknown, row: Row) => {
@@ -851,7 +874,7 @@ export function Exams({ location, navigate }: { location: ExamLocation; navigate
           scanTab={location.scanTab || 'capture'}
           onScanTab={tab => go({ ...base, section: 'scans', scanTab: tab === 'correct' ? 'correct' : undefined })}
           sections={groupSections}
-          renderTemplateEditor={id => <TemplateEditor groupId={id} />}
+          renderTemplateEditor={id => <TemplateEditor groupId={id} statistics={statistics} />}
         />
       ) : grade ? (
         <ScopedWorkspace project={project} subject={subject!} gradeId={gradeId} section={scopedSection} onSection={setScopedSection}>
@@ -874,7 +897,7 @@ export function Exams({ location, navigate }: { location: ExamLocation; navigate
               allowImport={false}
               scope={{ subject_id: subject!.id, grade_id: grade.id }}
               fields={[{ name: 'name', label: '题卡名称' }]}
-              creationFields={<CardConversionFields projectId={project.id} />}
+              creationFields={statistics ? undefined : <CardConversionFields projectId={project.id} />}
               onEnter={enterCard}
               onCreated={async row => {
                 await refresh()
@@ -896,7 +919,7 @@ export function Exams({ location, navigate }: { location: ExamLocation; navigate
         </ScopedWorkspace>
       ) : (
         <Tabs
-          activeKey={location.section || 'subjects'}
+          activeKey={statistics && location.section === 'conversions' ? 'subjects' : location.section || 'subjects'}
           onChange={section => go({ projectId: project.id, section })}
           items={[
             {
@@ -915,8 +938,10 @@ export function Exams({ location, navigate }: { location: ExamLocation; navigate
               ),
             },
             { key: 'sheets', label: '答题卡查询', children: <SheetLookup key={project.id} projectId={project.id} /> },
-            { key: 'summary', label: '成绩总览', children: <Results key={project.id} admin projectId={project.id} /> },
-            { key: 'conversions', label: '赋分方案', children: <Conversions projectId={project.id} /> },
+            ...(statistics ? [{ key: 'summary', label: '统计结果', children: <ProjectStatistics key={project.id} project={project}
+              subjects={subjects.data} groups={groups.data} grades={grades.data} reload={refresh} /> }]
+              : [{ key: 'summary', label: '成绩总览', children: <Results key={project.id} admin projectId={project.id} /> },
+            { key: 'conversions', label: '赋分方案', children: <Conversions projectId={project.id} /> }]),
             { key: 'storage', label: '存储设置', children: <ProjectStorage project={project} onSaved={refresh} /> },
             { key: 'archives', label: '文件管理', children: <ArchiveManager projectId={project.id} /> },
           ]}

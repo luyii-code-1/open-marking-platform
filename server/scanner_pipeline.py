@@ -64,6 +64,9 @@ def project_package(identifier: str, capability: str = '', current=Depends(scan_
     with connect() as db:
         db.execute('BEGIN'); project = require(db, identifier, 'projects'); writable(db, 'projects', project)
         project=project_views(db,[project])[0]
+        if project.get('category')=='statistics' and not project.get('statistics_group_id'):
+            # Older scanner frontends reserve this category for the direct-entry workflow.
+            project.pop('category')
         subjects = find(db, 'subjects', project_id=identifier); subject_ids = {s['id'] for s in subjects}
         groups = [g for g in objects(db, 'groups') if g.get('subject_id') in subject_ids]
         packaged = []
@@ -192,7 +195,7 @@ def verify_result(template, side, result, original, normalized, cuts):
     selected = result.get('selections')
     if not isinstance(selected, dict) or set(selected) != set(questions): raise HTTPException(422, '客观题识读范围与题卡不一致')
     for qid, values in selected.items():
-        letters = (ascii_uppercase if anonymous else 'ABCDEFG')[:questions[qid].get('options', 4)]
+        letters = (ascii_uppercase if anonymous or template.get('statistics_mode') else 'ABCDEFG')[:questions[qid].get('options', 4)]
         if not isinstance(values, list) or len(values) > len(letters) or len(set(str(v) for v in values)) != len(values) or any(not isinstance(v, str) or len(v) != 1 or v not in letters for v in values): raise HTTPException(422, '客观题选项无效')
     if result.get('upload_format') == 'jpeg-sheet-1':
         if not isinstance(result.get('source_sha256'),str) or len(result['source_sha256'])!=64 or any(c not in '0123456789abcdef' for c in result['source_sha256']): raise HTTPException(422,'扫描原图校验值无效')

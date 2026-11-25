@@ -124,7 +124,7 @@ def suggest_anchors(page):
     return anchors
 
 
-def suggest_regions(page, anonymous=False):
+def suggest_regions(page, anonymous=False, statistics=False):
     adaptive = cv2.adaptiveThreshold(page, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 21, 10)
     mask = np.uint8((page < 165) | (adaptive > 0))
     contours, _ = cv2.findContours(mask, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
@@ -174,7 +174,9 @@ def suggest_regions(page, anonymous=False):
         if offsets.min() >= 8 and offsets.max() - offsets.min() <= 7:
             grid = similar[:10]
             break
-    choice = [[box_from_pixels(*cell) for cell in row] for row in runs if ((2 <= len(row) <= 26) if anonymous else (3 <= len(row) <= 7 and row not in grid))]
+    minimum, maximum = (2, 26) if anonymous or statistics else (3, 7)
+    choice = [[box_from_pixels(*cell) for cell in row] for row in runs
+              if minimum <= len(row) <= maximum and (anonymous or row not in grid)]
     candidate = [[box_from_pixels(*cell) for cell in column] for column in zip(*grid)] if grid else []
     return {'candidate': candidate, 'choices': choice[:150], 'frames': [box_from_pixels(*frame) for frame in frames[:45]]}
 
@@ -200,6 +202,8 @@ def reference(group_id: str, files: list[UploadFile] = File(), paper: str = Form
               already_corrected: bool = Form(False), current=Depends(admin)):
     with connect() as db:
         group = draft_in_group(db, group_id, current)
+        from .statistics_projects import is_statistics_group
+        statistics = is_statistics_group(db, group)
     if not 1 <= len(files) <= (5 if combine else 2) or not 0 <= rotation <= 3:
         raise HTTPException(422, '请选择有效的题卡样张和旋转方向')
     if not _slots.acquire(blocking=False):
@@ -247,7 +251,7 @@ def reference(group_id: str, files: list[UploadFile] = File(), paper: str = Form
         for index, page, source in pages:
             normalized = omr.grayscale(page)
             result[index] = {'source': picture(source, '.jpg'), 'image': picture(page),
-                             'anchors': suggest_anchors(normalized), **suggest_regions(normalized, bool(group.get('statistics_group')))}
+                             'anchors': suggest_anchors(normalized), **suggest_regions(normalized, bool(group.get('statistics_group')), statistics)}
         return JSONResponse({'pages': [result[index] for index in sorted(result)]}, headers={'Cache-Control': 'private, no-store'})
     except (ValueError, OSError, cv2.error, subprocess.SubprocessError) as error:
         raise HTTPException(422, f'无法导入题卡：{error}') from error

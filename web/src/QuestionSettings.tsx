@@ -12,6 +12,20 @@ export function QuestionSettings({ template, question: q, open, readOnly, onClos
   const [ruleOpen, setRuleOpen] = useState(false), [ruleText, setRuleText] = useState(''), [trial,setTrial]=useState(''), [trialResult,setTrialResult]=useState(''), [trialBusy,setTrialBusy]=useState(false), { message } = App.useApp()
   const [frameOpen,setFrameOpen] = useState(false)
   if (!q) return null
+  if (template.statistics_mode) return (
+    <Drawer title={'第 '+q.number+' 题设置'} width={420} open={open} onClose={onClose} extra={<Button onClick={onClose}>完成</Button>}>
+      <Form layout="vertical" disabled={readOnly}>
+        <Form.Item label="题号"><InputNumber min={1} precision={0} value={q.number} onChange={number => number && onChange({ number })} /></Form.Item>
+        <Form.Item label="题目说明"><Input maxLength={64} value={q.title || ''} onChange={e => onChange({ title: e.target.value })} /></Form.Item>
+        <Form.Item label="题型"><Select value={q.type} options={[{ label: '单选题', value: 'single' }, { label: '多选题', value: 'multiple' }]}
+          onChange={type => onChange({ type })} /></Form.Item>
+        <Form.Item label="选项数"><InputNumber min={2} max={26} precision={0} value={q.options} onChange={options => options && onChange({ options })} /></Form.Item>
+      </Form>
+      <Popconfirm title={'删除第 '+q.number+' 题及其答题区域？'} onConfirm={onDelete}>
+        <Button disabled={readOnly} danger icon={<DeleteOutlined />}>删除本题</Button>
+      </Popconfirm>
+    </Drawer>
+  )
   const rule = q.rule || { mode: 'exact' }, mode = String(rule.mode || 'exact')
   const patchRule = (patch: Record<string, unknown>) => onChange({ rule: { ...rule, ...patch } })
   const field = (key: string, fallback = 0) => typeof rule[key] === 'number' ? rule[key] as number : fallback

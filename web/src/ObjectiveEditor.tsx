@@ -11,6 +11,7 @@ import { addObjective, arrangeObjective, parseAnswer } from './objectiveLayout'
 
 const { Text } = Typography
 export function ObjectiveEditor({ value, page, readOnly, selected, onChange, onEdit, onSelect }: { value: Template; page: number; readOnly: boolean; selected?: string; onChange: (questions: Question[]) => void; onEdit: (id: string) => void; onSelect: (id: string) => void }) {
+  const statistics = value.statistics_mode
   const rows = value.questions.filter(q => q.type !== 'subjective').sort((a, b) => a.number - b.number)
   const [batchOpen, setBatchOpen] = useState(false), [layoutOpen, setLayoutOpen] = useState(false), [answerOpen, setAnswerOpen] = useState(false)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
@@ -92,9 +93,9 @@ export function ObjectiveEditor({ value, page, readOnly, selected, onChange, onE
         >
           添加并排版
         </Button>
-        <Button size="small" disabled={!rows.length || readOnly} onClick={() => setAnswerOpen(true)}>
+        {!statistics && <Button size="small" disabled={!rows.length || readOnly} onClick={() => setAnswerOpen(true)}>
           集中录入答案
-        </Button>
+        </Button>}
         <Button
           size="small"
           disabled={!rows.length || readOnly}
@@ -109,7 +110,7 @@ export function ObjectiveEditor({ value, page, readOnly, selected, onChange, onE
       {!!rows.length && (
         <Space wrap size={8} style={{ justifyContent: 'space-between', width: '100%' }}>
           <Text type="secondary" style={{ fontSize: 12 }}>
-            {rows.length} 题 · {rows.reduce((sum, q) => sum + q.points, 0)} 分 · 已设答案 {rows.filter(q => q.answer.length).length} 题
+            {rows.length} 题{!statistics && ' · '+rows.reduce((sum, q) => sum + q.points, 0)+' 分 · 已设答案 '+rows.filter(q => q.answer.length).length+' 题'}
           </Text>
           {active && (
             <Button size="small" type="link" style={{ paddingInline: 0 }} onClick={() => onEdit(active.id)}>
@@ -122,7 +123,7 @@ export function ObjectiveEditor({ value, page, readOnly, selected, onChange, onE
         <div className="question-batch-bar">
           <Space wrap size={6}>
             <Text style={{ fontSize: 12 }}>已选 {selectedIds.length} 题</Text>
-            <InputNumber
+            {!statistics && <><InputNumber
               size="small"
               min={0.01}
               precision={2}
@@ -131,7 +132,7 @@ export function ObjectiveEditor({ value, page, readOnly, selected, onChange, onE
               style={{ width: 64 }}
               aria-label="批量分值"
             />
-            <Button size="small" onClick={applyBatchPoints}>设分</Button>
+            <Button size="small" onClick={applyBatchPoints}>设分</Button></>}
             <Button size="small" onClick={() => applyBatchType('single')}>单选</Button>
             <Button size="small" onClick={() => applyBatchType('multiple')}>多选</Button>
             <Popconfirm title={`删除选中的 ${selectedIds.length} 道选择题？`} onConfirm={deleteSelected}>
@@ -167,7 +168,7 @@ export function ObjectiveEditor({ value, page, readOnly, selected, onChange, onE
                 }
                 rowClassName={q => (q.id === selected ? 'selected-question-row' : '')}
                 onRow={q => ({ onClick: () => onSelect(q.id) })}
-                locale={{ emptyText: <Empty description="批量填写题号、题型和分值，自动生成答题区" /> }}
+                locale={{ emptyText: <Empty description={statistics ? "填写题号、题型和选项数，自动生成答题区" : "批量填写题号、题型和分值，自动生成答题区"} /> }}
                 columns={[
                   {
                     title: '题号',
@@ -180,7 +181,7 @@ export function ObjectiveEditor({ value, page, readOnly, selected, onChange, onE
                       </Space>
                     ),
                   },
-                  {
+                  ...(statistics ? [{ title: '选项', width: 72, render: (_: unknown, q: Question) => 'A–' + String.fromCharCode(64 + q.options) }] : [{
                     title: '分值',
                     width: 72,
                     render: (_: unknown, q: Question) => (
@@ -217,7 +218,7 @@ export function ObjectiveEditor({ value, page, readOnly, selected, onChange, onE
                         onChange={event => changeAnswer(q, event.target.value)}
                       />
                     ),
-                  },
+                  }]),
                   {
                     title: '',
                     width: 48,
@@ -252,7 +253,7 @@ export function ObjectiveEditor({ value, page, readOnly, selected, onChange, onE
               onChange(questions)
               if (first) onSelect(first.id)
               setBatchOpen(false)
-              message.success('客观题已添加，可继续录入答案')
+              message.success(statistics ? '选择题已添加' : '客观题已添加，可继续录入答案')
             } catch (e) {
               message.error((e as Error).message)
             }
@@ -266,18 +267,18 @@ export function ObjectiveEditor({ value, page, readOnly, selected, onChange, onE
               <TagPicker compact options={[{ label: '单选题', value: 'single' }, { label: '多选题', value: 'multiple' }]} />
             </Form.Item>
             <Form.Item name="options" label="选项数" rules={[{ required: true }]}>
-              <TagPicker compact options={[3, 4, 5, 6, 7].map(n => ({ label: `${n} 项`, value: n }))} />
+              {statistics ? <InputNumber min={2} max={26} precision={0} /> : <TagPicker compact options={[3, 4, 5, 6, 7].map(n => ({ label: `${n} 项`, value: n }))} />}
             </Form.Item>
           </div>
-          <Form.Item name="points" label="每题分值" rules={[{ required: true }]}>
+          {!statistics && <Form.Item name="points" label="每题分值" rules={[{ required: true }]}>
             <InputNumber min={0.01} max={1000} precision={2} />
-          </Form.Item>
+          </Form.Item>}
           {layoutFields}
           <Text type="secondary">排布会避让已有答题区域，当前面不足时接续背面；空间不足时请调整题数或列数。</Text>
         </Form>
       </Modal>
       <Modal title="重新排布客观题" open={layoutOpen} onCancel={() => setLayoutOpen(false)} onOk={() => layoutForm.submit()} okText="确认排布">
-        <Typography.Paragraph>重新安排本题卡全部客观题的答题区，主观题区域保持原位。手工调整过的客观题区域也会重新安排。</Typography.Paragraph>
+        <Typography.Paragraph>重新安排本题卡全部客观题的答题区，也会重新安排手工移动过的题区。</Typography.Paragraph>
         <Form
           form={layoutForm}
           layout="vertical"
@@ -293,7 +294,7 @@ export function ObjectiveEditor({ value, page, readOnly, selected, onChange, onE
           {layoutFields}
         </Form>
       </Modal>
-      <Modal title="集中录入客观题答案" open={answerOpen} onCancel={() => setAnswerOpen(false)} footer={<Button type="primary" onClick={() => setAnswerOpen(false)}>完成</Button>} width={620}>
+      {!statistics && <Modal title="集中录入客观题答案" open={answerOpen} onCancel={() => setAnswerOpen(false)} footer={<Button type="primary" onClick={() => setAnswerOpen(false)}>完成</Button>} width={620}>
         <AnswerEntry
           active={answerOpen}
           questions={rows}
@@ -303,7 +304,7 @@ export function ObjectiveEditor({ value, page, readOnly, selected, onChange, onE
             onChange(value.questions.map(question => (answers.has(question.id) ? { ...question, answer: answers.get(question.id)! } : question)))
           }}
         />
-      </Modal>
+      </Modal>}
     </div>
   )
 }

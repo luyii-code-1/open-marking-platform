@@ -47,6 +47,7 @@ type Props = { value: Template; disabled: boolean; readOnly: boolean; change: (p
 export function CompatibleTemplateEditor({ value, disabled, readOnly, change, flush, settings }: Props) {
   const profile = value.external_sheet!
   const anonymous = value.statistics_sheet === true
+  const statistics = anonymous || value.statistics_mode === true
   const [page, setPage] = useState(1), [tool, setTool] = useState<Tool>('anchor'), [lastDrawTool, setLastDrawTool] = useState<Exclude<Tool, 'corners'>>('anchor')
   const [refs, setRefs] = useState<Record<number, Reference>>({}), [savedArt, setSavedArt] = useState('')
   const [error, setError] = useState(''), [notice, setNotice] = useState(''), [busy, setBusy] = useState(false)
@@ -279,7 +280,7 @@ export function CompatibleTemplateEditor({ value, disabled, readOnly, change, fl
         return
       }
       const region = { page, ...box }
-      const rows = anonymous ? Math.min(options, optionRows) : 1
+      const rows = statistics ? Math.min(options, optionRows) : 1
       const layout = grid(box, Math.ceil(options / rows), rows)
       const cells = transpose ? grid(box, 1, options)[0] : Array.from({ length: rows }, (_, row) =>
         layout.map(column => column[row])).flat().slice(0, options)
@@ -317,7 +318,7 @@ export function CompatibleTemplateEditor({ value, disabled, readOnly, change, fl
     }))),
   ]
   const canAutoCorrect = !!(reference?.source || savedArt)
-  const showCanvas = !!image || (anonymous && readOnly && marks.length > 0)
+  const showCanvas = !!image || (statistics && readOnly && marks.length > 0)
   return <div className="compatible-workbench">
     <Card title="兼容标定" className="compatible-controls">
       <Form layout="vertical">
@@ -347,20 +348,20 @@ export function CompatibleTemplateEditor({ value, disabled, readOnly, change, fl
           <Button disabled={blocked || !reference.anchors.length} onClick={() => applySuggestions('anchors')}>采用定位建议</Button>
           {!anonymous && page === 1 && <Button disabled={blocked || !reference.candidate.length} onClick={() => applySuggestions('candidate')}>采用考号建议</Button>}
           <Button disabled={blocked || !reference.choices.length} onClick={() => applySuggestions('choices')}>添加客观题建议</Button>
-          {!anonymous && <Button disabled={blocked || !reference.frames.length} onClick={() => applySuggestions('frames')}>添加主观题建议</Button>}
+          {!statistics && <Button disabled={blocked || !reference.frames.length} onClick={() => applySuggestions('frames')}>添加主观题建议</Button>}
         </Space>}
         <Space wrap className="compatible-tools">
           <Select aria-label="框选工具" value={tool === 'corners' ? undefined : tool} disabled={blocked}
-            options={drawingTools.filter(item => anonymous ? ['anchor', 'choice'].includes(item.value) : page === 1 || !['candidate', 'absent'].includes(item.value))}
+            options={drawingTools.filter(item => (!statistics || item.value !== 'subjective') && (!anonymous || !['candidate','absent'].includes(item.value)) && (page === 1 || !['candidate','absent'].includes(item.value)))}
             onChange={next => chooseTool(next as Exclude<Tool, 'corners'>)} placeholder="选择框选工具" />
           {selected && <Button size="small" disabled={blocked} onClick={() => { setSelected(''); setAdjustCell(false) }}>取消选中（新建下一题）</Button>}
           {tool === 'candidate' && <><InputNumber aria-label="考号位数" min={1} max={20} value={value.candidate_length} disabled={blocked}
             onChange={length => { if (length) change({ candidate_length: length }) }} />
             <Checkbox disabled={blocked} checked={reverse} onChange={e => setReverse(e.target.checked)}>反向数字顺序</Checkbox></>}
           {tool === 'choice' && <>
-            <InputNumber aria-label="选项数量" min={anonymous ? 2 : 3} max={anonymous ? 26 : 7} value={options} disabled={blocked} addonBefore="选项" style={{ width: 112 }}
-              onChange={n => { setOptions(n ?? 4); if (anonymous) { setOptionRows((n ?? 4) > 13 ? 2 : 1); setChoiceBatchCount(1) } }} />
-            {anonymous && !transpose && !adjustCell && <InputNumber aria-label="每题选项行数" min={1} max={Math.min(8, options)}
+            <InputNumber aria-label="选项数量" min={statistics ? 2 : 3} max={statistics ? 26 : 7} value={options} disabled={blocked} addonBefore="选项" style={{ width: 112 }}
+              onChange={n => { setOptions(n ?? 4); if (statistics) { setOptionRows((n ?? 4) > 13 ? 2 : 1); setChoiceBatchCount(1) } }} />
+            {statistics && !transpose && !adjustCell && <InputNumber aria-label="每题选项行数" min={1} max={Math.min(8, options)}
               value={optionRows} disabled={blocked} addonBefore="选项行数" style={{ width: 130 }}
               onChange={n => { setOptionRows(n ?? 1); setChoiceBatchCount(1) }} />}
             {!selected && !adjustCell && optionRows === 1 && <InputNumber aria-label="批量题数" min={1} max={50} value={choiceBatchCount} disabled={blocked} addonBefore="连框题数" style={{ width: 132 }}
@@ -412,12 +413,12 @@ export function CompatibleTemplateEditor({ value, disabled, readOnly, change, fl
             setSelected(nextSelected)
             if (nextSelected) {
               const nextTool = q.type === 'subjective' ? 'subjective' : 'choice'
-              setTool(nextTool); setLastDrawTool(nextTool); setOptions(q.options); setOptionRows(anonymous && q.options > 13 ? 2 : 1); setAdjustCell(false)
+              setTool(nextTool); setLastDrawTool(nextTool); setOptions(q.options); setOptionRows(statistics && q.options > 13 ? 2 : 1); setAdjustCell(false)
             }
           }}>第 {q.number} 题</Button>
           <InputNumber aria-label={`第 ${q.number} 题题号`} disabled={blocked} min={1} value={q.number}
             onChange={number => { if (number && !value.questions.some(other => other.id !== q.id && other.number === number)) questionUpdate(q.id, { number }) }} />
-          {anonymous ? <>
+          {statistics ? <>
             <Select size="small" aria-label={`第 ${q.number} 题题型`} disabled={blocked} value={q.type}
               options={[{ value: 'single', label: '单选' }, { value: 'multiple', label: '多选' }]}
               onChange={type => questionUpdate(q.id, { type })} />
@@ -437,7 +438,7 @@ export function CompatibleTemplateEditor({ value, disabled, readOnly, change, fl
         {!!(reference?.source || savedArt) && <Button disabled={blocked} onClick={() => void run(async () => tryScan(await (await fetch(reference?.source || savedArt)).blob()))}>使用当前样张试扫</Button>}
       </Space>}
     </Card>
-    <Card title={image || !anonymous ? "原版面" : "标定预览"} extra={<Space wrap>
+    <Card title={image || !statistics ? "原版面" : "题卡预览"} extra={<Space wrap>
       <Button size="small" icon={<ZoomOutOutlined />} aria-label="缩小画布" disabled={!showCanvas || zoom <= 50} onClick={() => setZoom(z => Math.max(50, z - 25))} />
       <Button size="small" disabled={!showCanvas} onClick={() => setZoom(100)}>{zoom}%</Button>
       <Button size="small" icon={<ZoomInOutlined />} aria-label="放大画布" disabled={!showCanvas || zoom >= 250} onClick={() => setZoom(z => Math.min(250, z + 25))} />

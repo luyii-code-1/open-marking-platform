@@ -19,6 +19,7 @@ const Roster = loadPage(() => import('./Roster').then(module => ({ default: modu
 const Scans = loadPage(() => import('./Management').then(module => ({ default: module.Scans })))
 const ReviewAllocation = loadPage(() => import('./ReviewAllocation').then(module => ({ default: module.ReviewAllocation })))
 const Exceptions = loadPage(() => import('./Exceptions').then(module => ({ default: module.Exceptions })))
+export const StatisticsResults = loadPage(() => import('./StatisticsWorkspace').then(module => ({ default: module.StatisticsResults })))
 const Results = loadPage(() => import('./Results').then(module => ({ default: module.Results })))
 
 export function ExamStatusTag({ row }: { row: Row }) {
@@ -352,6 +353,7 @@ export function ScopedWorkspace({
   onSection: (section?: string) => void
   children: ReactNode
 }) {
+  if (project.category === 'statistics') return <>{children}</>
   const activeKey = section === 'results' ? 'results' : 'cards'
   return (
     <Tabs
@@ -365,7 +367,7 @@ export function ScopedWorkspace({
   )
 }
 
-function GroupOverview({ group, projectId, onSection }: { group: Row; projectId: string; onSection: (section: string) => void }) {
+function GroupOverview({ group, projectId, onSection, statistics }: { group: Row; projectId: string; onSection: (section: string) => void; statistics: boolean }) {
   const workflow = useResource<Row>(`/groups/${group.id}/workflow`, {} as Row)
   const templates = useResource<Template[]>('/templates', [])
   const roster = useResource<any>(`/groups/${group.id}/roster`, null)
@@ -438,8 +440,8 @@ function GroupOverview({ group, projectId, onSection }: { group: Row; projectId:
     },
     {
       key: 'results',
-      label: '成绩',
-      detail: group.frozen ? '成绩已发布 · 成绩复核' : w.in_review ? '成绩复核中 · 重新发布' : '检查统计并确认发布',
+      label: statistics ? '统计结果' : '成绩',
+      detail: statistics ? '查看各题选项的份数与占比' : group.frozen ? '成绩已发布 · 成绩复核' : w.in_review ? '成绩复核中 · 重新发布' : '检查统计并确认发布',
     },
     {
       key: 'conversions',
@@ -465,7 +467,7 @@ function GroupOverview({ group, projectId, onSection }: { group: Row; projectId:
           extra={
             <Space>
               <Tag color={w.published ? 'green' : w.in_review ? 'blue' : undefined}>
-                {w.published ? '成绩已发布' : w.in_review ? '成绩复核中' : '成绩未发布'}
+                {statistics ? (w.published ? '收集已结束' : '收集中') : w.published ? '成绩已发布' : w.in_review ? '成绩复核中' : '成绩未发布'}
               </Tag>
               <Button loading={workflow.loading} onClick={workflow.reload}>
                 刷新
@@ -490,8 +492,14 @@ function GroupOverview({ group, projectId, onSection }: { group: Row; projectId:
               <Button type="link" onClick={() => onSection('scans')}>
                 查看扫描记录
               </Button>
+              {statistics && <Popconfirm title="重新识别当前题卡的选择题？" onConfirm={reprocess}
+                disabled={!!active || reprocessing || !w.objective_reprocess_allowed}>
+                <Button type="link" loading={reprocessing} disabled={!!active || !w.objective_reprocess_allowed}>
+                  重新自动识别
+                </Button>
+              </Popconfirm>}
             </section>
-            <section>
+            {!statistics && <section>
               <h4>
                 客观题阅卷 <span>题次</span>
               </h4>
@@ -514,8 +522,8 @@ function GroupOverview({ group, projectId, onSection }: { group: Row; projectId:
                   重新自动识别
                 </Button>
               </Popconfirm>
-            </section>
-            <section>
+            </section>}
+            {!statistics && <section>
               <h4>
                 主观题阅卷 <span>题次</span>
               </h4>
@@ -532,9 +540,9 @@ function GroupOverview({ group, projectId, onSection }: { group: Row; projectId:
               <Button type="link" onClick={() => onSection('marking')}>
                 查看教师进度
               </Button>
-            </section>
+            </section>}
           </div>
-          {w.scans_purged && <Alert type="info" showIcon message="扫描文件已清理，成绩与评分记录保留。" style={{ marginTop: 12 }} />}
+          {w.scans_purged && <Alert type="info" showIcon message={statistics ? '扫描文件已清理，统计结果保留。' : '扫描文件已清理，成绩与评分记录保留。'} style={{ marginTop: 12 }} />}
           {!!w.regrades && (
             <Tag color="orange" style={{ marginTop: 12 }}>
               待重阅 {w.regrades} 项
@@ -562,7 +570,7 @@ function GroupOverview({ group, projectId, onSection }: { group: Row; projectId:
         </Card>
       )}
       <div className="group-work-grid">
-        {entries.map(item => (
+        {entries.filter(item => !statistics || !['marking','conversions'].includes(item.key)).map(item => (
           <button type="button" className="workspace-entry" key={item.key} onClick={() => onSection(item.key)}>
             <span className="workspace-entry-title">
               {item.label}
@@ -595,9 +603,13 @@ export function GroupWorkspace({
   sections: readonly (readonly [string, string])[]
   renderTemplateEditor: (groupId: string) => ReactNode
 }) {
+  const statistics = project.category === 'statistics'
+  const groups = useResource<Row[]>(statistics ? '/groups' : null, [])
+  const closed = groups.data.find(item => item.id === group.id)?.frozen ?? group.frozen
+  const visibleSections = sections.filter(([key]) => key !== 'template' && (!statistics || !['marking','conversions'].includes(key)))
   return (
     <>
-      {group.frozen && section !== 'results' && (
+      {group.frozen && !statistics && section !== 'results' && (
         <Alert
           type="info"
           showIcon
@@ -608,19 +620,18 @@ export function GroupWorkspace({
         />
       )}
       <Tabs
-        activeKey={section}
+        activeKey={visibleSections.some(([key]) => key === section) ? section : 'overview'}
         onChange={onSection}
         tabBarExtraContent={<Button onClick={() => onSection('template')}>题卡设计</Button>}
-        items={sections
-          .filter(([key]) => key !== 'template')
+        items={visibleSections
           .map(([key, label]) => ({
             key,
-            label,
+            label: statistics && key === 'results' ? '统计结果' : label,
             children:
               key === 'sheets' ? (
                 <SheetLookup key={group.id} projectId={project.id} groupId={group.id} />
               ) : key === 'overview' ? (
-                <GroupOverview group={group} projectId={project.id} onSection={onSection} />
+                <GroupOverview group={group} projectId={project.id} onSection={onSection} statistics={statistics} />
               ) : (key === 'scans' || key === 'marking') && !group.template_id ? (
                 <Card>
                   <Empty description={key === 'scans' ? '发布题卡后即可开始扫描与导入' : '发布题卡后即可分配教师与阅卷'}>
@@ -632,7 +643,7 @@ export function GroupWorkspace({
               ) : key === 'template' ? (
                 renderTemplateEditor(group.id)
               ) : key === 'roster' ? (
-                <Roster groupId={group.id} />
+                <Roster groupId={group.id} statistics={statistics} />
               ) : key === 'scans' ? (
                 <Scans groupId={group.id} tab={scanTab} onTab={onScanTab} />
               ) : key === 'marking' ? (
@@ -647,6 +658,9 @@ export function GroupWorkspace({
                 <Exceptions groupId={group.id} />
               ) : key === 'conversions' ? (
                 <ConversionWorkspace projectId={project.id} groupId={group.id} />
+              ) : statistics ? (
+                <StatisticsResults endpoint={'/projects/'+project.id+'/statistics'} groupId={group.id} name={group.name}
+                  closed={!!closed} canChange={!project.scans_purged} onCollectionChange={groups.reload} />
               ) : (
                 <Results admin projectId={project.id} groupId={group.id} />
               ),

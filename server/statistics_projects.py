@@ -1,4 +1,4 @@
-"""Configuration and aggregation for anonymous statistics projects."""
+"""Configuration, collection, and aggregation for statistics projects."""
 import base64
 from string import ascii_uppercase
 from uuid import uuid4
@@ -16,19 +16,53 @@ from .templates import render_preview, require_replaceable
 router = APIRouter(prefix='/api/v1/projects')
 
 
-def create_group(db, project, actor):
-    subject = put(db, 'subjects', {'project_id': project['id'], 'name': '统计题卡', 'group_mode': 'default'}, actor)
-    group = put(db, 'groups', {'subject_id': subject['id'], 'name': project['name'], 'statistics_group': True,
-                               'roster_mode': 'open', 'template_id': None}, actor)
-    put(db, 'subjects', {**subject, 'default_group_id': group['id']}, actor)
-    return put(db, 'projects', {**project, 'statistics_group_id': group['id']}, actor)
+def is_statistics_group(db, group):
+    subject = get(db, group.get('subject_id'), 'subjects') or {}
+    project = get(db, subject.get('project_id'), 'projects') or {}
+    return project.get('category') == 'statistics'
 
 
-def context(db, identifier):
+def restore_empty_project_workspaces():
+    with connect() as db:
+        db.execute('BEGIN IMMEDIATE')
+        for project in find(db, 'projects', category='statistics'):
+            group = get(db, project.get('statistics_group_id'), 'groups')
+            if project.get('scans_purged') or not group or not group.get('statistics_group'):
+                continue
+            if db.execute('SELECT 1 FROM deletion_locks WHERE project_id=?', (project['id'],)).fetchone():
+                continue
+            if group.get('statistics_draft') or any(
+                find(db, kind, group_id=group['id'])
+                for kind in ('templates', 'scan-batches', 'statistics-responses')
+            ):
+                continue
+            group.pop('statistics_group')
+            project.pop('statistics_group_id')
+            put(db, 'groups', group)
+            put(db, 'projects', project)
+
+
+def set_template_mode(db, group, value):
+    value.pop('statistics_sheet', None)
+    value.pop('statistics_mode', None)
+    if not is_statistics_group(db, group):
+        return
+    value['statistics_mode'] = True
+    value['notice_template'] = 'none'
+    value['uniform_subjective'] = False
+    value['auto_subjective_layout'] = False
+    for q in value['questions']:
+        q.update(points=0, answer=[], rule={'mode': 'exact'}, review_mode='single', threshold=0)
+
+
+def context(db, identifier, group_id=None):
     project = require(db, identifier, 'projects')
     if project.get('category') != 'statistics':
         raise HTTPException(404, '请选择统计项目')
-    group = require(db, project.get('statistics_group_id'), 'groups')
+    group = require(db, group_id or project.get('statistics_group_id'), 'groups')
+    subject = get(db, group.get('subject_id'), 'subjects') or {}
+    if subject.get('project_id') != identifier:
+        raise HTTPException(404, '题卡不属于该统计项目')
     template = get(db, group.get('template_id'), 'templates')
     return project, group, template
 
@@ -93,22 +127,26 @@ def save_statistics(identifier: str, body: dict, current=Depends(admin)):
 
 
 @router.put('/{identifier}/statistics/collection')
-def set_collection(identifier: str, body: dict, current=Depends(admin)):
+def set_collection(identifier: str, body: dict, group_id: str | None = None, current=Depends(admin)):
     closed = body.get('closed')
     if type(closed) is not bool:
         raise HTTPException(422, '请选择收集状态')
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
-        project, group, template = context(db, identifier)
+        project, group, template = context(db, identifier, group_id)
         writable(db, 'projects', project)
         if bool(group.get('frozen')) == closed:
             return {'closed': closed}
         if closed:
-            if not template or not find(db, 'statistics-responses', group_id=group['id']):
+            if not template or not responses_for(db, group, template):
                 raise HTTPException(409, '请先确认至少一份统计答卷')
             batches = [batch for batch in find(db, 'scan-batches', group_id=group['id']) if batch['status'] != 'paired']
             if any(not page.get('excluded') for batch in batches for page in find(db, 'pages', batch_id=batch['id'])):
                 raise HTTPException(409, '请先处理尚未确认的扫描批次')
+            if template.get('statistics_mode'):
+                from .workflow import overview
+                if overview(db, group, current)['open_exceptions']:
+                    raise HTTPException(409, '请先处理待核查的答卷异常')
         put(db, 'groups', {**group, 'frozen': closed}, current['id'])
         return {'closed': closed}
 
@@ -145,16 +183,27 @@ def aggregate(template, responses):
     return {'total': total, 'rows': rows}
 
 
-def results(db, identifier):
-    _, group, template = context(db, identifier)
-    return aggregate(template, find(db, 'statistics-responses', group_id=group['id']))
+def responses_for(db, group, template):
+    if not template:
+        return []
+    if group.get('statistics_group'):
+        return find(db, 'statistics-responses', group_id=group['id'])
+    from .review import objective_selections
+    return [{'selections': objective_selections(db, submission)}
+            for submission in find(db, 'submissions', group_id=group['id'])
+            if submission['template_id'] == template['id'] and submission['status'] != 'absent' and submission.get('pages')]
+
+
+def results(db, identifier, group_id=None):
+    _, group, template = context(db, identifier, group_id)
+    return aggregate(template, responses_for(db, group, template))
 
 
 @router.get('/{identifier}/statistics/results')
-def statistics_results(identifier: str, current=Depends(admin)):
+def statistics_results(identifier: str, group_id: str | None = None, current=Depends(admin)):
     with connect() as db:
         db.execute('BEGIN')
-        return results(db, identifier)
+        return results(db, identifier, group_id)
 
 
 @router.get('/{identifier}/statistics/preview')
@@ -200,10 +249,10 @@ def statistics_paper_preview(identifier: str, body: dict, page: int = 1, current
 
 
 @router.get('/{identifier}/statistics/export')
-def statistics_export(identifier: str, format: FileFormat = 'xlsx', current=Depends(admin)):
+def statistics_export(identifier: str, format: FileFormat = 'xlsx', group_id: str | None = None, current=Depends(admin)):
     with connect() as db:
         db.execute('BEGIN')
-        data = results(db, identifier)
+        data = results(db, identifier, group_id)
     total = data['total']
     letters = ascii_uppercase[:max((len(row['counts']) for row in data['rows']), default=0)]
     columns = ['题号', '题目', '题型', '确认份数', '空白份数', '无效份数']

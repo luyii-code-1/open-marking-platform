@@ -42,8 +42,10 @@ def overview(db,group,current):
     from .room_tags import exception_source,progress
     exceptions=[e for e in objects(db,'exceptions') if e.get('status')=='open' and e.get('kind')!='excellent' and (e.get('group_id')==group['id'] or exception_source(db,e).get('group_id')==group['id'])]
     rooms=[{**r,**progress(db,r)} for r in find(db,'room-tags',group_id=group['id']) if not r.get('archived')]
+    from .statistics_projects import is_statistics_group
+    statistics=is_statistics_group(db,group)
     from .review import results_for
-    rows=results_for(db,group['id'],current) if group.get('template_id') else []
+    rows=results_for(db,group['id'],current) if group.get('template_id') and not statistics else []
     counts={status:sum(r['status']==status for r in rows) for status in ('unscanned','absent','pending','completed')}
     details=[{**b,**batch_progress(db,b)} for b in batches]
     signature=hashlib.sha256(json.dumps({'members':sorted(s['id'] for s in roster['students']),'batches':sorted((b['id'],b.get('status'),b['received_pages'],b['linked_pages']) for b in details),'rooms':sorted((r['id'],r.get('expected_students')) for r in rooms),'submissions':sorted((s['id'],s.get('status'),s.get('pages',[])) for s in submissions)},sort_keys=True).encode()).hexdigest()
@@ -64,6 +66,20 @@ def overview(db,group,current):
     state['roster_scanned']=len(roster_ids & scanned_ids)
     state['scanned_students']=len(scanned_ids)
     state['unpaired_pages']=sum(max(0,b['received_pages']-b['linked_pages']) for b in details)
+    if statistics:
+        subject=require(db,group['subject_id'],'subjects')
+        project=require(db,subject['project_id'],'projects')
+        expected=len(roster['students']) if roster['configured'] else state['room_expected'] or len(submissions)
+        present_ids={s['student_id'] for s in submissions if s.get('pages') and s['status']!='absent'}
+        absent_ids={s['student_id'] for s in submissions if s['status']=='absent'}
+        pending=max(0,expected-len(present_ids | absent_ids))
+        state['scan']={'received':len(present_ids),'expected':expected,'pending':pending,'exceptions':len(exceptions),'absent':len(absent_ids)}
+        state['results']={'unscanned':pending,'absent':len(absent_ids)}
+        state['scans_purged']=bool(project.get('scans_purged'))
+        state['project_id']=project['id']
+        template=get(db,group.get('template_id'),'templates') or {}
+        state['objective_reprocess_allowed']=bool(not group.get('frozen') and not state['scans_purged'] and template.get('questions') and any(b['recognized_pages'] for b in details))
+        return state
     # Count scores against the version actually used by each submitted sheet.
     from .merged_questions import label
     templates={}

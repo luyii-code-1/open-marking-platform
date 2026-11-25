@@ -18,7 +18,7 @@ def issues(template,complete=False,*,require_answers=True):
     questions=template.get('questions',[])
     if not isinstance(questions,list) or any(not isinstance(q,dict) for q in questions):return errors+['题目应为对象列表']
     if complete and not questions:errors.append('至少创建一道题')
-    if template.get('statistics_sheet'):
+    if template.get('statistics_sheet') or template.get('statistics_mode'):
         if len(questions)>150:
             return errors+['统计题卡最多支持 150 道题']
         numbers=set()
@@ -30,7 +30,9 @@ def issues(template,complete=False,*,require_answers=True):
             if (q.get('type') not in ('single','multiple') or type(options) is not int or not 2<=options<=26
                     or not isinstance(title,str) or len(title)>64 or any(ord(c)<32 for c in title)):
                 return errors+[f'第 {number} 题需设置单选或多选、2 至 26 个选项及 64 字以内的题目说明']
-        if template.get('external_sheet') and not errors:
+            if template.get('statistics_mode') and complete and len(q.get('regions', [])) != 1:
+                errors.append(f'请为第 {number} 题设置一个答题区域')
+        if (template.get('external_sheet') or template.get('statistics_mode')) and not errors:
             try:
                 paper.validate(template)
             except (ValueError,TypeError,KeyError,OverflowError,AttributeError) as error:

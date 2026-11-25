@@ -30,7 +30,7 @@ type ImportReport = {
   warnings: any[]
 }
 
-export function Roster({ groupId }: { groupId?: string }) {
+export function Roster({ groupId, statistics = false }: { groupId?: string; statistics?: boolean }) {
   const groups = useResource<Row[]>('/groups', [])
   const grades = useResource<Row[]>('/grades', [])
   const [selectedGroup, setGroup] = useState(groupId || '')
@@ -98,7 +98,7 @@ export function Roster({ groupId }: { groupId?: string }) {
       setChecked([])
       await refresh()
       message.success(
-        `已移出 ${result.removed} 名应考学生${result.retained_submissions ? `，${result.retained_submissions} 份已有答卷及其评分、成绩继续保留` : ''}`,
+        `已移出 ${result.removed} 名应考学生${result.retained_submissions ? `，${result.retained_submissions} 份已有答卷${statistics ? '' : '及其评分、成绩'}继续保留` : ''}`,
       )
     } catch (e) {
       message.error((e as Error).message)
@@ -232,7 +232,7 @@ export function Roster({ groupId }: { groupId?: string }) {
             extra={
               <Popconfirm
                 title={`移出所选 ${checked.length} 名应考学生？`}
-                description="仅调整当前题卡的应考名单，已有答卷、评分和成绩继续保留。"
+                description={statistics?'仅调整当前题卡的应考名单，已有答卷继续保留。':'仅调整当前题卡的应考名单，已有答卷、评分和成绩继续保留。'}
                 onConfirm={() => removeStudents(checked)}
               >
                 <Button danger disabled={busy || frozen || !checked.length}>
@@ -302,7 +302,7 @@ export function Roster({ groupId }: { groupId?: string }) {
                   render: (_, student) => (
                     <Popconfirm
                       title={`将 ${student.name} 移出应考名单？`}
-                      description="仅调整当前题卡的应考名单，已有答卷、评分和成绩继续保留。"
+                      description={statistics?'仅调整当前题卡的应考名单，已有答卷继续保留。':'仅调整当前题卡的应考名单，已有答卷、评分和成绩继续保留。'}
                       onConfirm={() => removeStudents([student.id])}
                     >
                       <Button danger disabled={busy || frozen}>
