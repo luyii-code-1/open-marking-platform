@@ -46,10 +46,12 @@ type Props = { value: Template; disabled: boolean; readOnly: boolean; change: (p
 
 export function CompatibleTemplateEditor({ value, disabled, readOnly, change, flush, settings }: Props) {
   const profile = value.external_sheet!
+  const anonymous = value.statistics_sheet === true
   const [page, setPage] = useState(1), [tool, setTool] = useState<Tool>('anchor'), [lastDrawTool, setLastDrawTool] = useState<Exclude<Tool, 'corners'>>('anchor')
   const [refs, setRefs] = useState<Record<number, Reference>>({}), [savedArt, setSavedArt] = useState('')
   const [error, setError] = useState(''), [notice, setNotice] = useState(''), [busy, setBusy] = useState(false)
   const [combine, setCombine] = useState(false), [transpose, setTranspose] = useState(false), [reverse, setReverse] = useState(false)
+  const [optionRows, setOptionRows] = useState(1)
   const [options, setOptions] = useState(4), [choiceBatchCount, setChoiceBatchCount] = useState(1), [appendRegion, setAppendRegion] = useState(false)
   const [selected, setSelected] = useState(''), [trial, setTrial] = useState<Trial>()
   const [adjustCell, setAdjustCell] = useState(false), [cellColumn, setCellColumn] = useState(1), [cellDigit, setCellDigit] = useState(0)
@@ -277,7 +279,10 @@ export function CompatibleTemplateEditor({ value, disabled, readOnly, change, fl
         return
       }
       const region = { page, ...box }
-      const cells = transpose ? grid(box, 1, options)[0] : grid(box, options, 1).flat()
+      const rows = anonymous ? Math.min(options, optionRows) : 1
+      const layout = grid(box, Math.ceil(options / rows), rows)
+      const cells = transpose ? grid(box, 1, options)[0] : Array.from({ length: rows }, (_, row) =>
+        layout.map(column => column[row])).flat().slice(0, options)
       const question = current ?? newQuestion(Math.max(0, ...value.questions.map(q => q.number)) + 1)
       const next: Question = tool === 'choice'
         ? { ...question, type: current?.type === 'multiple' ? 'multiple' : 'single', options, answer: question.answer.filter(a => a < String.fromCharCode(65 + options)), external_options: cells, regions: [region] }
@@ -312,6 +317,7 @@ export function CompatibleTemplateEditor({ value, disabled, readOnly, change, fl
     }))),
   ]
   const canAutoCorrect = !!(reference?.source || savedArt)
+  const showCanvas = !!image || (anonymous && readOnly && marks.length > 0)
   return <div className="compatible-workbench">
     <Card title="兼容标定" className="compatible-controls">
       <Form layout="vertical">
@@ -339,22 +345,25 @@ export function CompatibleTemplateEditor({ value, disabled, readOnly, change, fl
         </Space>}
         {reference?.image && <Space wrap className="compatible-tools">
           <Button disabled={blocked || !reference.anchors.length} onClick={() => applySuggestions('anchors')}>采用定位建议</Button>
-          {page === 1 && <Button disabled={blocked || !reference.candidate.length} onClick={() => applySuggestions('candidate')}>采用考号建议</Button>}
+          {!anonymous && page === 1 && <Button disabled={blocked || !reference.candidate.length} onClick={() => applySuggestions('candidate')}>采用考号建议</Button>}
           <Button disabled={blocked || !reference.choices.length} onClick={() => applySuggestions('choices')}>添加客观题建议</Button>
-          <Button disabled={blocked || !reference.frames.length} onClick={() => applySuggestions('frames')}>添加主观题建议</Button>
+          {!anonymous && <Button disabled={blocked || !reference.frames.length} onClick={() => applySuggestions('frames')}>添加主观题建议</Button>}
         </Space>}
         <Space wrap className="compatible-tools">
           <Select aria-label="框选工具" value={tool === 'corners' ? undefined : tool} disabled={blocked}
-            options={drawingTools.filter(item => page === 1 || !['candidate', 'absent'].includes(item.value))}
+            options={drawingTools.filter(item => anonymous ? ['anchor', 'choice'].includes(item.value) : page === 1 || !['candidate', 'absent'].includes(item.value))}
             onChange={next => chooseTool(next as Exclude<Tool, 'corners'>)} placeholder="选择框选工具" />
           {selected && <Button size="small" disabled={blocked} onClick={() => { setSelected(''); setAdjustCell(false) }}>取消选中（新建下一题）</Button>}
           {tool === 'candidate' && <><InputNumber aria-label="考号位数" min={1} max={20} value={value.candidate_length} disabled={blocked}
             onChange={length => { if (length) change({ candidate_length: length }) }} />
             <Checkbox disabled={blocked} checked={reverse} onChange={e => setReverse(e.target.checked)}>反向数字顺序</Checkbox></>}
           {tool === 'choice' && <>
-            <InputNumber aria-label="选项数量" min={3} max={7} value={options} disabled={blocked} addonBefore="选项" style={{ width: 112 }}
-              onChange={n => setOptions(n ?? 4)} />
-            {!selected && !adjustCell && <InputNumber aria-label="批量题数" min={1} max={50} value={choiceBatchCount} disabled={blocked} addonBefore="连框题数" style={{ width: 132 }}
+            <InputNumber aria-label="选项数量" min={anonymous ? 2 : 3} max={anonymous ? 26 : 7} value={options} disabled={blocked} addonBefore="选项" style={{ width: 112 }}
+              onChange={n => { setOptions(n ?? 4); if (anonymous) { setOptionRows((n ?? 4) > 13 ? 2 : 1); setChoiceBatchCount(1) } }} />
+            {anonymous && !transpose && !adjustCell && <InputNumber aria-label="每题选项行数" min={1} max={Math.min(8, options)}
+              value={optionRows} disabled={blocked} addonBefore="选项行数" style={{ width: 130 }}
+              onChange={n => { setOptionRows(n ?? 1); setChoiceBatchCount(1) }} />}
+            {!selected && !adjustCell && optionRows === 1 && <InputNumber aria-label="批量题数" min={1} max={50} value={choiceBatchCount} disabled={blocked} addonBefore="连框题数" style={{ width: 132 }}
               onChange={n => setChoiceBatchCount(n ?? 1)} />}
           </>}
           {tool === 'subjective' && !!selectedQuestion && selectedQuestion.type === 'subjective' && <Checkbox disabled={blocked} checked={appendRegion}
@@ -393,7 +402,7 @@ export function CompatibleTemplateEditor({ value, disabled, readOnly, change, fl
       </>}
       <div className="compatible-tools">
         <Tag>定位参照 {face.anchors.length}</Tag>
-        {page === 1 && <Tag color={face.candidate?.length && face.candidate.length !== value.candidate_length ? 'orange' : undefined}>考号 {face.candidate?.length || 0} / {value.candidate_length} 位</Tag>}
+        {!anonymous && page === 1 && <Tag color={face.candidate?.length && face.candidate.length !== value.candidate_length ? 'orange' : undefined}>考号 {face.candidate?.length || 0} / {value.candidate_length} 位</Tag>}
         <Tag>本面 {pageQuestions.length} 题</Tag>
       </div>
       <div className="compatible-questions">
@@ -403,14 +412,22 @@ export function CompatibleTemplateEditor({ value, disabled, readOnly, change, fl
             setSelected(nextSelected)
             if (nextSelected) {
               const nextTool = q.type === 'subjective' ? 'subjective' : 'choice'
-              setTool(nextTool); setLastDrawTool(nextTool); setOptions(q.options); setAdjustCell(false)
+              setTool(nextTool); setLastDrawTool(nextTool); setOptions(q.options); setOptionRows(anonymous && q.options > 13 ? 2 : 1); setAdjustCell(false)
             }
           }}>第 {q.number} 题</Button>
           <InputNumber aria-label={`第 ${q.number} 题题号`} disabled={blocked} min={1} value={q.number}
             onChange={number => { if (number && !value.questions.some(other => other.id !== q.id && other.number === number)) questionUpdate(q.id, { number }) }} />
-          <InputNumber aria-label={`第 ${q.number} 题分值`} disabled={blocked} value={q.points} min={.01} precision={2}
-            onChange={points => { if (points) questionUpdate(q.id, { points }) }} />
-          <Button disabled={blocked} onClick={() => settings(q.id)}>设置</Button>
+          {anonymous ? <>
+            <Select size="small" aria-label={`第 ${q.number} 题题型`} disabled={blocked} value={q.type}
+              options={[{ value: 'single', label: '单选' }, { value: 'multiple', label: '多选' }]}
+              onChange={type => questionUpdate(q.id, { type })} />
+            <Input size="small" aria-label={`第 ${q.number} 题说明`} disabled={blocked} maxLength={64}
+              placeholder="题目说明" value={q.title || ''} onChange={e => questionUpdate(q.id, { title: e.target.value })} />
+          </> : <>
+            <InputNumber aria-label={`第 ${q.number} 题分值`} disabled={blocked} value={q.points} min={.01} precision={2}
+              onChange={points => { if (points) questionUpdate(q.id, { points }) }} />
+            <Button disabled={blocked} onClick={() => settings(q.id)}>设置</Button>
+          </>}
           <Button disabled={blocked} danger onClick={() => { if (selected === q.id) setSelected(''); change({ questions: value.questions.filter(other => other.id !== q.id) }); setTrial(undefined) }}>删除</Button>
         </div>)}
       </div>
@@ -420,25 +437,25 @@ export function CompatibleTemplateEditor({ value, disabled, readOnly, change, fl
         {!!(reference?.source || savedArt) && <Button disabled={blocked} onClick={() => void run(async () => tryScan(await (await fetch(reference?.source || savedArt)).blob()))}>使用当前样张试扫</Button>}
       </Space>}
     </Card>
-    <Card title="原版面" extra={<Space wrap>
-      <Button size="small" icon={<ZoomOutOutlined />} aria-label="缩小画布" disabled={!image || zoom <= 50} onClick={() => setZoom(z => Math.max(50, z - 25))} />
-      <Button size="small" disabled={!image} onClick={() => setZoom(100)}>{zoom}%</Button>
-      <Button size="small" icon={<ZoomInOutlined />} aria-label="放大画布" disabled={!image || zoom >= 250} onClick={() => setZoom(z => Math.min(250, z + 25))} />
+    <Card title={image || !anonymous ? "原版面" : "标定预览"} extra={<Space wrap>
+      <Button size="small" icon={<ZoomOutOutlined />} aria-label="缩小画布" disabled={!showCanvas || zoom <= 50} onClick={() => setZoom(z => Math.max(50, z - 25))} />
+      <Button size="small" disabled={!showCanvas} onClick={() => setZoom(100)}>{zoom}%</Button>
+      <Button size="small" icon={<ZoomInOutlined />} aria-label="放大画布" disabled={!showCanvas || zoom >= 250} onClick={() => setZoom(z => Math.min(250, z + 25))} />
       <Select aria-label="纸面" value={page} disabled={busy} onChange={switchPage}
         options={[{ value: 1, label: '正面' }, ...(value.sides === 2 ? [{ value: 2, label: '背面' }] : [])]} />
     </Space>}>
       {(error || reference?.error) && <Alert className="compatible-tools" showIcon type="warning" message={error || reference?.error} />}
       {notice && <Alert className="compatible-tools" showIcon type="info" message={notice} closable onClose={() => setNotice('')} />}
       {trial && <Alert className="compatible-tools" showIcon type="success" message="请核对本面试扫结果（当前显示自动校正图）"
-        description={<div>{page === 1 && <div>考号 {trial.candidate || '未识读'}{trial.absent ? ' · 缺考' : ''}</div>}
+        description={<div>{!anonymous && page === 1 && <div>考号 {trial.candidate || '未识读'}{trial.absent ? ' · 缺考' : ''}</div>}
           {Object.entries(trial.selections).map(([id, choices]) => <Tag key={id}>第 {value.questions.find(q => q.id === id)?.number} 题 {choices.join('') || '空白'}</Tag>)}</div>}
         action={<Space direction="vertical" size={6}>
-          {!readOnly && <Button type="primary" size="small" disabled={blocked} onClick={() => void run(() => adoptCorrectedImage(trial.image, '已引用自动校正图作为当前底图，可继续框选定位与答题区'))}>引用此校正图继续框选</Button>}
+          {!readOnly && !(anonymous && profile.mode === 'blank') && <Button type="primary" size="small" disabled={blocked} onClick={() => void run(() => adoptCorrectedImage(trial.image, '已引用自动校正图作为当前底图，可继续框选定位与答题区'))}>引用此校正图继续框选</Button>}
           <Button size="small" onClick={() => setTrial(undefined)}>返回标定</Button>
         </Space>} />}
-      {image ? <div className="compatible-canvas-viewport"><div className="compatible-canvas" style={{ aspectRatio: `${width}/${height}`, width: `${zoom}%`, maxWidth: zoom > 100 ? 'none' : 920 }}>
-        <img ref={imgRef} src={image} alt={correcting ? '待校正原图' : '当前纸面'} draggable={false}
-          onLoad={event => { if (correcting) setRawSize([event.currentTarget.naturalWidth, event.currentTarget.naturalHeight]) }} />
+      {showCanvas ? <div className="compatible-canvas-viewport"><div className="compatible-canvas" style={{ aspectRatio: `${width}/${height}`, width: `${zoom}%`, maxWidth: zoom > 100 ? 'none' : 920 }}>
+        {image && <img ref={imgRef} src={image} alt={correcting ? '待校正原图' : '当前纸面'} draggable={false}
+          onLoad={event => { if (correcting) setRawSize([event.currentTarget.naturalWidth, event.currentTarget.naturalHeight]) }} />}
         <svg role="img" aria-label="题卡标定区域" viewBox={`0 0 ${width} ${height}`} className={blocked || trial ? '' : 'compatible-draw'}
           onPointerDown={event => {
             if (blocked || trial) return

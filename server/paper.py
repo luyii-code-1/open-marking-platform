@@ -147,7 +147,7 @@ def forbidden_regions(template,page):
 
 
 def pdf(template, only_page=None):
-    if statistics_sheet.enabled(template):
+    if statistics_sheet.enabled(template) and not compatible_omr.profile(template):
         return statistics_sheet.pdf(template, only_page)
     from .merged_questions import print_questions
     template={**template,'questions':list(print_questions(template))}

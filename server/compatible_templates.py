@@ -124,7 +124,7 @@ def suggest_anchors(page):
     return anchors
 
 
-def suggest_regions(page):
+def suggest_regions(page, anonymous=False):
     adaptive = cv2.adaptiveThreshold(page, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 21, 10)
     mask = np.uint8((page < 165) | (adaptive > 0))
     contours, _ = cv2.findContours(mask, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
@@ -174,7 +174,7 @@ def suggest_regions(page):
         if offsets.min() >= 8 and offsets.max() - offsets.min() <= 7:
             grid = similar[:10]
             break
-    choice = [[box_from_pixels(*cell) for cell in row] for row in runs if 3 <= len(row) <= 7 and row not in grid]
+    choice = [[box_from_pixels(*cell) for cell in row] for row in runs if ((2 <= len(row) <= 26) if anonymous else (3 <= len(row) <= 7 and row not in grid))]
     candidate = [[box_from_pixels(*cell) for cell in column] for column in zip(*grid)] if grid else []
     return {'candidate': candidate, 'choices': choice[:150], 'frames': [box_from_pixels(*frame) for frame in frames[:45]]}
 
@@ -199,7 +199,7 @@ def reference(group_id: str, files: list[UploadFile] = File(), paper: str = Form
               rotation: int = Form(0), corners: str = Form(''), combine: bool = Form(False),
               already_corrected: bool = Form(False), current=Depends(admin)):
     with connect() as db:
-        draft_in_group(db, group_id, current)
+        group = draft_in_group(db, group_id, current)
     if not 1 <= len(files) <= (5 if combine else 2) or not 0 <= rotation <= 3:
         raise HTTPException(422, '请选择有效的题卡样张和旋转方向')
     if not _slots.acquire(blocking=False):
@@ -247,7 +247,7 @@ def reference(group_id: str, files: list[UploadFile] = File(), paper: str = Form
         for index, page, source in pages:
             normalized = omr.grayscale(page)
             result[index] = {'source': picture(source, '.jpg'), 'image': picture(page),
-                             'anchors': suggest_anchors(normalized), **suggest_regions(normalized)}
+                             'anchors': suggest_anchors(normalized), **suggest_regions(normalized, bool(group.get('statistics_group')))}
         return JSONResponse({'pages': [result[index] for index in sorted(result)]}, headers={'Cache-Control': 'private, no-store'})
     except (ValueError, OSError, cv2.error, subprocess.SubprocessError) as error:
         raise HTTPException(422, f'无法导入题卡：{error}') from error
@@ -322,7 +322,7 @@ def trial(identifier: str, file: UploadFile = File(), side: str = Form(), curren
             raise ValueError('试扫时请逐面上传样张')
         normalized, candidate, selections = recognize(images[0], template, side)
         missing = absent_mark(normalized, side, template)
-        if side == 'front' and omr.profile(template)['mode'] == 'completed' and (not candidate or '?' in candidate):
+        if side == 'front' and not template.get('statistics_sheet') and omr.profile(template)['mode'] == 'completed' and (not candidate or '?' in candidate):
             raise ValueError('试扫件存在无法识读的考号，请核对考号格或使用填涂清晰的试扫件')
     except (ValueError, OSError, cv2.error, subprocess.SubprocessError) as error:
         raise HTTPException(422, str(error)) from error

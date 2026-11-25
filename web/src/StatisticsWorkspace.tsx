@@ -1,17 +1,20 @@
-import { useState } from 'react'
-import { Alert, App, Card, Empty, Input, InputNumber, Popconfirm, Progress, Select, Space, Spin, Statistic, Tabs, Tag, Typography } from 'antd'
+import { useEffect, useState } from 'react'
+import { Alert, App, Card, Empty, Input, InputNumber, Popconfirm, Progress, Segmented, Select, Space, Spin, Statistic, Tabs, Tag, Typography } from 'antd'
 import { ArrowLeftOutlined, DownloadOutlined, PlusOutlined } from '@ant-design/icons'
 import { Button } from './Button'
 import { Table } from './DataTable'
 import { ErrorNotice } from './EntityTable'
-import { announceChanges, download, send, useResource, type Row } from './api'
+import { announceChanges, download, request, send, useResource, type ExternalMode, type Row, type Template } from './api'
 import { useUnsavedChanges } from './useNavigation'
 import { Scans } from './Management'
+import { DraftSaver } from './draftSaver'
+import { CompatibleTemplateEditor } from './CompatibleTemplateEditor'
 
 type Question = { type: 'single' | 'multiple'; options: number; title: string }
 type CardState = {
   group_id: string
-  template: { id: string; revision: number; sides: number; questions: Question[] } | null
+  template: Template | null
+  external_draft?: Template | null
   draft: Question[] | null
   draft_version: number
   locked: boolean
@@ -37,10 +40,13 @@ export function StatisticsWorkspace({ project, back }: { project: Row; back: () 
 function StatisticsCard({ endpoint, name, initial, refresh }: { endpoint: string; name: string; initial: CardState; refresh: () => Promise<unknown> }) {
   const [card, setCard] = useState(initial)
   const makeRows = (state: CardState): (Question & { key: string })[] => (state.draft ?? state.template?.questions ?? [defaultQuestion])
-    .map(question => ({ ...question, key: crypto.randomUUID() }))
+    .map(({ type, options, title }) => ({ type: type === 'multiple' ? 'multiple' : 'single', options, title: title || '', key: crypto.randomUUID() }))
   const [questions, setQuestions] = useState(() => makeRows(initial))
   const [dirty, setDirty] = useState(false), [busy, setBusy] = useState(false)
   const [section, setSection] = useState('design')
+  const [creation, setCreation] = useState<'native' | 'external'>(() =>
+    initial.template?.external_sheet || (!initial.template && initial.external_draft) ? 'external' : 'native')
+  const [openedExternal, setOpenedExternal] = useState(creation === 'external')
   const { message } = App.useApp()
   useUnsavedChanges(dirty)
 
@@ -67,15 +73,17 @@ function StatisticsCard({ endpoint, name, initial, refresh }: { endpoint: string
   const scanLocked = initial.locked || card.locked
   const activeTemplate = initial.locked ? initial.template : card.template
   const draft = scanLocked ? null : card.draft
+  const external = scanLocked ? !!activeTemplate?.external_sheet : creation === 'external'
   const visibleQuestions = scanLocked
-    ? activeTemplate?.questions.map((q, i) => ({ ...q, key: 'published-' + i })) ?? []
+    ? activeTemplate?.questions.map((q, i) => ({ type: q.type === 'multiple' ? 'multiple' as const : 'single' as const,
+      options: q.options, title: q.title || '', key: 'published-' + i })) ?? []
     : questions
   const locked = scanLocked || busy
   const design = <Card title="统计题卡" extra={<Space wrap>
-    {activeTemplate && <Tag color="green">第 {activeTemplate.revision} 版 · {activeTemplate.sides === 2 ? '双面' : '单面'}</Tag>}
+    {activeTemplate && !activeTemplate.external_sheet && <Tag color="green">第 {activeTemplate.revision} 版 · {activeTemplate.sides === 2 ? '双面' : '单面'}</Tag>}
     {draft && <Tag>草稿</Tag>}
     {!scanLocked && <Button disabled={!questions.length} loading={busy} onClick={() => save(false)}>保存草稿</Button>}
-    <Button icon={<DownloadOutlined />} disabled={(!scanLocked && dirty) || (!draft && !activeTemplate)} onClick={() =>
+    <Button icon={<DownloadOutlined />} disabled={(!scanLocked && dirty) || (!draft && (!activeTemplate || !!activeTemplate.external_sheet))} onClick={() =>
       download(draft ? endpoint + '/preview' : `/templates/${activeTemplate!.id}/pdf`, `${name}.pdf`).catch(error => message.error(error.message))}>{draft ? '下载草稿预览' : '下载打印题卡'}</Button>
     {!scanLocked && <Popconfirm title={card.template ? '发布新版统计题卡？' : '发布统计题卡？'}
       description="正式扫描开始后锁定题目配置。" onConfirm={() => save(true)}>
@@ -105,14 +113,127 @@ function StatisticsCard({ endpoint, name, initial, refresh }: { endpoint: string
       {!scanLocked && <Button icon={<PlusOutlined />} disabled={busy || questions.length >= 32}
         onClick={() => change([...questions, { ...defaultQuestion, key: crypto.randomUUID() }])}>添加题目</Button>}
     </Space>
+    <StatisticsPaperPreview endpoint={endpoint} questions={visibleQuestions}
+      published={!!activeTemplate && !activeTemplate.external_sheet && !dirty && !draft} />
   </Card>
+  const designer = <Space direction="vertical" size={12} style={{ width: '100%' }}>
+    {!scanLocked && <Segmented<'native' | 'external'> aria-label="制卡方式" value={creation} options={[
+      { label: '系统制卡', value: 'native' }, { label: '从外部兼容导入', value: 'external' },
+    ]} onChange={next => { setCreation(next); if (next === 'external') setOpenedExternal(true) }} />}
+    {!external && design}
+    {(external || openedExternal) && <div hidden={!external}><StatisticsExternalDesigner
+      groupId={card.group_id} name={name} savedDraft={initial.external_draft}
+      published={activeTemplate} locked={scanLocked}
+      onPublished={async template => { setCard(old => ({ ...old, template, draft: null })); await refresh() }} /></div>}
+  </Space>
   return <Tabs activeKey={section} onChange={setSection} items={[
-    { key: 'design', label: '题卡', children: design },
+    { key: 'design', label: '题卡', children: designer },
     { key: 'scans', label: '扫描与导入', children: activeTemplate ? <Scans groupId={card.group_id} /> :
       <Card><Empty description="发布统计题卡后即可创建扫描批次" /></Card> },
     { key: 'statistics', label: '统计结果', destroyOnHidden: true, children: <StatisticsResults
       endpoint={endpoint} name={name} closed={initial.closed} canChange={!initial.scans_purged} onCollectionChange={refresh} /> },
   ]} />
+}
+
+type PaperPreview = { page: number; sides: number; image: string }
+
+function StatisticsPaperPreview({ endpoint, questions, published }: { endpoint: string; questions: Question[]; published: boolean }) {
+  const [page, setPage] = useState(1), [result, setResult] = useState<PaperPreview>()
+  const [error, setError] = useState('')
+  const body = JSON.stringify(published ? { published: true } :
+    { questions: questions.map(({ type, options, title }) => ({ type, options, title })) })
+  useEffect(() => {
+    const controller = new AbortController()
+    const timer = window.setTimeout(() => {
+      setError('')
+      if (!published && !questions.length) { setResult(undefined); return }
+      void sendPreview().catch(error => {
+        if (!controller.signal.aborted) { setError((error as Error).message); setResult(undefined) }
+      })
+    }, 300)
+    async function sendPreview() {
+      const response = await request<PaperPreview>(`${endpoint}/paper-preview?page=${page}`, {
+        method: 'POST', body, signal: controller.signal,
+      })
+      if (!controller.signal.aborted) setResult(response)
+    }
+    return () => { window.clearTimeout(timer); controller.abort() }
+  }, [endpoint, body, page])
+  return <Card title="题卡预览" style={{ marginTop: 16 }}
+    extra={result?.sides === 2 ? <Segmented aria-label="预览纸面" value={result.page} options={[
+      { label: '正面', value: 1 }, { label: '背面', value: 2 },
+    ]} onChange={setPage} /> : undefined}>
+    {error ? <Alert type="warning" showIcon message={error} /> : result
+      ? <img src={result.image} alt={result.page === 2 ? '统计题卡背面预览' : '统计题卡正面预览'}
+        style={{ display: 'block', width: '100%', maxWidth: 620, margin: '0 auto', border: '1px solid var(--border-color, #ddd)' }} />
+      : questions.length ? <Spin /> : <Empty description="添加题目后预览题卡" />}
+  </Card>
+}
+
+function newExternal(groupId: string, name: string, mode: ExternalMode): Template {
+  return {
+    id: crypto.randomUUID(), group_id: groupId, name, paper: 'A4', sides: 1,
+    layout_version: 3, candidate_length: 0, revision: 0, status: 'draft', questions: [],
+    statistics_sheet: true, external_sheet: { version: 1, mode, pages: {} },
+  }
+}
+
+function StatisticsExternalDesigner({ groupId, name, savedDraft, published, locked, onPublished }: {
+  groupId: string; name: string; savedDraft?: Template | null; published: Template | null; locked: boolean
+  onPublished: (template: Template) => Promise<void>
+}) {
+  const { message } = App.useApp()
+  const [, repaint] = useState(0)
+  const [busy, setBusy] = useState(false)
+  const [saver] = useState(() => new DraftSaver(
+    savedDraft || (published?.external_sheet ? published : newExternal(groupId, name, 'blank')),
+    ({ value, request_id, base_version }) =>
+      send<Template>(`/groups/${groupId}/drafts/${value.id}`, { value, request_id, base_version }, 'PUT'),
+    () => repaint(n => n + 1),
+  ))
+  const value = locked && published?.external_sheet ? published : saver.value
+  const readOnly = locked || value.status === 'published'
+  useUnsavedChanges(!readOnly && saver.dirty)
+  async function flush() {
+    if (!saver.value.draft_version && !saver.dirty) saver.edit(saver.value)
+    return saver.flush()
+  }
+  async function save(publish: boolean) {
+    setBusy(true)
+    try {
+      const draft = await flush()
+      if (publish) {
+        const result = await send<Template>(`/templates/${draft.id}/publish`, { replace_id: published?.id ?? null })
+        saver.load(result)
+        await onPublished(result)
+        announceChanges(['groups', 'templates', 'projects'])
+      }
+      message.success(publish ? '兼容题卡已发布' : '兼容草稿已保存')
+    } catch (error) { message.error((error as Error).message) }
+    finally { setBusy(false) }
+  }
+  function downloadCard() {
+    void download(`/templates/${value.id}/pdf`, `${value.name}.pdf`).catch(error => message.error(error.message))
+  }
+  return <Space direction="vertical" size={12} style={{ width: '100%' }}>
+    <Card size="small"><Space wrap>
+      {readOnly ? <Tag color="green">第 {value.revision} 版</Tag> : <>
+        <Select aria-label="原稿类型" value={value.external_sheet?.mode}
+          disabled={busy || saver.saving || !!value.questions.length || !!Object.keys(value.background_assets || {}).length ||
+            !!Object.keys(value.external_sheet?.pages || {}).length}
+          options={[{ label: '空白原稿', value: 'blank' }, { label: '已填样张', value: 'completed' }]}
+          onChange={mode => saver.edit({ ...value, external_sheet: { ...value.external_sheet!, mode } })} />
+        <Button disabled={busy} onClick={() => save(false)}>保存草稿</Button>
+        <Popconfirm title="发布兼容题卡？" description="逐面试扫后发布，用于后续匿名扫描。" onConfirm={() => save(true)}>
+          <Button type="primary" disabled={busy || !value.questions.length}>发布题卡</Button>
+        </Popconfirm>
+      </>}
+      {readOnly && value.external_sheet?.mode === 'blank' && <Button icon={<DownloadOutlined />} onClick={downloadCard}>下载空白题卡</Button>}
+      {readOnly && !locked && <Button onClick={() => saver.load(newExternal(groupId, name, 'blank'))}>新建兼容草稿</Button>}
+    </Space></Card>
+    <CompatibleTemplateEditor key={value.id} value={value} disabled={busy} readOnly={readOnly} flush={flush}
+      change={patch => saver.edit({ ...saver.value, ...patch })} settings={() => {}} />
+  </Space>
 }
 
 function StatisticsResults({ endpoint, name, closed, canChange, onCollectionChange }: {

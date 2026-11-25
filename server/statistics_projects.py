@@ -1,16 +1,17 @@
 """Configuration and aggregation for anonymous statistics projects."""
+import base64
 from string import ascii_uppercase
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 
-from . import statistics_sheet
+from . import paper, statistics_sheet
 from .db import connect, find, get, put
 from .dependencies import admin, require
 from .export_tables import ExportTable, FileFormat, table_response
 from .lifecycle import writable
-from .templates import require_replaceable
+from .templates import render_preview, require_replaceable
 
 router = APIRouter(prefix='/api/v1/projects')
 
@@ -55,6 +56,7 @@ def get_statistics(identifier: str, current=Depends(admin)):
         project, group, template = context(db, identifier)
         locked = bool(db.execute('SELECT 1 FROM scanned_groups WHERE group_id=?', (group['id'],)).fetchone())
         return {'group_id': group['id'], 'template': template, 'draft': None if locked else group.get('statistics_draft'),
+                'external_draft': None if locked else get(db, group.get('statistics_external_draft_id'), 'templates'),
                 'draft_version': group.get('statistics_draft_version', 0), 'locked': locked,
                 'closed': bool(group.get('frozen')), 'scans_purged': bool(project.get('scans_purged'))}
 
@@ -126,7 +128,7 @@ def aggregate(template, responses):
     questions = (template or {}).get('questions', [])
     total = len(responses)
     rows = []
-    for q in questions:
+    for q in sorted(questions, key=lambda q: q['number']):
         counts = dict.fromkeys(ascii_uppercase[:q['options']], 0)
         blank = invalid = 0
         for response in responses:
@@ -138,7 +140,7 @@ def aggregate(template, responses):
             else:
                 for letter in selected:
                     counts[letter] += 1
-        rows.append({'number': q['number'], 'title': q['title'], 'type': q['type'], 'counts': counts,
+        rows.append({'number': q['number'], 'title': q.get('title', ''), 'type': q['type'], 'counts': counts,
                      'blank': blank, 'invalid': invalid})
     return {'total': total, 'rows': rows}
 
@@ -166,8 +168,35 @@ def statistics_preview(identifier: str, current=Depends(admin)):
                     'sides': questions[-1]['regions'][0]['page'], 'status': 'draft'}
     if not template:
         raise HTTPException(404, '请先保存题卡草稿')
-    return Response(statistics_sheet.pdf(template), media_type='application/pdf',
+    try:
+        content = paper.pdf(template) if template.get('external_sheet') else statistics_sheet.pdf(template)
+    except ValueError as error:
+        raise HTTPException(422,str(error)) from error
+    return Response(content, media_type='application/pdf',
                     headers={'Content-Disposition':'attachment; filename=statistics-card.pdf','Cache-Control':'private, no-store'})
+
+
+@router.post('/{identifier}/statistics/paper-preview')
+def statistics_paper_preview(identifier: str, body: dict, page: int = 1, current=Depends(admin)):
+    with connect() as db:
+        project, group, published = context(db, identifier)
+    if body.get('published') is True:
+        if not published:
+            raise HTTPException(404, '请先发布题卡')
+        template = published
+    else:
+        try:
+            questions, sides = design(body.get('questions'))
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from error
+        # Keep geometry-based preview cache keys stable across equivalent requests.
+        questions = [{k: value for k, value in q.items() if k != 'id'} for q in questions]
+        template = {'id': group['id'], 'revision': 0, 'name': project['name'], 'questions': questions,
+                    'paper': 'A4', 'sides': sides, 'status': 'draft', 'statistics_sheet': True}
+    page = max(1, min(page, template['sides']))
+    image = render_preview(template, page)
+    src = f'data:{image.media_type};base64,' + base64.b64encode(image.body).decode('ascii')
+    return {'image': src, 'page': page, 'sides': template['sides']}
 
 
 @router.get('/{identifier}/statistics/export')

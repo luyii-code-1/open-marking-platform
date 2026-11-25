@@ -411,6 +411,8 @@ def publish(identifier:str,body:dict|None=None,current=Depends(admin)):
             put(db,'templates',template,current['id'])
             group=require(db,template['group_id'],'groups')
             group['template_id']=identifier
+            if group.get('statistics_group'):
+                group.update(statistics_external_draft_id=None,statistics_draft=None)
             put(db,'groups',group,current['id'])
         return template
 

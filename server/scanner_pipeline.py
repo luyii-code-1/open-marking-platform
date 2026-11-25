@@ -74,6 +74,9 @@ def project_package(identifier: str, capability: str = '', current=Depends(scan_
             if compatible_omr.profile(template) and compatible_omr.CAPABILITY not in capabilities: continue
             if statistics_sheet.enabled(template):
                 if statistics_sheet.CAPABILITY not in capabilities: continue
+                if compatible_omr.profile(template) and statistics_sheet.EXTERNAL_CAPABILITY not in capabilities:
+                    project['required_scanner_capability'] = statistics_sheet.EXTERNAL_CAPABILITY
+                    continue
                 confirmed = find(db, 'statistics-responses', group_id=group['id'])
                 packaged.append({'id': group['id'], 'name': group['name'], 'subject_id': group['subject_id'],
                                  'frozen': bool(group.get('frozen')), 'roster_mode': 'open', 'roster': [],
@@ -99,7 +102,7 @@ def project_package(identifier: str, capability: str = '', current=Depends(scan_
         rooms=[{**view(db,[t])[0],**progress(db,t)} for t in find(db,'room-tags',project_id=identifier)]
         return {'protocol': 'omp-scanner-4', 'engine_version': ENGINE_VERSION,
                 'room_tags':rooms,
-                'project': {k: project[k] for k in ('id', 'name', 'status', 'category', *STATUS_FIELDS) if k in project},
+                'project': {k: project[k] for k in ('id', 'name', 'status', 'category', 'required_scanner_capability', *STATUS_FIELDS) if k in project},
                 'subjects': [{k: s[k] for k in ('id', 'name', 'default_group_id') if k in s} for s in subjects], 'groups': packaged}
 
 

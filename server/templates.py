@@ -39,7 +39,15 @@ def save_draft(group_id:str,identifier:str,body:dict,current=Depends(admin)):
     signature=hashlib.sha256(json.dumps(body,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
     with connect() as db:
         db.execute('BEGIN IMMEDIATE');group=require(db,group_id,'groups')
-        if group.get('statistics_group'):raise HTTPException(422,'请在统计项目中设计题卡')
+        statistics = bool(group.get('statistics_group'))
+        if statistics:
+            if definition.get('statistics_sheet') is not True or not isinstance(definition.get('external_sheet'), dict):
+                raise HTTPException(422,'请选择从外部兼容导入')
+            from .lifecycle import writable
+            writable(db,'groups',group)
+            require_replaceable(db,group_id)
+            if group.get('statistics_external_draft_id') not in (None, identifier):
+                raise HTTPException(409,'已有兼容草稿，请重新载入后继续')
         old=get(db,identifier,'templates')
         if old and old.get('group_id')!=group_id:raise HTTPException(409,'草稿属于另一题卡')
         if group.get('frozen') or old and old.get('status') in ('published','superseded'):raise HTTPException(409,'题卡已发布，不能保存草稿')
@@ -56,7 +64,12 @@ def save_draft(group_id:str,identifier:str,body:dict,current=Depends(admin)):
         value.setdefault('notice_template','standard-v1')
         from .sheet_style import defaults
         defaults(value);prepare_questions(value)
-        return put(db,'templates',value,current['id'])
+        if statistics:
+            value['statistics_sheet'] = True
+        draft = put(db,'templates',value,current['id'])
+        if statistics and not group.get('statistics_external_draft_id'):
+            put(db,'groups',{**group,'statistics_external_draft_id':identifier},current['id'])
+        return draft
 
 
 def require_replaceable(db,group_id):
@@ -80,6 +93,8 @@ def delete_template(identifier:str,draft_version:int|None=None,expected_status:s
         if group.get('template_id')==identifier:
             require_replaceable(db,group['id'])
             put(db,'groups',{**group,'template_id':None},current['id'])
+        if group.get('statistics_external_draft_id')==identifier:
+            put(db,'groups',{**group,'statistics_external_draft_id':None},current['id'])
         assignments=find(db,'assignments',template_id=identifier)
         for object_id in [a['id'] for a in assignments]+[identifier]:
             db.execute("INSERT INTO audit(id,actor,action,object_id,body) SELECT ?,?,'delete',id,body FROM objects WHERE id=?",(str(uuid4()),current['id'],object_id))
@@ -201,7 +216,12 @@ def preview_template(body:dict,page:int=1,current=Depends(user)):
     if not 1<=page<=body['sides']:raise HTTPException(422,'预览页码超出题卡范围')
     check_assets(body)
     template={**body,'id':body.get('id') or str(uuid4()),'revision':body.get('revision',0),'layout_version':body.get('layout_version',3)}
+    return render_preview(template,page)
+
+
+def render_preview(template, page):
     cache_payload={k:template.get(k) for k in DEFINITION_FIELDS}
+    cache_payload.update({k:template.get(k) for k in ('id','revision','status','statistics_sheet')})
     cache_key=(hashlib.sha256(json.dumps(cache_payload,sort_keys=True,ensure_ascii=False).encode()).hexdigest(),page)
     with _preview_cache_lock:
         cached=_preview_cache.get(cache_key)
