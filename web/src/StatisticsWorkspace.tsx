@@ -36,7 +36,7 @@ export function StatisticsWorkspace({ project, back }: { project: Row; back: () 
 
 function StatisticsCard({ endpoint, name, initial, refresh }: { endpoint: string; name: string; initial: CardState; refresh: () => Promise<unknown> }) {
   const [card, setCard] = useState(initial)
-  const makeRows = (state: CardState) => (state.draft ?? state.template?.questions ?? [defaultQuestion])
+  const makeRows = (state: CardState): (Question & { key: string })[] => (state.draft ?? state.template?.questions ?? [defaultQuestion])
     .map(question => ({ ...question, key: crypto.randomUUID() }))
   const [questions, setQuestions] = useState(() => makeRows(initial))
   const [dirty, setDirty] = useState(false), [busy, setBusy] = useState(false)
