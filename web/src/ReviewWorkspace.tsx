@@ -3,7 +3,8 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import { createPortal } from 'react-dom'
 import { Alert, App, Button, Modal, Popconfirm, Space } from 'antd'
 import { Table } from './DataTable'
-import { currentToken, type User } from './api'
+import { currentToken, setSessionNotice, type User } from './api'
+import { sessionEndedMessage } from './sharedSession'
 import { forgetReview, hasUnsentReview, isReviewUpdateLocked, listReviews, retryFailedReview, watchReviewChanges, type ReviewRecord } from './reviewStore'
 import {useUnsavedChanges} from './useNavigation'
 import { reviewTransport, syncReviewRecords, type SyncReport } from './reviewSync'
@@ -53,7 +54,7 @@ export function ReviewWorkspace({user,offline,onVerified,onLoginRequired,childre
     const work=(async():Promise<SyncReport>=>{
       let result:SyncReport
       try{
-        const upload=()=>alive()?syncReviewRecords(owner,reviewTransport(token,alive)):Promise.resolve({state:'login',sent:0} as SyncReport)
+        const upload=()=>alive()?syncReviewRecords(owner,reviewTransport(token,alive,(reason,detail)=>setSessionNotice(sessionEndedMessage(reason,detail)))):Promise.resolve({state:'login',sent:0} as SyncReport)
         result=navigator.locks?await navigator.locks.request('omp-score-upload:'+owner,upload):await upload()
       }catch(e){
         if(alive())setStorageError('无法读写本地评分：'+(e as Error).message)

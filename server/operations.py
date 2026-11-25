@@ -186,7 +186,8 @@ def batch_force_logout(body:dict,current=Depends(admin)):
                 raise HTTPException(404,'账号不存在')
             if current['role']=='manager' and person['role']!='teacher':
                 raise HTTPException(403,'管理教师只能操作普通教师账号')
-            db.execute('DELETE FROM sessions WHERE user_id=?',(uid,))
+            from .browser_sessions import revoke_user_sessions
+            revoke_user_sessions(db,uid,'force_logout')
             put(db,'account-events',{'user_id':uid,'action':'force_logout','batch':True},current['id'])
             updated+=1
     return {'updated':updated}
@@ -214,8 +215,10 @@ def batch_user_role(body:dict,current=Depends(system_admin)):
             total_admins=db.execute("SELECT COUNT(*) FROM users WHERE role='admin'").fetchone()[0]
             if demoting_admins and total_admins-demoting_admins<1:
                 raise HTTPException(409,'至少保留一名管理员')
+        from .browser_sessions import enforce_single_session_role
         for r in rows:
             db.execute('UPDATE users SET role=? WHERE id=?',(role,r['id']))
+            enforce_single_session_role(db,r['id'],role)
             put(db,'account-events',{'user_id':r['id'],'action':'profile_update','name':r['name'],'role':role,'batch':True},current['id'])
     return {'updated':len(rows),'role':role}
 
@@ -248,6 +251,8 @@ def edit_user(identifier:str,body:dict,current=Depends(admin)):
         if current['role']=='manager' and (row['role']!='teacher' or value['role']!='teacher'):raise HTTPException(403,'管理教师只能维护普通教师账号')
         if row['role']=='admin' and value['role']!='admin' and db.execute("SELECT COUNT(*) FROM users WHERE role='admin'").fetchone()[0]<=1: raise HTTPException(409,'至少保留一名管理员')
         db.execute('UPDATE users SET name=?,role=? WHERE id=?',(value['name'],value['role'],identifier))
+        from .browser_sessions import enforce_single_session_role
+        enforce_single_session_role(db,identifier,value['role'])
         put(db,'account-events',{'user_id':identifier,'action':'profile_update','name':value['name'],'role':value['role']},current['id'])
         return value
 

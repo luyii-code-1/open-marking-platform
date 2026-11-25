@@ -24,6 +24,21 @@ def own_devices(current=Depends(admin)):
     with connect() as db:return [public(v) for v in find(db,'scanner-devices',owner_id=current['id'])]
 
 
+@router.post('/devices/{identifier}/revoke')
+def revoke_device(identifier:str,body:dict|None=None,current=Depends(admin)):
+    reason=str((body or {}).get('reason','')).strip() or '操作员在扫描台取消授权'
+    if len(reason)>200:raise HTTPException(422,'取消授权原因最多200字')
+    with connect() as db:
+        db.execute('BEGIN IMMEDIATE')
+        device=require(db,identifier,'scanner-devices')
+        if current['role']!='admin' and device.get('owner_id')!=current['id']:
+            raise HTTPException(403,'仅可取消本人授权的扫描设备')
+        device.update(revoked=True,status_reason=reason)
+        for session in find(db,'scanner-sessions',device_id=identifier):
+            if not session.get('revoked'):session['revoked']=True;put(db,'scanner-sessions',session,current['id'])
+        return public(put(db,'scanner-devices',device,current['id']))
+
+
 def distribution(variant='webview2'):
     if variant not in ('webview2','electron'):raise HTTPException(422,'扫描端版本无效')
     root=Path(os.getenv('OMP_SCANNER_DISTRIBUTION',database.ROOT/'scanner-distribution')).resolve()

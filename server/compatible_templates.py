@@ -125,19 +125,28 @@ def suggest_anchors(page):
 
 
 def suggest_regions(page):
-    mask = np.uint8(page < 155)
+    adaptive = cv2.adaptiveThreshold(page, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 21, 10)
+    mask = np.uint8((page < 165) | (adaptive > 0))
     contours, _ = cv2.findContours(mask, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+    # Light horizontal closing helps merge open-bracket OMR cells such as [A].
+    closed_cells = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((1, 5), np.uint8))
+    bracket_contours, _ = cv2.findContours(closed_cells, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     small, frames = [], []
     height, width = page.shape
     for contour in sorted(contours, key=cv2.contourArea, reverse=True)[:3500]:
         x, y, w, h = cv2.boundingRect(contour)
         if w >= width * .15 and h >= 44 and w < width * .95 and h < height * .83:
             points = cv2.approxPolyDP(contour, .013 * cv2.arcLength(contour, True), True)
-            if len(points) == 4 and cv2.contourArea(contour) >= .86 * w * h:
+            if len(points) == 4 and cv2.contourArea(contour) >= .84 * w * h:
                 if not any(abs(x - a) < 8 and abs(y - b) < 8 and abs(w - c) < 14 and abs(h - d) < 14 for a, b, c, d in frames):
                     frames.append((x, y, w, h))
-        elif 9 <= w <= 42 and 6 <= h <= 26 and w / h <= 3 and cv2.contourArea(contour) > .51 * w * h:
+        elif 9 <= w <= 44 and 6 <= h <= 28 and w / h <= 3.2 and cv2.contourArea(contour) > .48 * w * h:
             if not any(abs(x + w / 2 - a - c / 2) < 3 and abs(y + h / 2 - b - d / 2) < 3 for a, b, c, d in small):
+                small.append((x, y, w, h))
+    for contour in bracket_contours:
+        x, y, w, h = cv2.boundingRect(contour)
+        if 10 <= w <= 42 and 6 <= h <= 24 and 0.8 <= w / h <= 3.2 and cv2.contourArea(contour) > .30 * w * h:
+            if not any(abs(x + w / 2 - a - c / 2) < 4 and abs(y + h / 2 - b - d / 2) < 4 for a, b, c, d in small):
                 small.append((x, y, w, h))
     rows = []
     for cell in sorted(small, key=lambda c: c[1] + c[3] / 2):
@@ -187,7 +196,8 @@ def draft_in_group(db, group_id, current):
 
 @router.post('/groups/{group_id}/compatible/reference')
 def reference(group_id: str, files: list[UploadFile] = File(), paper: str = Form(),
-              rotation: int = Form(0), corners: str = Form(''), combine: bool = Form(False), current=Depends(admin)):
+              rotation: int = Form(0), corners: str = Form(''), combine: bool = Form(False),
+              already_corrected: bool = Form(False), current=Depends(admin)):
     with connect() as db:
         draft_in_group(db, group_id, current)
     if not 1 <= len(files) <= (5 if combine else 2) or not 0 <= rotation <= 3:
@@ -197,18 +207,20 @@ def reference(group_id: str, files: list[UploadFile] = File(), paper: str = Form
     try:
         width, height = prep_dimensions(paper)
         images = [image for file in files for image in input_pages(read_file(file), width, height)]
-        if len(images) > (5 if combine else 2) or corners and len(images) != 1:
-            raise ValueError('每次最多导入两面，手动校正请逐面上传')
+        if len(images) > (5 if combine else 2) or (corners or already_corrected) and len(images) != 1:
+            raise ValueError('每次最多导入两面，手动校正或引用校正图请逐面处理')
         result, pages = {}, []
         for index, image in enumerate(images):
             # Return the exact preview coordinate space for subsequent manual corner placement.
             factor = min(1, 1800 / max(image.shape))
             image = np.ascontiguousarray(np.rot90(image, rotation))
-            if not corners and (image.shape[1] > image.shape[0]) != (width > height):
+            if not corners and not already_corrected and (image.shape[1] > image.shape[0]) != (width > height):
                 image = np.ascontiguousarray(np.rot90(image))
             if factor < 1:
                 image = cv2.resize(image, None, fx=factor, fy=factor, interpolation=cv2.INTER_AREA)
-            if corners:
+            if already_corrected:
+                page = image if image.shape == (height, width) else cv2.resize(image, (width, height), interpolation=cv2.INTER_AREA if image.shape[1] > width else cv2.INTER_CUBIC)
+            elif corners:
                 page = omr.warp(image, json.loads(corners), width, height)
             else:
                 try:
@@ -223,8 +235,8 @@ def reference(group_id: str, files: list[UploadFile] = File(), paper: str = Form
             aligned = [pages[0][1]]
             for _, page, _ in pages[1:]:
                 match = omr.registration(omr.grayscale(page), anchors)
-                if match and match[0] >= .56:
-                    aligned.append(cv2.warpAffine(page, match[1], (width, height), borderValue=255))
+                if match and match[0] >= .54:
+                    aligned.append(omr.warp_match(page, match[1], width, height))
             pages = [(pages[0][0], np.quantile(aligned, .70, axis=0).astype(np.uint8), pages[0][2])]
         if combine:
             if not pages:
@@ -243,17 +255,42 @@ def reference(group_id: str, files: list[UploadFile] = File(), paper: str = Form
         _slots.release()
 
 
+def _decode_page_for_anchor(content, width, height):
+    image = cv2.imdecode(np.frombuffer(content, np.uint8), cv2.IMREAD_GRAYSCALE)
+    if image is None:
+        raise ValueError('请先校正并载入当前纸面的样张')
+    if image.shape != (height, width):
+        ratio = (image.shape[1] / image.shape[0]) / (width / height)
+        if not .96 <= ratio <= 1.04:
+            raise ValueError('请先校正并载入当前纸面的样张')
+        image = cv2.resize(image, (width, height), interpolation=cv2.INTER_AREA if image.shape[1] > width else cv2.INTER_CUBIC)
+    return omr.grayscale(image)
+
+
 @router.post('/groups/{group_id}/compatible/anchor')
 def anchor(group_id: str, file: UploadFile = File(), box: str = Form(), paper: str = Form(), current=Depends(admin)):
     with connect() as db:
         draft_in_group(db, group_id, current)
     try:
         width, height = prep_dimensions(paper)
-        image = cv2.imdecode(np.frombuffer(read_file(file), np.uint8), cv2.IMREAD_GRAYSCALE)
-        if image is None or image.shape != (height, width):
-            raise ValueError('请先校正并载入当前纸面的样张')
-        return omr.make_anchor(omr.grayscale(image), json.loads(box))
+        normalized = _decode_page_for_anchor(read_file(file), width, height)
+        return omr.make_anchor(normalized, json.loads(box))
     except (ValueError, cv2.error) as error:
+        raise HTTPException(422, str(error)) from error
+
+
+@router.post('/groups/{group_id}/compatible/reextract-anchors')
+def reextract_anchors(group_id: str, file: UploadFile = File(), boxes: str = Form(), paper: str = Form(), current=Depends(admin)):
+    with connect() as db:
+        draft_in_group(db, group_id, current)
+    try:
+        width, height = prep_dimensions(paper)
+        normalized = _decode_page_for_anchor(read_file(file), width, height)
+        raw_boxes = json.loads(boxes)
+        if not isinstance(raw_boxes, list) or not 1 <= len(raw_boxes) <= 8:
+            raise ValueError('定位参照数量应为 1 至 8 个')
+        return {'anchors': [omr.make_anchor(normalized, {k: item[k] for k in ('x', 'y', 'width', 'height')}) for item in raw_boxes]}
+    except (ValueError, KeyError, TypeError, cv2.error) as error:
         raise HTTPException(422, str(error)) from error
 
 

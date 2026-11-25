@@ -122,7 +122,7 @@ assert.equal(await reads.read('a','/dashboard',async()=>5),5,'Completed results 
 
 function browser(local){
   const win=new EventTarget(),module={exports:{}};let handler=async()=>new Response('{}')
-  const dependencies={react:{},'./sharedSession':shared.exports,'./resourceReads':readsModule.exports,'./updatePolicy':{beginMutation:()=>()=>{},watchMutations:()=>{},hasPendingMutations:()=>false}}
+  const dependencies={react:{},'./sharedSession':shared.exports,'./resourceReads':readsModule.exports,'./networkPolicy':{resilientFetch:(...args)=>handler(...args)},'./updatePolicy':{beginMutation:()=>()=>{},watchMutations:()=>{},hasPendingMutations:()=>false}}
   vm.runInNewContext(apiSource,{exports:module.exports,module,require:name=>dependencies[name],
     localStorage:local,sessionStorage:storage(),window:win,EventTarget,Event,CustomEvent,Headers,FormData,fetch:(...args)=>handler(...args),setTimeout,clearTimeout})
   return {api:module.exports,setFetch:fn=>handler=fn,refresh(){const event=new Event('storage');Object.defineProperty(event,'key',{value:sessionKey});win.dispatchEvent(event)}}
@@ -139,4 +139,11 @@ await first.api.request('/auth/login',{method:'POST',body:'{}'}).catch(()=>{})
 assert.equal(first.api.currentToken(),'two','An invalid login attempt does not invalidate an existing session')
 await first.api.request('/dashboard').catch(()=>{});second.refresh()
 assert.equal(first.api.currentToken(),'');assert.equal(second.api.currentToken(),'')
-console.log('Shared browser login passed: persistence, cross-tab login/logout, renewal ordering, trusted input, idle behavior and stale-request isolation')
+first.api.setToken('kicked-token',lease)
+first.setFetch(async()=>new Response('{"detail":"replaced"}',{status:401,headers:{'X-OMP-Session-Ended':'replaced'}}))
+await first.api.request('/dashboard').catch(()=>{})
+assert.equal(first.api.currentToken(),'')
+assert.ok(first.api.currentSessionNotice().includes('其他设备登录'),'Replaced session stores kicked-offline notice')
+first.api.setToken('fresh-token',lease)
+assert.equal(first.api.currentSessionNotice(),'','Fresh login clears previous session notice')
+console.log('Shared browser login passed: persistence, cross-tab login/logout, renewal ordering, trusted input, idle behavior, kicked notice and stale-request isolation')

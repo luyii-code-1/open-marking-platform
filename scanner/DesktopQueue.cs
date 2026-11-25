@@ -59,15 +59,32 @@ public sealed partial class LocalQueue
     private static void LoadDesktopFields(SqliteConnection db,BatchRow batch)
     {
         using var command=db.CreateCommand();
-        command.CommandText="SELECT project_id,subject_id,config_sha256,template_json,roster_json,local_pairs_json,room_tags_json FROM batches WHERE id=$id";
+        command.CommandText="SELECT project_id,subject_id,config_sha256,template_json,roster_json,local_pairs_json,room_tags_json,local_group_id,expected_count FROM batches WHERE id=$id";
         command.Parameters.AddWithValue("$id",batch.Id);using var row=command.ExecuteReader();row.Read();
         batch.ProjectId=row.GetString(0);batch.SubjectId=row.GetString(1);batch.ConfigSha256=row.GetString(2);
         batch.TemplateJson=row.GetString(3);batch.RosterJson=row.GetString(4);batch.LocalPairsJson=row.GetString(5);batch.RoomTagsJson=row.GetString(6);
+        batch.LocalGroupId=row.GetString(7);batch.ExpectedCount=row.GetInt32(8);
     }
 
     public void SaveDesktopBatch(BatchRow batch)=>Execute("""
-        UPDATE batches SET project_id=$project,subject_id=$subject,config_sha256=$hash,template_json=$template,roster_json=$roster,local_pairs_json=$pairs,room_tags_json=$tags WHERE id=$id
-        """,("$id",batch.Id),("$project",batch.ProjectId),("$subject",batch.SubjectId),("$hash",batch.ConfigSha256),("$template",batch.TemplateJson),("$roster",batch.RosterJson),("$pairs",batch.LocalPairsJson),("$tags",batch.RoomTagsJson));
+        UPDATE batches SET project_id=$project,subject_id=$subject,config_sha256=$hash,template_json=$template,roster_json=$roster,local_pairs_json=$pairs,room_tags_json=$tags,local_group_id=$local_group,expected_count=$expected WHERE id=$id
+        """,("$id",batch.Id),("$project",batch.ProjectId),("$subject",batch.SubjectId),("$hash",batch.ConfigSha256),("$template",batch.TemplateJson),("$roster",batch.RosterJson),("$pairs",batch.LocalPairsJson),("$tags",batch.RoomTagsJson),("$local_group",batch.LocalGroupId),("$expected",batch.ExpectedCount));
+
+    public void UpdateLocalGroupMetadata(BatchRow[] sheets,string label,int expectedCount)
+    {
+        using var db=Open();using var tx=db.BeginTransaction();using var cmd=db.CreateCommand();
+        cmd.Transaction=tx;
+        foreach(var batch in sheets)
+        {
+            cmd.CommandText="UPDATE batches SET label=$label,expected_count=$expected WHERE id=$id";
+            cmd.Parameters.Clear();
+            cmd.Parameters.AddWithValue("$label",label);
+            cmd.Parameters.AddWithValue("$expected",expectedCount);
+            cmd.Parameters.AddWithValue("$id",batch.Id);
+            cmd.ExecuteNonQuery();
+        }
+        tx.Commit();
+    }
 
     public void PageRecognized(string captureId,string result,string? issue=null)=>Execute("""
         UPDATE pages SET recognition_json=$result,status=$status,error=$error

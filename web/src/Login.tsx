@@ -7,7 +7,7 @@ import { THEME_MODE_LABELS, useThemeMode } from './themeMode'
 
 export type Portal = 'marking' | 'admin'
 type Mode = 'password' | 'passkey' | 'forgot' | 'bootstrap'
-type Props = { portal?: Portal; onPortal: (portal?: Portal) => void; onLogin: (user: User, portal: Portal) => void }
+type Props = { portal?: Portal; sessionNotice?: string; onDismissSessionNotice?: () => void; onPortal: (portal?: Portal) => void; onLogin: (user: User, portal: Portal) => void }
 type FieldProps = InputHTMLAttributes<HTMLInputElement> & { label: string; name: string }
 
 function Field({ label, name, type = 'text', ...props }: FieldProps) {
@@ -24,7 +24,7 @@ function Field({ label, name, type = 'text', ...props }: FieldProps) {
   </div>
 }
 
-export function Login({ portal, onPortal, onLogin }: Props) {
+export function Login({ portal, sessionNotice, onDismissSessionNotice, onPortal, onLogin }: Props) {
   const [role, setRole] = useState<Portal>(() => portal || (sessionStorage.getItem('omp-login-role') === 'admin' ? 'admin' : 'marking'))
   const [mode, setMode] = useState<Mode>('password'), [loading, setLoading] = useState(false)
   const [error, setError] = useState(''), [notice, setNotice] = useState('')
@@ -112,6 +112,10 @@ export function Login({ portal, onPortal, onLogin }: Props) {
         </button>
       </div>
     )}
+    {sessionNotice && <div className="login-error" role="alert" style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:8}}>
+      <span><strong>下线提示：</strong>{sessionNotice}</span>
+      {onDismissSessionNotice && <button type="button" onClick={onDismissSessionNotice} aria-label="关闭下线提示" style={{border:'none',background:'transparent',color:'inherit',cursor:'pointer',padding:'0 4px',fontSize:16,lineHeight:1}}>×</button>}
+    </div>}
     {error && <div className="login-error" role="alert">{error}</div>}
     {notice && <div className="login-notice" role="status">{notice}</div>}
     {recovery && <p>使用已保存的恢复码设置新密码。恢复码仅可使用一次，重置后原登录会话失效。</p>}

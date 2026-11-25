@@ -2,7 +2,7 @@ type Row=Record<string,any> & {id:string}
 type Call=(method:string,args:Record<string,unknown>)=>Promise<any>
 export type ScanRun={anchorId:string;previousIds:string[]}
 export type Paper={id:string;number:number;duplex:boolean;front?:Row;back?:Row}
-const roomKey=(row:Row)=>(row.room_tags||[]).map((t:Row)=>t.id).sort().join(',')
+const scopeKey=(row:Row)=>row.local_group_id ? 'group:'+row.local_group_id : 'room:'+(row.room_tags||[]).map((t:Row)=>t.id).sort().join(',')
 const size=50
 
 export async function scannerRoomState(call:Call,batchId:string,page:number,run?:ScanRun){
@@ -10,7 +10,7 @@ export async function scannerRoomState(call:Call,batchId:string,page:number,run?
   const state=await call('state',{...room,offset:0})
   const selected=state.batches?.find((b:Row)=>b.id===batchId)
   if(!selected)return {...state,papers:[],paper_total:0}
-  const batches:Row[]=state.batches.filter((b:Row)=>b.group_id===selected.group_id&&roomKey(b)===roomKey(selected)&&
+  const batches:Row[]=state.batches.filter((b:Row)=>b.group_id===selected.group_id&&scopeKey(b)===scopeKey(selected)&&
     (!run||b.id===run.anchorId||!run.previousIds.includes(b.id)))
     .sort((a:Row,b:Row)=>a.created_at.localeCompare(b.created_at))
   const chunks=new Map<string,Row[]>([[state.room_pages?'room:0':batchId+':0',state.pages]])

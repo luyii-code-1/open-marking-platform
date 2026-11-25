@@ -423,8 +423,8 @@ function GroupOverview({ group, projectId, onSection }: { group: Row; projectId:
       key: 'scans',
       label: '扫描与补扫',
       detail: workflow.data.group_id
-        ? `已入库实考 ${workflow.data.scanned} 人 · ${workflow.data.open_batches} 个批次待完成`
-        : '按批次查看扫描计数、页面与配对情况',
+        ? `已入库实考 ${workflow.data.scanned} 人 · ${workflow.data.open_batches} 条记录待完成`
+        : '查看扫描记录、页面与配对情况',
     },
     {
       key: 'marking',
@@ -488,7 +488,7 @@ function GroupOverview({ group, projectId, onSection }: { group: Row; projectId:
                 <span>缺考 {w.scan.absent}</span>
               </Space>
               <Button type="link" onClick={() => onSection('scans')}>
-                查看扫描批次
+                查看扫描记录
               </Button>
             </section>
             <section>
@@ -623,7 +623,7 @@ export function GroupWorkspace({
                 <GroupOverview group={group} projectId={project.id} onSection={onSection} />
               ) : (key === 'scans' || key === 'marking') && !group.template_id ? (
                 <Card>
-                  <Empty description={key === 'scans' ? '发布题卡后即可建立扫描批次' : '发布题卡后即可分配教师与阅卷'}>
+                  <Empty description={key === 'scans' ? '发布题卡后即可开始扫描与导入' : '发布题卡后即可分配教师与阅卷'}>
                     <Button type="primary" onClick={() => onSection('template')}>
                       设计题卡
                     </Button>

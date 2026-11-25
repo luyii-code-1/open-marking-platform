@@ -2,6 +2,14 @@ export type SessionLease={expires_at:number;server_time:number;user?:{id:string}
 export type StoredSession={token:string;expires_at?:number;deadline?:number;user_id?:string}
 type StorageLike=Pick<Storage,'getItem'|'setItem'|'removeItem'>
 export const sessionKey='omp-session'
+export const sessionNoticeKey='omp-session-notice'
+
+export function sessionEndedMessage(reason:string|null|undefined,detail?:string){
+  if(detail)return detail
+  if(reason==='replaced')return '您的账号已在其他设备登录，当前登录已下线，请重新登录'
+  if(reason==='force_logout')return '您的账号已被管理员强制下线，请重新登录'
+  return ''
+}
 
 export class SharedSession {
   private value:StoredSession|null=null

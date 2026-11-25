@@ -129,7 +129,7 @@ def scan_user(authorization):
     with connect() as db:
         try:return authenticate_session(db,authorization)
         except HTTPException as error:
-            if error.status_code!=401:raise
+            if error.status_code!=401 or (error.headers and 'X-OMP-Session-Ended' in error.headers):raise
         sessions=find(db,'scanner-sessions',token_hash=digest)
         if not sessions or sessions[0]['expires_at']<time.time():raise HTTPException(401,'设备连接已过期，请重新连接')
         device=active(db,sessions[0]['device_id'])

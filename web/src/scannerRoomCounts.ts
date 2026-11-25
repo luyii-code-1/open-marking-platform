@@ -1,8 +1,14 @@
-type LocalScan = { group_id:string; room_tags?:{id:string}[]; status:string; scanned_sheets?:number; paired_sheets?:number }
+type LocalScan = { group_id:string; local_group_id?:string; room_tags?:{id:string}[]; status:string; scanned_sheets?:number; paired_sheets?:number }
 
-export function scannerRoomCounts(scans:LocalScan[],groupId:string,roomId?:string){
-  const local=scans.filter(scan=>scan.group_id===groupId&&
-    (roomId?scan.room_tags?.some(tag=>tag.id===roomId):!scan.room_tags?.length))
+export function scannerScopeKey(scan:Record<string,any>){
+  return scan.local_group_id ? 'group:'+scan.local_group_id : 'room:'+(scan.room_tags||[]).map((tag:{id:string})=>tag.id).sort().join(',')
+}
+
+export function scannerRoomCounts(scans:LocalScan[],groupId:string,roomId?:string,localGroupId?:string){
+  const local=scans.filter(scan=>scan.group_id===groupId&&(
+    localGroupId ? scan.local_group_id===localGroupId
+      : !scan.local_group_id && (roomId?scan.room_tags?.some(tag=>tag.id===roomId):!scan.room_tags?.length)
+  ))
   const waiting=local.filter(scan=>scan.status==='local_paired')
   return {
     scanned:local.every(scan=>scan.scanned_sheets!==undefined)?local.reduce((n,scan)=>n+scan.scanned_sheets!,0):null,

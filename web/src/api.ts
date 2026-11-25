@@ -2,7 +2,7 @@ import {resilientFetch} from './networkPolicy'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { beginMutation, hasPendingMutations, watchMutations } from './updatePolicy'
 import { ResourceReads } from './resourceReads'
-import { SharedSession,sessionKey,type SessionLease } from './sharedSession'
+import { SharedSession,sessionEndedMessage,sessionKey,sessionNoticeKey,type SessionLease } from './sharedSession'
 
 export type Row = Record<string, any> & { id: string }
 export type User = { id: string; username: string; name: string; role: string }
@@ -22,8 +22,36 @@ export type QuestionPart = Pick<Question,'number'|'points'|'style'|'lines'|'cell
 export type Question = { id: string; number: number; parts?:QuestionPart[]; type: 'single' | 'multiple' | 'subjective'; options: number; answer: string[]; points: number; step?:number; regions: Region[]; rule: Record<string, unknown>; review_mode: 'single' | 'double'; review_layout?: 'stack' | 'paper'; review_frames?: Region[]; threshold: number; threshold_inclusive?:boolean; choice_group?:string; choice_style?: 'bracket' | 'compact'; style?:string; lines?:number; cell_size?:number; content_html?:string; image_asset_id?:string; image_height?:number; image_box?:ImageBox; external_options?:ImageBox[] }
 export type Template = { id: string; group_id: string; name: string; subtitle?:string; font_size?:number; leading?:number; background_assets?:Record<string,string>; background_boxes?:Record<string,ImageBox>; paper: 'A3' | 'A4'; sheet_columns?:number; layout_version?:number; notice_template?:'standard-v1'|'none'; notice_layout?:number; print_style?:'standard-v2'; column_frame?:boolean; uniform_subjective?:boolean;auto_subjective_layout?:boolean; print_notes?:PrintNote[]; forbidden_regions?:Region[]; sides: number; candidate_length: number; revision: number; draft_version?:number; status?: string; questions: Question[]; external_sheet?:ExternalSheet }
 const session=new SharedSession(localStorage,sessionStorage)
-window.addEventListener('storage',event=>{if(event.key===sessionKey||event.key===null)session.refresh()})
-export function setToken(value:string,lease?:SessionLease){if(value)session.login(value,lease);else session.clear()}
+const noticeListeners=new Set<(message:string)=>void>()
+let sessionNotice=(()=>{try{return localStorage.getItem(sessionNoticeKey)||''}catch{return ''}})()
+function emitSessionNotice(){for(const listener of noticeListeners)listener(sessionNotice)}
+export function setSessionNotice(value:string){
+  const next=value.trim()
+  if(!next)return
+  sessionNotice=next
+  try{localStorage.setItem(sessionNoticeKey,next)}catch{}
+  emitSessionNotice()
+}
+export function clearSessionNotice(){
+  if(!sessionNotice){try{localStorage.removeItem(sessionNoticeKey)}catch{};return}
+  sessionNotice=''
+  try{localStorage.removeItem(sessionNoticeKey)}catch{}
+  emitSessionNotice()
+}
+export const currentSessionNotice=()=>sessionNotice
+export function watchSessionNotice(listener:(message:string)=>void){
+  noticeListeners.add(listener)
+  return()=>{noticeListeners.delete(listener)}
+}
+window.addEventListener('storage',event=>{
+  if(event.key===sessionKey||event.key===null)session.refresh()
+  if(event.key===sessionNoticeKey||event.key===null){
+    let next=''
+    try{next=localStorage.getItem(sessionNoticeKey)||''}catch{}
+    if(next!==sessionNotice){sessionNotice=next;emitSessionNotice()}
+  }
+})
+export function setToken(value:string,lease?:SessionLease){if(value){clearSessionNotice();session.login(value,lease)}else session.clear()}
 export const currentToken=()=>session.token()
 export const currentSession=()=>session.snapshot()
 export const watchSession=(listener:Parameters<SharedSession['subscribe']>[0])=>session.subscribe(listener)
@@ -32,7 +60,12 @@ export const clearSession=(expected?:string)=>session.clear(expected)
 export type AuthSession=SessionLease&{user:User;token?:string}
 function expired(response:Response,path:string,authorization:string|null){
   const publicAuth=path==='/auth/login'||path==='/auth/bootstrap'||path==='/auth/recovery-reset'||path.startsWith('/auth/passkeys/login/')
-  if(response.status===401&&!publicAuth&&authorization?.startsWith('Bearer '))session.clear(authorization.slice(7))
+  if(response.status===401&&!publicAuth&&authorization?.startsWith('Bearer ')){
+    const sent=authorization.slice(7)
+    const reason=response.headers?.get?.('X-OMP-Session-Ended')
+    if(reason&&session.token()===sent)setSessionNotice(sessionEndedMessage(reason))
+    session.clear(sent)
+  }
 }
 const resourceEvents=new EventTarget()
 const resourceReads = new ResourceReads()

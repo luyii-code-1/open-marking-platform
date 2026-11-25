@@ -149,10 +149,12 @@ class Hub:
                     task_owners.add(body.get('user_id'))
                 else:
                     events.append((row['kind'], body))
+            from .browser_sessions import lookup_revoked
             for client in clients:
                 person=people.get(client.digest)
                 if not person or person['role']!=client.person['role']:
-                    changes.append((client,None,None,None));continue
+                    revoked=lookup_revoked(db,client.digest) if not person else None
+                    changes.append((client,None,None,revoked));continue
                 scope=scopes.get(person['id'],client.scope);roots=set()
                 if task_templates:
                     roots.update(task_topics(person, scope, client.scope, task_templates, task_owners))
@@ -175,7 +177,9 @@ class Hub:
             for client,person,scope,roots in changes:
                 if client not in self.clients:continue
                 if person is None:
-                    client.offer({'type':'closing','code':4401});self.clients.discard(client)
+                    closing={'type':'closing','code':4401}
+                    if roots:closing.update(ended_reason=roots[0],ended_detail=roots[1])
+                    client.offer(closing);self.clients.discard(client)
                 else:
                     client.person=person;client.scope=scope
                     if roots:client.offer({'type':'invalidate','roots':sorted(roots)})
@@ -211,7 +215,11 @@ async def events(socket:WebSocket):
             while True:
                 try:value=await asyncio.wait_for(client.queue.get(),timeout=20)
                 except asyncio.TimeoutError:value={'type':'ping'}
-                if value['type']=='closing':await socket.close(code=value['code']);return
+                if value['type']=='closing':
+                    if value.get('ended_reason'):
+                        with suppress(Exception):
+                            await asyncio.wait_for(socket.send_json({'type':'session_ended','reason':value['ended_reason'],'detail':value.get('ended_detail','')}),timeout=2)
+                    await socket.close(code=value['code']);return
                 await asyncio.wait_for(socket.send_json(value),timeout=5)
         async def receiver():
             while True:

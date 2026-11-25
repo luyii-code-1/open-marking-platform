@@ -102,13 +102,13 @@ async def verify(scope, credentials):
     try:
         person = await run_in_threadpool(authenticate, token)
     except HTTPException as error:
-        state['_http_guard_auth'] = (token, kind, None, error.status_code, error.detail)
+        state['_http_guard_auth'] = (token, kind, None, error.status_code, error.detail, error.headers)
         return None
     except Exception:
         # An unavailable identity store cannot qualify the request for relaxed
         # inspection. Let the application's normal authentication handle it.
         return None
-    state['_http_guard_auth'] = (token, kind, person, 0, '')
+    state['_http_guard_auth'] = (token, kind, person, 0, '', None)
     state.update(http_guard_verified=True, http_guard_role=person['role'], actor=person['id'],
                  actor_label=(person.get('username') or person.get('name') or '')[:160],
                  actor_kind='device' if person['role'] == 'scanner' else 'user')

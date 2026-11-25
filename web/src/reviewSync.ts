@@ -45,11 +45,15 @@ export async function syncReviewRecords(owner:string,transport:ReviewTransport,n
   return {state:'ready',sent,profile:me.body}
 }
 
-export function reviewTransport(token:string,alive:()=>boolean):ReviewTransport{
+export function reviewTransport(token:string,alive:()=>boolean,onSessionEnded?:(reason:string,detail?:string)=>void):ReviewTransport{
   return async(path,body)=>{
     if(!alive())return {status:401,body:{}}
     const response=await fetch('/api/v1'+path,{method:body===undefined?'GET':'POST',headers:{Authorization:`Bearer ${token}`,...(body===undefined?{}:{'Content-Type':'application/json'})},body:body===undefined?undefined:JSON.stringify(body),cache:'no-store',signal:AbortSignal.timeout(8000)})
     const data=await response.json().catch(()=>({}))
+    if(response.status===401&&alive()){
+      const reason=response.headers?.get?.('X-OMP-Session-Ended')
+      if(reason)onSessionEnded?.(reason,typeof data?.detail==='string'?data.detail:undefined)
+    }
     return alive()?{status:response.status,body:data}:{status:401,body:{}}
   }
 }

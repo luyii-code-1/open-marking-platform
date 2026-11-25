@@ -10,7 +10,7 @@ import { uiTheme } from './uiTheme'
 import { Brand } from './Brand'
 import { cardName,subjectGrades,unassignedGrade } from './examNavigation'
 import { rowNavigation } from './rowNavigation'
-import {scannerRoomCounts} from './scannerRoomCounts'
+import {scannerRoomCounts,scannerScopeKey} from './scannerRoomCounts'
 import {scannerRoomState,type Paper,type ScanRun} from './scannerRoomPages'
 import {ScanDesk} from './ScanDesk'
 import {ScanChoices} from './ScanChoices'
@@ -35,10 +35,18 @@ function Scanner() {
   const [newBatchOpen,setNewBatchOpen]=useState(false)
   const [newBatchName,setNewBatchName]=useState('')
   const [newBatchCount,setNewBatchCount]=useState<number|null>(null)
+  const [editBatchOpen,setEditBatchOpen]=useState(false)
+  const [editBatchName,setEditBatchName]=useState('')
+  const [editBatchCount,setEditBatchCount]=useState<number|null>(null)
   const [batchCounts,setBatchCounts]=useState<Record<string,number>>(()=>{try{return JSON.parse(localStorage.getItem('omp-scan-batch-counts')||'{}')}catch{return {}}})
-  function rememberBatchCount(id:string,count:number|null){
-    if(!count||count<=0)return
-    setBatchCounts(prev=>{const next={...prev,[id]:count};try{localStorage.setItem('omp-scan-batch-counts',JSON.stringify(next))}catch{};return next})
+  function rememberBatchCount(key:string,count:number|null){
+    setBatchCounts(prev=>{
+      const next={...prev}
+      if(count&&count>0)next[key]=count
+      else delete next[key]
+      try{localStorage.setItem('omp-scan-batch-counts',JSON.stringify(next))}catch{}
+      return next
+    })
   }
   const { message, modal } = App.useApp()
   const [scanRun,setScanRun]=useState<(ScanRun&{groupId:string;room:string})|null>(null)
@@ -84,17 +92,16 @@ function Scanner() {
   const projects: Row[] = [...new Map([...(state?.projects || []), ...(state?.catalog.projects || [])].map((p: Row) => [p.id, p])).values()] as Row[]
   const filteredProjects=projects.filter(p=>projectStatus==='all'||(p.exam_status||'in_progress')===projectStatus)
   const grade=subject?subjectGrades(subject,pack?.groups||[]).find(g=>g.id===gradeId):undefined
-  const roomKey=(row:Row)=>(row.room_tags||[]).map((t:Row)=>t.id).sort().join(',')
-  const roomSheets:Row[]=batch?state.batches.filter((r:Row)=>r.group_id===batch.group_id&&roomKey(r)===roomKey(batch)):[]
-  const runSheets=scanRun&&scanRun.groupId===groupId&&batch&&scanRun.room===roomKey(batch)?roomSheets.filter(r=>r.id===scanRun.anchorId||!scanRun.previousIds.includes(r.id)):[]
+  const batchScopeKey=(row:Row)=>scannerScopeKey(row)
+  const roomSheets:Row[]=batch?state.batches.filter((r:Row)=>r.group_id===batch.group_id&&batchScopeKey(r)===batchScopeKey(batch)):[]
+  const runSheets=scanRun&&scanRun.groupId===groupId&&batch&&scanRun.room===batchScopeKey(batch)?roomSheets.filter(r=>r.id===scanRun.anchorId||!scanRun.previousIds.includes(r.id)):[]
   const visibleSheets=scanView==='run'&&scanRun?runSheets:roomSheets
   const sumVisible=(key:string)=>visibleSheets.reduce((n,r)=>n+(r[key]||0),0)
   const pendingSheets=roomSheets.filter(r=>r.status==='local_paired')
+  const retryableUploadSheets=roomSheets.filter(r=>r.status==='frozen'&&String(r.error||'').startsWith('同步被服务器拒绝'))
   const needsReview=roomSheets.some(r=>r.status==='frozen'||r.status==='open'&&(r.pending||r.blocked||r.uploaded))
-  const room=batch?.room_tags?.[0]&&pack?.room_tags?.find((r:Row)=>r.id===batch.room_tags[0].id)
   const readyToUpload=pendingSheets.length>0&&!needsReview&&!state?.capturing&&!state?.processing
-  const currentCounts=scannerRoomCounts(state?.batches||[],groupId,room?.id||batch?.room_tags?.[0]?.id)
-  const roomComplete=room?.expected_students>0&&(currentCounts.pending??0)+(room.confirmed_sheets??((room.scanned_students||0)+(room.confirmed_absent||0)))>=room.expected_students
+  const currentCounts=scannerRoomCounts(state?.batches||[],groupId,batch?.room_tags?.[0]?.id,batch?.local_group_id||undefined)
   const [review,setReview]=useState<Row[]|null>(null),[answer,setAnswer]=useState<Row|null>(null)
   const [corrected,setCorrected]=useState(false)
   const [original,setOriginal]=useState(''),[sideIndex,setSideIndex]=useState(0),[originalError,setOriginalError]=useState('')
@@ -139,16 +146,24 @@ function Scanner() {
   }
   async function openProject(id: string) { await action('openProject', { project_id: id }, enterProject) }
   function openSubject(id:string){setSubject(id);setGrade('');setGroup('');setBatch('')}
+  const groupBatches=(groupId?(state?.batches||[]).filter((b:Row)=>b.group_id===groupId):[]) as Row[]
+  const localGroups=Object.values(groupBatches.reduce((acc:Record<string,{key:string;anchor:Row;sheets:Row[]}>,row:Row)=>{
+    const key=batchScopeKey(row)
+    if(!acc[key])acc[key]={key,anchor:row,sheets:[]}
+    acc[key].sheets.push(row)
+    if(row.created_at>=acc[key].anchor.created_at)acc[key].anchor=row
+    return acc
+  },{} as Record<string,{key:string;anchor:Row;sheets:Row[]}>)).sort((a,b)=>b.anchor.created_at.localeCompare(a.anchor.created_at))
+
   async function createCountedBatch(customName?:string,expectedCount?:number|null){
     imageRequest.current++;selectionRequest.current++
     setScanView('room');setScanRun(null);setDeskPage(null);setAnswer(null)
     if(!group||!pack)return
     if(group.template.sides===2&&!firstSide){setDeviceOpen(true);message.warning('请在扫描设置中选择双面出图顺序，然后重新开始扫描');return}
-    const existingCount=state.batches.filter((b:Row)=>b.group_id===group.id).length
-    const baseLabel=(customName||'').trim()||`第 ${existingCount+1} 批`
-    const fullName=expectedCount&&expectedCount>0?`${baseLabel}（${expectedCount}张）`:baseLabel
-    const created=await action('createBatch',{group_id:group.id,name:fullName,room_tag_ids:[],capture_mode:group.template.sides===2?'duplex':'separate',first_side:firstSide},r=>{
-      if(expectedCount&&expectedCount>0)rememberBatchCount(r.id,expectedCount)
+    const baseLabel=(customName||'').trim()||`第 ${localGroups.length+1} 批`
+    const countValue=typeof expectedCount==='number'&&expectedCount>0?expectedCount:0
+    const created=await action('createBatch',{group_id:group.id,name:baseLabel,local_batch:true,local_group_id:'new',expected_count:countValue,room_tag_ids:[],capture_mode:group.template.sides===2?'duplex':'separate',first_side:firstSide},r=>{
+      rememberBatchCount(r.local_group_id||r.id,countValue||null)
       setBatch(r.id);setPage(1)
     })
     if(created){
@@ -157,8 +172,22 @@ function Scanner() {
       setNewBatchCount(null)
     }
   }
+  async function saveBatchMeta(){
+    if(!batch)return
+    const nextName=editBatchName.trim()
+    if(!nextName){message.warning('请输入批次名称');return}
+    const countValue=typeof editBatchCount==='number'&&editBatchCount>0?editBatchCount:0
+    const updated=await action('updateLocalBatch',{batch_id:batch.id,name:nextName,expected_count:countValue})
+    if(updated){
+      rememberBatchCount(batch.local_group_id||batch.id,countValue||null)
+      setEditBatchOpen(false)
+    }
+  }
   const expectedForBatch=(b?:Row)=>{
     if(!b)return null
+    if(typeof b.expected_count==='number'&&b.expected_count>0)return b.expected_count
+    const key=b.local_group_id||b.id
+    if(batchCounts[key])return batchCounts[key]
     if(batchCounts[b.id])return batchCounts[b.id]
     const m=String(b.name||'').match(/（(\d+)张）/)
     return m?Number(m[1]):null
@@ -168,16 +197,16 @@ function Scanner() {
     const impact=await action('clearRoom',{batch_id:scope})
     if(!impact)return
     modal.confirm({
-      title:'清理本考场旧扫描数据？',
-      content:`将删除本机该考场的 ${impact.pages} 面原图及识别结果，其中 ${impact.pending} 面尚未上传。清理后从空列表开始扫描。服务器已接收的数据继续保留。`,
-      okText:'删除本地旧数据',okButtonProps:{danger:true},
+      title:'清理本批次本地扫描数据？',
+      content:`将删除本机当前分组的 ${impact.pages} 面原图及识别结果，其中 ${impact.pending} 面尚未上传。其他本地批次不受影响，服务器已接收的数据继续保留。`,
+      okText:'删除本批本地数据',okButtonProps:{danger:true},
       onOk:async()=>{
         const result=await scannerCall('clearRoom',{batch_id:scope,confirm:true,signature:impact.signature})
         if(!result?.cleared)return
         imageRequest.current++;selectionRequest.current++
         setScanRun(null);setScanView('room');setBatch('');setPage(1);setDeskPage(null);setAnswer(null)
         await reload()
-        message.success(result.files_removed?'本地旧数据已清理，请选择考场开始新扫描':'记录已清理，部分占用文件将在下次清理时重试')
+        message.success(result.files_removed?'本批本地旧数据已清理，可重新创建或选择批次扫描':'记录已清理，部分占用文件将在下次清理时重试')
       },
     })
   }
@@ -197,13 +226,13 @@ function Scanner() {
     }
     let id=batchId
     if(batch.status!=='open'||batch.total>0&&(batch.sides===1||batch.capture_mode==='duplex')){
-      const next=await action('createBatch',{group_id:group.id,name:batch.name,room_tag_ids:batch.room_tags.map((t:Row)=>t.id),capture_mode:batch.capture_mode,first_side:firstSide})
+      const next=await action('createBatch',{group_id:group.id,name:batch.name,local_batch:!!batch.local_group_id,local_group_id:batch.local_group_id||'',expected_count:expectedForBatch(batch)||0,room_tag_ids:batch.local_group_id?[]:batch.room_tags.map((t:Row)=>t.id),capture_mode:batch.capture_mode,first_side:firstSide})
       if(!next)return
       id=next.id;setBatch(id)
     }
     const started=await action('start',{batch_id:id,device_id:device,side})
     if(started){
-      setScanRun({anchorId:id,previousIds:state.batches.map((r:Row)=>r.id),groupId,room:roomKey(batch)})
+      setScanRun({anchorId:id,previousIds:state.batches.map((r:Row)=>r.id),groupId,room:batchScopeKey(batch)})
       setScanView('run');setPage(1)
     }
   }
@@ -239,7 +268,7 @@ function Scanner() {
     ...(inProject && group ? [{ title: <Button type="link" disabled={locked} onClick={() => setBatch('')}>{cardName(group,subject)}</Button> }] : []),
     ...(inProject && batch ? [{ title: batch.name || `批次 ${batch.id.slice(0,8)}` }] : []),
   ]
-  if(state&&(!state.device_preferences||typeof state.session_open!=='boolean'))return <main className="scanner-unavailable"><Typography.Title level={3}>请更新扫描客户端</Typography.Title><p>从管理后台的扫描台下载安装包后重新打开。</p><Button onClick={()=>action('offlinePage')}>打开已安装版本的本地页面</Button></main>
+  if(state&&(!state.device_preferences||typeof state.session_open!=='boolean'||state.local_batch_groups!==true))return <main className="scanner-unavailable"><Typography.Title level={3}>请更新扫描客户端</Typography.Title><p>从管理后台的扫描台下载安装包后重新打开。</p><Button onClick={()=>action('offlinePage')}>打开已安装版本的本地页面</Button></main>
   if (!hasScannerHost) return <main className="scanner-unavailable"><Typography.Title level={3}>扫描工作台</Typography.Title><Typography.Paragraph>请在扫描客户端打开此页面。可在管理后台的「扫描台」下载安装包，并连接本机扫描端。</Typography.Paragraph><a href="/#/scanner">打开管理后台扫描台</a></main>
   const currentBatchExpected=expectedForBatch(batch)
   const currentBatchFront=sumVisible('front_count')
@@ -264,54 +293,75 @@ function Scanner() {
         : !subject ? <ScanChoices title={pack.project.name} description="选择扫描科目" items={pack.subjects.map((row:Row)=>({id:row.id,name:row.name,disabled:locked,facts:[{label:'可扫描年级',value:subjectGrades(row,pack.groups).filter(g=>g.count).length},{label:'题卡',value:pack.groups.filter((g:Row)=>g.subject_id===row.id).length}]}))} onOpen={openSubject} extra={<Button disabled={!state.online||locked} onClick={()=>action('downloadProject',{project_id:pack.project.id})}>更新考试资料</Button>}/>
         : !grade ? <ScanChoices title={subject.name} description="选择年级" items={subjectGrades(subject,pack.groups).filter(g=>g.count).map(row=>({id:row.id,name:row.name,disabled:locked,facts:[{label:'题卡',value:row.count}]}))} onOpen={id=>{setGrade(id);setGroup('');setBatch('')}}/>
         : !group ? <ScanChoices title={grade.name} description="选择本次使用的题卡" items={pack.groups.filter((g:Row)=>g.subject_id===subject.id&&(g.grade_id||unassignedGrade)===gradeId).map((row:Row)=>({id:row.id,name:cardName(row,subject),description:row.template.paper+' · '+(row.template.sides===2?'双面':'单面'),status:<Tag>{row.frozen?'成绩已发布':'可扫描'}</Tag>,disabled:locked||row.frozen}))} onOpen={id=>{setGroup(id);setBatch('')}}/>
-          : !batch ? <section className="scanner-section"><div className="scanner-title"><div><Typography.Title level={2}>{cardName(group,subject)}</Typography.Title><Typography.Text type="secondary">{group.grade_name&&`${group.grade_name} · `}{group.template.name} · {group.template.paper} · {group.template.sides === 2 ? '双面' : '单面'}</Typography.Text></div><Space wrap><Button type="primary" disabled={locked||group.frozen} onClick={()=>{setNewBatchName(`第 ${state.batches.filter((b:Row)=>b.group_id===group.id).length+1} 批`);setNewBatchCount(null);setNewBatchOpen(true)}}>新建扫描批次</Button><Button disabled={!state.online||locked} onClick={()=>action('downloadProject',{project_id:pack.project.id})}>刷新进度</Button></Space></div>
-          <Card size="small" style={{marginBottom:16}}><Space wrap align="center">
-            <Typography.Text strong>快速新建批次：</Typography.Text>
+          : !batch ? <section className="scanner-section"><div className="scanner-title"><div><Typography.Title level={2}>{cardName(group,subject)}</Typography.Title><Typography.Text type="secondary">{group.grade_name&&`${group.grade_name} · `}{group.template.name} · {group.template.paper} · {group.template.sides === 2 ? '双面' : '单面'}</Typography.Text></div><Space wrap><Button type="primary" disabled={locked||group.frozen} onClick={()=>{setNewBatchName(`第 ${localGroups.length+1} 批`);setNewBatchCount(null);setNewBatchOpen(true)}}>新建本地批次</Button><Button disabled={!state.online||locked} onClick={()=>action('downloadProject',{project_id:pack.project.id})}>刷新进度</Button></Space></div>
+          <Card size="small" style={{marginBottom:16}}><Space direction="vertical" size={8} style={{width:'100%'}}><Space wrap align="center">
+            <Typography.Text strong>快速新建本地批次：</Typography.Text>
             <Input style={{width:160}} placeholder="批次名（如 第1批）" value={newBatchName} onChange={e=>setNewBatchName(e.target.value)}/>
             <InputNumber min={1} max={10000} precision={0} style={{width:170}} placeholder="预计张数（如 37）" addonAfter="张" value={newBatchCount} onChange={v=>setNewBatchCount(typeof v==='number'?v:null)}/>
             <Button type="primary" disabled={locked||group.frozen} onClick={()=>void createCountedBatch(newBatchName,newBatchCount)}>新建并进入扫描</Button>
-          </Space></Card>
-          <ScanChoices title="已有扫描批次" description="点击已有批次继续扫描或核对，或点击上方「新建扫描批次」开始新一叠。" items={state.batches.filter((b:Row)=>b.group_id===group.id).map((row:Row)=>{
-            const exp=expectedForBatch(row)
-            const scannedSheets=row.front_count??(row.sides===2?Math.ceil((row.total||0)/2):(row.total||0))
-            return {id:row.id,name:row.name||`批次 ${row.id.slice(0,8)}`,disabled:locked||group.frozen,status:<Status value={row.status}/>,
-              facts:[{label:'批次计数',value:exp?`${scannedSheets} / ${exp} 张`:`${scannedSheets} 张`},{label:'待核对',value:row.blocked||0},{label:'待上传',value:row.pending||0}]}
+          </Space><Typography.Text type="secondary">批次仅保存在本机，用于按叠分组扫描、核对与按批重传，不会上传到云端。</Typography.Text></Space></Card>
+          <ScanChoices title="本机扫描批次分组" description="点击批次继续扫描、核对或按批重传；不同批次彼此独立。" items={localGroups.map(({anchor,sheets})=>{
+            const exp=expectedForBatch(anchor)
+            const scannedSheets=sheets.reduce((n,r)=>n+(r.scanned_sheets??r.front_count??(r.sides===2?Math.ceil((r.total||0)/2):(r.total||0))),0)
+            const blockedCount=sheets.reduce((n,r)=>n+(r.blocked||0),0)
+            const pendingCount=sheets.filter(r=>r.status==='local_paired').reduce((n,r)=>n+(r.paired_sheets??r.scanned_sheets??1),0)
+            const uploadedCount=sheets.filter(r=>r.status==='paired').reduce((n,r)=>n+(r.paired_sheets??r.scanned_sheets??1),0)
+            const retryable=sheets.some(r=>r.status==='frozen'&&String(r.error||'').startsWith('同步被服务器拒绝'))
+            const hasException=sheets.some(r=>r.status==='frozen'||(r.blocked||0)>0)
+            const allUploaded=sheets.some(r=>r.total>0)&&sheets.every(r=>r.status==='paired'||!r.total)
+            const tagStatus=hasException?'blocked':pendingCount>0?'local_paired':allUploaded?'paired':'open'
+            return {id:anchor.id,name:anchor.name||`批次 ${anchor.id.slice(0,8)}`,disabled:locked||group.frozen,status:<Status value={tagStatus}/>,
+              facts:[{label:'本批计数',value:exp?`${scannedSheets} / ${exp} 张`:`${scannedSheets} 张`},{label:'待核对',value:blockedCount},{label:'待上传',value:pendingCount},{label:'已上传',value:uploadedCount}],
+              action:(pendingCount>0||retryable)&&state.online?<Button block size="small" disabled={locked||group.frozen||state.processing} onClick={()=>void action('upload',{batch_id:anchor.id,retry_failed:retryable})}>{retryable?'按批重传本批':'上传本批待传答卷'}</Button>:undefined}
           })} onOpen={id=>{setScanView('room');setScanRun(null);setBatch(id);setPage(1)}}/>
           <Typography.Paragraph type="secondary">本题卡服务器已确认 {group.confirmed_sheets??group.confirmed_students??0} 份 · 统计以上次刷新为准</Typography.Paragraph>
           </section>
             : <ScanDesk rows={state.pages} papers={state.papers||[]} total={state.paper_total||0} page={page} onPage={changePage}
                 selected={state.pages.find((r:Row)=>r.id===deskPage?.id)||deskPage}
                 onSelect={selectDeskPage} capturing={state.capturing} syncing={state.syncing} processing={state.processing} processingRemaining={state.processing_remaining||0} needsReview={needsReview} uploaded={roomSheets.some(r=>r.total>0)&&roomSheets.every(r=>r.status==='paired'||!r.total)}
-                context={<div><h2>{batch.name||`批次 ${batch.id.slice(0,8)}`}{currentBatchExpected?<Tag color={currentBatchFront===currentBatchExpected?'green':'blue'} style={{marginLeft:8}}>计数 {currentBatchFront} / {currentBatchExpected} 张</Tag>:null}</h2><span>{pack.project.name} · {subject.name} · {group.grade_name} · {cardName(group,subject)} · {batch.paper} {batch.sides===2?'双面':'单面'}</span></div>}
+                context={<div><h2>{batch.name||`批次 ${batch.id.slice(0,8)}`}<Tag style={{marginLeft:8}}>本地分组</Tag>{currentBatchExpected?<Tag color={currentBatchFront===currentBatchExpected?'green':'blue'}>计数 {currentBatchFront} / {currentBatchExpected} 张</Tag>:null}</h2><span>{pack.project.name} · {subject.name} · {group.grade_name} · {cardName(group,subject)} · {batch.paper} {batch.sides===2?'双面':'单面'}</span></div>}
                 stats={[{label:'本批计数',value:currentBatchExpected?`${currentBatchFront} / ${currentBatchExpected} 张`:`${currentBatchFront} 张`},{label:'正面',value:sumVisible('front_count')+' 面'},{label:'背面',value:sumVisible('back_count')+' 面'},{label:'待核对',value:sumVisible('blocked')+' 面'},{label:'待上传',value:sumVisible('pending')+' 面'},{label:'已上传',value:sumVisible('uploaded')+' 面'}]}
                 scope={<Radio.Group value={scanView} onChange={e=>{clearSelection();setScanView(e.target.value);setPage(1)}} optionType="button" options={[{label:'本次扫描',value:'run',disabled:!scanRun},{label:'本批全部',value:'room'}]}/>}
                 actions={<>
               <Button size="large" type="primary" loading={busyKey===actionKey('start',{batch_id:batchId})} disabled={locked || group.frozen} onClick={startScan}>开始扫描</Button><Button danger loading={busyKey===actionKey('stop')} disabled={!state.capturing} onClick={() => action('stop')}>停止扫描</Button>
               <Dropdown menu={{items:[
-                {key:'round',label:'新建下一批次（可设张数）',disabled:locked||state.processing,onClick:()=>{
-                  setNewBatchName(`第 ${state.batches.filter((b:Row)=>b.group_id===group.id).length+1} 批`)
+                {key:'round',label:'新建下一本地批次（可设张数）',disabled:locked||state.processing,onClick:()=>{
+                  setNewBatchName(`第 ${localGroups.length+1} 批`)
                   setNewBatchCount(null)
                   setNewBatchOpen(true)
+                }},
+                {key:'edit',label:'编辑本批名称与预计张数',disabled:locked||state.processing,onClick:()=>{
+                  setEditBatchName(batch.name||'')
+                  setEditBatchCount(currentBatchExpected)
+                  setEditBatchOpen(true)
                 }},
                 {key:'import',label:'从文件导入答题卡',disabled:locked||batch.status!=='open',onClick:()=>action('import',{batch_id:batchId,side})},
                 {key:'refresh',label:'刷新上传结果',disabled:locked||!state.online,onClick:()=>action('refreshBatch',{batch_id:batchId})},
                 {type:'divider'},
-                {key:'clear',label:'清理本批旧数据',danger:true,disabled:locked||state.processing,onClick:clearRoom},
+                {key:'clear',label:'清理本批本地数据',danger:true,disabled:locked||state.processing,onClick:clearRoom},
               ]}}><Button icon={<DownOutlined/>} iconPosition="end" disabled={locked}>更多操作</Button></Dropdown>
                 </>}
                 settings={<div className="scan-device-summary"><strong>{state.scan_settings?.dpi===600?'高清 · 600 DPI（较慢）':'标清 · 300 DPI'}</strong><span>{prefs?.device?.name||'尚未选择扫描仪'}</span><Button block disabled={locked} onClick={()=>setDeviceOpen(true)}>调整扫描设置</Button></div>}
-                feedback={<>{batch.error&&<Alert type="warning" message={batch.error}/>}<Typography.Paragraph>{state.message||'将答题卡放入进纸口，再点击“开始扫描”。'}</Typography.Paragraph>{!device&&<Typography.Text type="warning">请先打开扫描设置，选择扫描仪</Typography.Text>}</>}
-                upload={<><Typography.Paragraph>待上传 <strong>{currentCounts.pending??pendingSheets.length}</strong> 份</Typography.Paragraph><Typography.Text type="secondary">{needsReview?'请先处理待核对答卷':'答卷先保存在本机，核对后点击上传'}</Typography.Text><Button type="primary" block disabled={locked||!roomSheets.some(r=>r.total>0)} onClick={reviewRoom}>{anonymous?'核对答卷并上传':'查看名单并上传'}</Button>{state.syncing&&<Typography.Paragraph role="status">正在上传 · 已上传 {roomSheets.reduce((n,r)=>n+r.uploaded,0)} 面</Typography.Paragraph>}{!state.syncing&&roomSheets.some(r=>r.total>0)&&roomSheets.every(r=>r.status==='paired'||!r.total)&&<Alert type="success" message="已扫答卷均已上传确认"/>}</>}
+                feedback={<>{batch.error&&<Alert type="warning" message={batch.error}/>}<Typography.Paragraph>{state.message||'将答题卡放入进纸口，再点击“开始扫描”。本批次仅在本地分组，不会上传云端。'}</Typography.Paragraph>{!device&&<Typography.Text type="warning">请先打开扫描设置，选择扫描仪</Typography.Text>}</>}
+                upload={<><Typography.Paragraph>本批待上传 <strong>{currentCounts.pending??pendingSheets.length}</strong> 份</Typography.Paragraph><Typography.Text type="secondary">{needsReview?'请先处理待核对答卷，或重传同步失败的答卷':'答卷先保存在本机分组中，核对后按批上传或重传'}</Typography.Text><Space direction="vertical" style={{width:'100%'}}><Button type="primary" block disabled={locked||!roomSheets.some(r=>r.total>0)} onClick={reviewRoom}>{anonymous?'核对答卷并上传':'查看本批名单并上传'}</Button>{(pendingSheets.length>0||retryableUploadSheets.length>0)&&<Button block disabled={locked||!state.online||state.processing} onClick={()=>void action('upload',{batch_id:batchId,retry_failed:retryableUploadSheets.length>0})}>{retryableUploadSheets.length>0?'重传本批失败/未上传答卷':'直接上传本批待传答卷'}</Button>}</Space>{state.syncing&&<Typography.Paragraph role="status">正在上传 · 已上传 {roomSheets.reduce((n,r)=>n+r.uploaded,0)} 面</Typography.Paragraph>}{!state.syncing&&roomSheets.some(r=>r.total>0)&&roomSheets.every(r=>r.status==='paired'||!r.total)&&<Alert type="success" message="本批已扫答卷均已上传确认"/>}</>}
                 imageTools={answer?<Space wrap>{answer.sides.map((r:Row,index:number)=><Button key={r.id} type={index===sideIndex?'primary':'default'} onClick={()=>{setDeskPage(state.pages.find((p:Row)=>p.id===r.id)||{...deskPage,...r});void openOriginal(answer,index)}}>{r.side==='front'?'正面':'背面'}</Button>)}<Button onClick={()=>openOriginal(answer,sideIndex,corrected?'original':'corrected')}>{corrected?'查看扫描原图':'查看校正图'}</Button></Space>:null}
                 image={originalError?<Alert type="error" message={originalError}/>:original?<img src={original} alt={corrected?'自动校正图':'扫描原图'}/>:<Card loading/>}
                 editor={answer&&!anonymous?<div className="scan-identity-editor"><label>准考证号<Input value={number} inputMode="numeric" disabled={!answer.editable||locked||state.processing||state.batches.find((r:Row)=>r.id===answer.batch_id)?.status==='paired'} onChange={e=>setNumber(e.target.value.trim())}/></label><div><span>姓名</span><strong>{matchedName||'未匹配'}</strong></div><label>缺考标记<Select aria-label="核对缺考标记" disabled={!answer.editable||locked||state.processing} value={absent===null?undefined:String(absent)} placeholder="待核对" options={[{value:'false',label:'未标缺考'},{value:'true',label:'缺考'}]} onChange={v=>setAbsent(v==='true')}/></label>{answer.editable&&<Button type="primary" disabled={locked||state.processing||!matchedName||absent===null||state.batches.find((r:Row)=>r.id===answer.batch_id)?.status==='paired'} onClick={saveAnswer}>保存更正</Button>}</div>:null}
                 pageActions={deskPage?<div className="scan-operation-buttons">{deskPage.error&&<Alert type="warning" message={deskPage.error}/>}<Status value={deskPage.status}/>{deskPage.local_cut_available&&<Button onClick={()=>showPreview(deskPage)}>查看切题</Button>}<Button disabled={locked||state.processing||deskPage.status==='uploaded'||deskPage.status==='excluded'} onClick={()=>action('retryPage',{batch_id:deskPage.batch_id||batchId,page_id:deskPage.id})}>重新识别</Button><Button danger disabled={locked||state.processing||deskPage.status==='uploaded'||deskPage.status==='excluded'} onClick={()=>exclude(deskPage)}>排除并重扫</Button>{deskPage.status==='blocked'&&<Button disabled={locked||!state.online} onClick={()=>modal.confirm({title:'上传这张原图供核查？',onOk:()=>action('sendForReview',{batch_id:deskPage.batch_id||batchId,page_id:deskPage.id})})}>上传原图供核查</Button>}</div>:null}
               />}
     </main>
-    {state&&<><Modal title="新建扫描批次" open={newBatchOpen} onCancel={()=>setNewBatchOpen(false)} onOk={()=>void createCountedBatch(newBatchName,newBatchCount)} okText="新建并进入">
+    {state&&<><Modal title="新建本地扫描批次" open={newBatchOpen} onCancel={()=>setNewBatchOpen(false)} onOk={()=>void createCountedBatch(newBatchName,newBatchCount)} okText="新建并进入">
       <Space direction="vertical" size={12} style={{width:'100%'}}>
+        <Typography.Text type="secondary">该批次仅保存在本机，用于分组扫描与按批重传，不会上传云端。</Typography.Text>
         <Input placeholder="批次名称（如 第1批）" value={newBatchName} onChange={e=>setNewBatchName(e.target.value)}/>
         <InputNumber min={1} max={10000} precision={0} style={{width:'100%'}} placeholder="预计扫描张数（如 37，留空不限）" addonAfter="张" value={newBatchCount} onChange={v=>setNewBatchCount(typeof v==='number'?v:null)}/>
+      </Space>
+    </Modal>
+    <Modal title="编辑本地批次信息" open={editBatchOpen} onCancel={()=>setEditBatchOpen(false)} onOk={()=>void saveBatchMeta()} okText="保存">
+      <Space direction="vertical" size={12} style={{width:'100%'}}>
+        <Typography.Text type="secondary">修改仅作用于本机分组，不会同步到云端。</Typography.Text>
+        <Input placeholder="批次名称" value={editBatchName} onChange={e=>setEditBatchName(e.target.value)}/>
+        <InputNumber min={1} max={10000} precision={0} style={{width:'100%'}} placeholder="预计扫描张数（留空不限）" addonAfter="张" value={editBatchCount} onChange={v=>setEditBatchCount(typeof v==='number'?v:null)}/>
       </Space>
     </Modal>
     <Drawer title={`${batch?.name||'当前批次'} · 已扫答卷`} open={review!==null} onClose={()=>setReview(null)} width="min(850px,95vw)" footer={<Button type="primary" disabled={!readyToUpload||!state.online||locked||!review?.some(r=>r.status==='local_paired')} onClick={()=>action('upload',{batch_id:batchId},()=>setReview(null))}>核对完毕，上传 {currentCounts.pending??pendingSheets.length} 份</Button>}>

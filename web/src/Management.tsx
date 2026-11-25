@@ -25,7 +25,7 @@ export function Scans({groupId,tab,onTab}:{groupId?:string;tab?:string;onTab?:(k
     if(next)rememberExamContext({groupId:next})
   }
   return <Tabs activeKey={currentTab} onChange={changeTab} items={[
-    {key:'capture',label:'扫描批次',children:<ScanCapture groupId={groupId} selectedGroup={group} onGroupChange={changeGroup} selectedBatch={selectedBatch} onBatchChange={setSelectedBatch} onOpenCorrection={batchId=>{if(batchId)setSelectedBatch(batchId);changeTab('correct')}}/>},
+    {key:'capture',label:'扫描记录',children:<ScanCapture groupId={groupId} selectedGroup={group} onGroupChange={changeGroup} selectedBatch={selectedBatch} onBatchChange={setSelectedBatch} onOpenCorrection={batchId=>{if(batchId)setSelectedBatch(batchId);changeTab('correct')}}/>},
     {key:'correct',label:'纠正与补扫',children:<Corrections groupId={groupId} selectedGroup={group} onGroupChange={changeGroup} selectedBatch={selectedBatch} onBatchChange={setSelectedBatch} onOpenCapture={batchId=>{if(batchId)setSelectedBatch(batchId);changeTab('capture')}}/>},
   ]}/>
 }

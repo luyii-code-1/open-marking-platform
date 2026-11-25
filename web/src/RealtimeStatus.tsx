@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { ApiError,announceChanges,currentToken,request,updateSession,watchChanges,type AuthSession,type User } from './api'
+import { ApiError,announceChanges,currentToken,request,setSessionNotice,updateSession,watchChanges,type AuthSession,type User } from './api'
 
 export function RealtimeStatus({user,onExpired,onProfile}:{user:User;onExpired:()=>void;onProfile:(user:User)=>void}) {
   const callbacks=useRef({onExpired,onProfile});callbacks.current={onExpired,onProfile}
@@ -21,11 +21,17 @@ export function RealtimeStatus({user,onExpired,onProfile}:{user:User;onExpired:(
       active.onopen=()=>{if(stopped||currentToken()!==signedToken)active.close();else active.send(JSON.stringify({type:'auth',token:signedToken}))}
       active.onmessage=event=>{
         if(stopped||socket!==active)return
-        let value:{type:string;roots?:string[]};try{value=JSON.parse(event.data)}catch{return}
+        let value:{type:string;roots?:string[];reason?:string;detail?:string};try{value=JSON.parse(event.data)}catch{return}
         if(value.type==='ready'){attempt=0;changed()}
         else if(value.type==='invalidate')changed(value.roots)
         else if(value.type==='sync')changed()
         else if(value.type==='ping')active.send('{"type":"pong"}')
+        else if(value.type==='session_ended'){
+          if(currentToken()!==signedToken)return
+          stopped=true
+          setSessionNotice?.(value.detail||(value.reason==='force_logout'?'您的账号已被管理员强制下线，请重新登录':'您的账号已在其他设备登录，当前登录已下线，请重新登录'))
+          callbacks.current.onExpired()
+        }
       }
       active.onclose=event=>{
         if(stopped||socket!==active)return

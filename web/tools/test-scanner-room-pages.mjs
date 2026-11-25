@@ -63,3 +63,21 @@ const excluded=await scannerRoomState(host([excludedFront,front[1],back[1]],{cap
 assert.equal(excluded.papers[0].back,undefined)
 assert.equal(excluded.papers[1].front.sequence,excluded.papers[1].back.sequence)
 console.log('Physical sheets stay together across face chunks, missing sides, reverse passes and exclusions')
+
+// Local batches with empty room_tags stay isolated by local_group_id.
+const groupA=[
+  {id:'a1',group_id:'card',local_group_id:'lg-1',room_tags:[],created_at:'001',sides:1,total:1,front_count:1,back_count:0,status:'local_paired'},
+  {id:'a2',group_id:'card',local_group_id:'lg-1',room_tags:[],created_at:'002',sides:1,total:1,front_count:1,back_count:0,status:'local_paired'},
+]
+const groupB=[
+  {id:'b1',group_id:'card',local_group_id:'lg-2',room_tags:[],created_at:'003',sides:1,total:1,front_count:1,back_count:0,status:'local_paired'},
+]
+const localCall=async(method,args)=>({
+  batches:[...groupA,...groupB],
+  pages:[{id:args.batch_id+'front',side:'front',sequence:1}],
+  page_total:1,
+})
+const isolated=await scannerRoomState(localCall,'a1',1)
+assert.equal(isolated.paper_total,2)
+assert.deepEqual(isolated.pages.map(p=>p.batch_id),['a1','a2'])
+console.log('Local scanner batches stay isolated by local_group_id without cloud room tags')

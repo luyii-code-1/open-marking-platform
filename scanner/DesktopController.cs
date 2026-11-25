@@ -132,7 +132,7 @@ public sealed class DesktopController : IDisposable
         var counts=_queue.Counts();
         var offset=args.TryGetProperty("offset",out var start)?Math.Max(0,start.GetInt32()):0;
         var roomScope=Text(args,"page_scope")=="room";
-        var visible=batch is null?[]:roomScope?batches.Where(b=>b.GroupId==batch.GroupId&&RoomKey(b)==RoomKey(batch)).OrderBy(b=>b.CreatedAt).ToArray():[batch];
+        var visible=batch is null?[]:roomScope?batches.Where(b=>b.GroupId==batch.GroupId&&ScopeKey(b)==ScopeKey(batch)).OrderBy(b=>b.CreatedAt).ToArray():[batch];
         if(roomScope&&args.TryGetProperty("run",out var run)&&run.ValueKind==JsonValueKind.Object)
         {
             var anchor=Text(run,"anchorId");
@@ -150,12 +150,12 @@ public sealed class DesktopController : IDisposable
         }
         var projects=_packages.Values.Select(p=>new{id=Text(p.GetProperty("project"),"id"),name=Text(p.GetProperty("project"),"name"),exam_status=Text(p.GetProperty("project"),"exam_status","in_progress"),downloaded_at=Text(p,"downloaded_at")}).ToArray();
         var catalogPath=Path.Combine(_queue.Root,"workspaces",Partition,"catalog.json");
-        return new{device_preferences=new{market=_market.View(),driver=_driver,plugins=_prefs.Plugins.Select(p=>new{id=p.Id,name=Path.GetFileName(p.Path),available=File.Exists(p.Path)}),plugin_id=_prefs.PluginId,device=_prefs.Device,devices=_devices},review_edit=true,room_review=true,manual_room_upload=true,device_protocol=DevicePlugin.Protocol,scan_settings=CaptureSettingsView(),protocol=Protocol,server_url=_server,default_server_url=_defaultServer,storage_path=_queue.Root,servers=SavedServers,cached_servers=SavedServers.Where(HasOfflineProjects).ToArray(),session_open=_sessionOpen,online=_online,capturing=Capturing,processing=Processing,processing_remaining=Volatile.Read(ref _processingCount),syncing=_uploadGate.CurrentCount==0,message=_message,project_id=_project,
+        return new{device_preferences=new{market=_market.View(),driver=_driver,plugins=_prefs.Plugins.Select(p=>new{id=p.Id,name=Path.GetFileName(p.Path),available=File.Exists(p.Path)}),plugin_id=_prefs.PluginId,device=_prefs.Device,devices=_devices},review_edit=true,room_review=true,manual_room_upload=true,local_batch_groups=true,device_protocol=DevicePlugin.Protocol,scan_settings=CaptureSettingsView(),protocol=Protocol,server_url=_server,default_server_url=_defaultServer,storage_path=_queue.Root,servers=SavedServers,cached_servers=SavedServers.Where(HasOfflineProjects).ToArray(),session_open=_sessionOpen,online=_online,capturing=Capturing,processing=Processing,processing_remaining=Volatile.Read(ref _processingCount),syncing=_uploadGate.CurrentCount==0,message=_message,project_id=_project,
             projects,catalog=File.Exists(catalogPath)?Json(File.ReadAllText(catalogPath)):Json("{\"projects\":[]}"),
             package=_packages.TryGetValue(_project,out var package)?package:Json("null"),
             batches=batches.Select(b=>{
                 var captured=counts.GetValueOrDefault(b.Id);
-                return new{id=b.Id,name=b.Label,subject_id=b.SubjectId,group_id=b.GroupId,room=b.Room,room_tags=JsonSerializer.Deserialize<JsonElement>(b.RoomTagsJson),status=b.Status,error=b.Error,capture_mode=b.CaptureMode,back_order=b.BackOrder,paper=b.Paper,sides=b.Sides,created_at=b.CreatedAt,
+                return new{id=b.Id,name=b.Label,local_group_id=b.LocalGroupId,expected_count=b.ExpectedCount,subject_id=b.SubjectId,group_id=b.GroupId,room=b.Room,room_tags=JsonSerializer.Deserialize<JsonElement>(b.RoomTagsJson),status=b.Status,error=b.Error,capture_mode=b.CaptureMode,back_order=b.BackOrder,paper=b.Paper,sides=b.Sides,created_at=b.CreatedAt,
                     scanned_sheets=captured.Scanned,paired_sheets=Json(b.LocalPairsJson).GetArrayLength(),
                     total=captured.Total,front_count=captured.Front,back_count=captured.Back,pending=captured.Pending,blocked=captured.Blocked,uploaded=captured.Uploaded};
             }),
@@ -279,20 +279,35 @@ public sealed class DesktopController : IDisposable
                 var template=selected.GetProperty("template");var sides=template.GetProperty("sides").GetInt32();
                 var mode=sides==2?Text(args,"capture_mode","duplex"):"separate";var order=mode=="duplex"?"same":Text(args,"back_order","same");
                 if(mode is not ("duplex" or "separate")||order is not ("same" or "reverse"))throw new InvalidOperationException("扫描模式无效。");
-                var created=new BatchRow{Id=Guid.NewGuid().ToString(),ServerUrl=_server,GroupId=Text(selected,"id"),Label=Text(args,"name","扫描批次"),Room=Text(args,"room"),Paper=Text(template,"paper"),Sides=sides,CaptureMode=mode,BackOrder=order,TemplateId=Text(template,"id"),TemplateRevision=template.GetProperty("revision").GetInt32()};
+                var requestedLocalGroup=Text(args,"local_group_id").Trim();
+                var expectedCount=args.TryGetProperty("expected_count",out var expectedElement)&&expectedElement.ValueKind==JsonValueKind.Number?expectedElement.GetInt32():0;
+                if(expectedCount<0||expectedCount>10000)throw new InvalidOperationException("预计张数应为 0 至 10000 的整数。");
+                var tagIds=args.TryGetProperty("room_tag_ids",out var requestedTags)?requestedTags.EnumerateArray().Select(t=>t.GetString()??"").ToArray():[];
+                var isLocalGroup=requestedLocalGroup.Length>0||(args.TryGetProperty("local_batch",out var localFlag)&&localFlag.ValueKind==JsonValueKind.True);
+                var localGroupId=isLocalGroup?(requestedLocalGroup=="new"||requestedLocalGroup.Length==0?Guid.NewGuid().ToString():requestedLocalGroup):"";
+                var created=new BatchRow{Id=Guid.NewGuid().ToString(),ServerUrl=_server,GroupId=Text(selected,"id"),Label=Text(args,"name","扫描批次"),LocalGroupId=localGroupId,ExpectedCount=expectedCount,Room=isLocalGroup?"":Text(args,"room"),Paper=Text(template,"paper"),Sides=sides,CaptureMode=mode,BackOrder=order,TemplateId=Text(template,"id"),TemplateRevision=template.GetProperty("revision").GetInt32()};
                 if(mode=="duplex"&&template.TryGetProperty("layout_version",out var version)&&version.GetInt32()>=3)
                 {
                     created.DuplexFirstSide=Text(args,"first_side");
                     if(created.DuplexFirstSide is not ("front" or "back"))throw new InvalidOperationException("请先校准并选择扫描仪正面或背面先出图。");
                 }
-                var tagIds=args.TryGetProperty("room_tag_ids",out var requestedTags)?requestedTags.EnumerateArray().Select(t=>t.GetString()??"").ToArray():[];
-                var tags=project.TryGetProperty("room_tags",out var availableTags)?availableTags.EnumerateArray().Where(t=>tagIds.Contains(Text(t,"id"))).ToArray():[];
-                if(tagIds.Distinct().Count()!=tagIds.Length||tags.Length!=tagIds.Length)throw new InvalidOperationException("考场标签不在已下载的项目配置中，请刷新项目。");
+                var tags=isLocalGroup?Array.Empty<JsonElement>():(project.TryGetProperty("room_tags",out var availableTags)?availableTags.EnumerateArray().Where(t=>tagIds.Contains(Text(t,"id"))).ToArray():[]);
+                if(!isLocalGroup&&(tagIds.Distinct().Count()!=tagIds.Length||tags.Length!=tagIds.Length))throw new InvalidOperationException("考场标签不在已下载的项目配置中，请刷新项目。");
                 var gradeId=Text(selected,"grade_id");
-                if(gradeId.Length>0&&tags.Length>0&&(tags.Length!=1||Text(tags[0],"group_id")!=created.GroupId||Text(tags[0],"grade_id")!=gradeId||tags[0].TryGetProperty("archived",out var stopped)&&stopped.GetBoolean()))
+                if(!isLocalGroup&&gradeId.Length>0&&tags.Length>0&&(tags.Length!=1||Text(tags[0],"group_id")!=created.GroupId||Text(tags[0],"grade_id")!=gradeId||tags[0].TryGetProperty("archived",out var stopped)&&stopped.GetBoolean()))
                     throw new InvalidOperationException("请选择当前题卡组年级下的一个有效考场，并刷新项目配置。");
                 created.RoomTagsJson=JsonSerializer.Serialize(tags);
-                Bind(created,_project,selected);_queue.AddBatch(created);_queue.SaveDesktopBatch(created);return new{id=created.Id};
+                Bind(created,_project,selected);_queue.AddBatch(created);_queue.SaveDesktopBatch(created);return new{id=created.Id,local_group_id=created.LocalGroupId};
+            case "updateLocalBatch":
+                if(Capturing)throw new InvalidOperationException("请先停止采集再修改本地批次信息。");
+                var editScope=Batch(Text(args,"batch_id"));
+                var nextLabel=Text(args,"name",editScope.Label).Trim();
+                if(nextLabel.Length==0||nextLabel.Length>100)throw new InvalidOperationException("批次名称需 1 至 100 字。");
+                var nextExpected=args.TryGetProperty("expected_count",out var nextExpEl)&&nextExpEl.ValueKind==JsonValueKind.Number?nextExpEl.GetInt32():0;
+                if(nextExpected<0||nextExpected>10000)throw new InvalidOperationException("预计张数应为 0 至 10000 的整数。");
+                _queue.UpdateLocalGroupMetadata(RoomSheets(editScope),nextLabel,nextExpected);
+                Notify("本地批次分组已更新（仅保存在本机）。");
+                return State(args);
             case "marketRefresh":
                 await _market.Fetch(null,_lifetime.Token);
                 return true;
@@ -379,11 +394,25 @@ public sealed class DesktopController : IDisposable
             case "upload":
                 var scope=Batch(Text(args,"batch_id"));
                 if(Capturing||_connecting||_tickRunning)throw new InvalidOperationException("请等待当前操作完成。");
+                var retryFailed=args.TryGetProperty("retry_failed",out var retryEl)&&retryEl.ValueKind==JsonValueKind.True;
                 var roomSheets=RoomSheets(scope);
+                if(retryFailed)
+                {
+                    foreach(var item in roomSheets.Where(b=>b.Status=="frozen"&&b.Error.StartsWith("同步被服务器拒绝")))
+                    {
+                        var activePages=_queue.Pages(item.Id).Where(p=>p.Status!="excluded").ToArray();
+                        if(activePages.Length>0&&activePages.All(p=>p.Status is "pending" or "uploaded"&&p.RecognitionJson!="{}"))
+                        {
+                            try{_queue.PairLocally(item);}
+                            catch(InvalidOperationException error){Freeze(item,error.Message);}
+                        }
+                    }
+                    roomSheets=RoomSheets(scope);
+                }
                 if(roomSheets.Any(b=>b.Status=="frozen"||b.Status=="open"&&_queue.Pages(b.Id).Any(p=>p.Status!="excluded")))
-                    throw new InvalidOperationException("请先核对本考场的异常或未完成答卷。");
+                    throw new InvalidOperationException("请先核对本批次的异常或未完成答卷。");
                 var ready=roomSheets.Where(b=>b.Status=="local_paired").ToArray();
-                if(ready.Length==0)throw new InvalidOperationException("本考场暂无待上传答卷。");
+                if(ready.Length==0)throw new InvalidOperationException("本批次暂无待上传答卷。");
                 _ = UploadRoom(ready);return new{started=true};
             case "refreshBatch":
                 if(Capturing)throw new InvalidOperationException("请先停止采集再核查批次状态。");
@@ -590,7 +619,7 @@ public sealed class DesktopController : IDisposable
         catch(Exception error)when(error is not OutOfMemoryException){Notify("上传暂停："+error.Message);}
     }
 
-    private BatchRow[] RoomSheets(BatchRow scope)=>_queue.Batches().Where(b=>b.ServerUrl==_server&&b.ProjectId==scope.ProjectId&&b.GroupId==scope.GroupId&&RoomKey(b)==RoomKey(scope)).ToArray();
+    private BatchRow[] RoomSheets(BatchRow scope)=>_queue.Batches().Where(b=>b.ServerUrl==_server&&b.ProjectId==scope.ProjectId&&b.GroupId==scope.GroupId&&ScopeKey(b)==ScopeKey(scope)).ToArray();
     private object CorrectAnswer(JsonElement args)
     {
         if(Capturing||_tickRunning||_revoked)throw new InvalidOperationException("当前无法编辑，请稍后再试。");
@@ -646,6 +675,7 @@ public sealed class DesktopController : IDisposable
     }
 
     private static string RoomKey(BatchRow sheet)=>string.Join(",",Json(sheet.RoomTagsJson).EnumerateArray().Select(tag=>Text(tag,"id")).OrderBy(id=>id));
+    private static string ScopeKey(BatchRow sheet)=>sheet.LocalGroupId.Length>0?"group:"+sheet.LocalGroupId:"room:"+RoomKey(sheet);
     public Task Tick()=>Tick(null);
     private async Task Tick(BatchRow[]? requested)
     {

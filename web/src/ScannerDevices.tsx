@@ -8,7 +8,7 @@ import { describeStatus,send,useResource,type Row } from './api'
 export function ScannerDevices() {
   const devices=useResource<Row[]>('/scanner/devices',[]),users=useResource<Row[]>('/users',[]),batches=useResource<Row[]>('/scan-batches',[])
   const [selected,setSelected]=useState<Row|null>(null),[mode,setMode]=useState('status'),[reason,setReason]=useState(''),[password,setPassword]=useState(''),[ids,setIds]=useState<string[]>([]),[busy,setBusy]=useState(false),{message}=App.useApp()
-  const enabled=(device:Row)=>!device.revoked&&users.data.find(u=>u.id===device.owner_id)?.role==='admin'
+  const enabled=(device:Row)=>!device.revoked&&['admin','manager'].includes(users.data.find(u=>u.id===device.owner_id)?.role)
   function open(device:Row,operation:string){setSelected(device);setMode(operation);setReason('');setPassword('');setIds([])}
   async function save(){
     if(!selected||!reason.trim()){message.warning('请填写操作原因');return}

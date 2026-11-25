@@ -22,8 +22,14 @@ def set_request_actor(request, person):
 def authenticate_session(db, authorization, request=None):
     if not authorization or not authorization.startswith('Bearer '):
         raise HTTPException(401,'请先登录')
-    row=db.execute('SELECT u.id,u.username,u.name,u.role FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=? AND s.expires>?',(hashlib.sha256(authorization[7:].encode()).hexdigest(),time.time())).fetchone()
+    token_digest=hashlib.sha256(authorization[7:].encode()).hexdigest()
+    row=db.execute('SELECT u.id,u.username,u.name,u.role FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=? AND s.expires>?',(token_digest,time.time())).fetchone()
     if row is None:
+        from .browser_sessions import lookup_revoked
+        revoked=lookup_revoked(db,token_digest)
+        if revoked is not None:
+            reason,detail=revoked
+            raise HTTPException(401,detail,headers={'X-OMP-Session-Ended':reason})
         raise HTTPException(401,'登录已过期')
     person = dict(row)
     set_request_actor(request, person)
@@ -34,9 +40,10 @@ def verified_in_request(request, authorization, kind):
     checked = getattr(request.state, '_http_guard_auth', None) if request is not None else None
     if not checked or checked[0] != authorization or checked[1] != kind:
         return None
-    _, _, person, status, detail = checked
+    person, status, detail = checked[2], checked[3], checked[4]
+    headers = checked[5] if len(checked) > 5 else None
     if status:
-        raise HTTPException(status, detail)
+        raise HTTPException(status, detail, headers=headers)
     return person
 
 

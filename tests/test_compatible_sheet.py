@@ -170,3 +170,65 @@ def test_publish_trial_and_wire_compatibility(tmp_path, monkeypatch):
         assert client.put(page_url, json={'reason': '核对扫描页'}, headers=headers).status_code == 422
         corrected = client.put(page_url, json={'reason': '核对扫描页', 'selections': {qid: ['C']}}, headers=headers)
         assert corrected.is_success and corrected.json()['status'] == 'recognized', corrected.text
+
+
+def test_external_accuracy_with_preprinted_letters_light_pencil_and_perspective():
+    template, (base,) = sheet('A4', 1)
+    # Render a realistic blank + filled sheet with pre-printed digits/letters inside bubbles and light 2B pencil fill.
+    width, height = prep_dimensions('A4')
+    realistic = base.copy()
+    # Redraw all bubbles cleanly with pre-printed characters inside every cell.
+    for col_idx, column in enumerate(template['external_sheet']['pages']['1']['candidate']):
+        for digit, cell in enumerate(column):
+            x, y, r, b = external.bounds(cell)
+            realistic[y + 1:b - 1, x + 1:r - 1] = 244
+            cv2.rectangle(realistic, (x, y), (r - 1, b - 1), 85, 1)
+            cv2.putText(realistic, str(digit), (x + 5, b - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.34, 115, 1)
+        # Fill with lighter 2B pencil intensity (~118)
+        fill(realistic, column[(col_idx + 3) % 10], value=118)
+    for i, cell in enumerate(template['questions'][0]['external_options']):
+        x, y, r, b = external.bounds(cell)
+        realistic[y + 1:b - 1, x + 1:r - 1] = 244
+        cv2.rectangle(realistic, (x, y), (r - 1, b - 1), 85, 1)
+        cv2.putText(realistic, chr(65 + i), (x + 5, b - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.34, 115, 1)
+    fill(realistic, template['questions'][0]['external_options'][1], value=118)
+
+    # Apply mild perspective warp + uneven lighting gradient.
+    src = np.float32([[0, 0], [width - 1, 0], [width - 1, height - 1], [0, height - 1]])
+    dst = np.float32([[8, 6], [width - 14, 12], [width - 6, height - 10], [12, height - 6]])
+    warped = cv2.warpPerspective(realistic, cv2.getPerspectiveTransform(src, dst), (width, height), borderValue=235)
+    gradient = np.linspace(0.86, 1.0, width, dtype=np.float32)[None, :]
+    shaded = np.clip(warped.astype(np.float32) * gradient, 0, 255).astype(np.uint8)
+
+    normalized, candidate, selections = recognize(shaded, template, 'front')
+    assert normalized.shape == (height, width)
+    assert candidate == '345'
+    assert selections == {template['questions'][0]['id']: ['B']}
+
+
+def test_compatible_adopt_auto_corrected_and_reextract_anchors(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    from server import db, jobs
+    from server.main import app
+
+    monkeypatch.setattr(db, 'ROOT', tmp_path)
+    monkeypatch.setattr(jobs, 'dispatch', lambda *args, **kwargs: None)
+    template, (image,) = sheet('A4', 1)
+    sample = cv2.imencode('.png', image)[1].tobytes()
+    with TestClient(app) as client:
+        account = {'username': 'admin', 'password': 'administrator-password', 'name': '管理员'}
+        assert client.post('/api/v1/auth/bootstrap', json=account).is_success
+        headers = {'Authorization': 'Bearer ' + client.post('/api/v1/auth/login', json=account).json()['token']}
+        with db.connect() as connection:
+            project = db.put(connection, 'projects', {'name': '校正测试', 'status': 'draft'})
+            subject = db.put(connection, 'subjects', {'project_id': project['id'], 'name': '物理'})
+            group = db.put(connection, 'groups', {'subject_id': subject['id'], 'name': '兼容卡'})
+        group_url = f"/api/v1/groups/{group['id']}"
+        adopted = client.post(group_url + '/compatible/reference', data={'paper': 'A4', 'already_corrected': 'true'},
+                              files={'files': ('corrected.png', sample)}, headers=headers)
+        assert adopted.is_success and adopted.json()['pages'][0].get('image'), adopted.text
+        boxes = [{k: a[k] for k in ('x', 'y', 'width', 'height')} for a in template['external_sheet']['pages']['1']['anchors']]
+        import json
+        refreshed = client.post(group_url + '/compatible/reextract-anchors', data={'paper': 'A4', 'boxes': json.dumps(boxes)},
+                                files={'file': ('corrected.png', sample)}, headers=headers)
+        assert refreshed.is_success and len(refreshed.json()['anchors']) == len(boxes), refreshed.text

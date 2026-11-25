@@ -144,3 +144,25 @@ def test_project_tags_snapshot_pairing_filter_export_archive(setup):
         records=json.loads(zipped.read('data.json'))['records'];assert any(r['kind']=='room-tags' for r in records)
     plan=post('projects/'+project+'/deletion-preview',None,h)
     assert next(row['count'] for row in plan['counts'] if row['kind']=='room-tags')==2
+
+
+def test_scanner_workbench_revoke_device_permissions(setup):
+    f=setup;c=f['client'];post=f['post'];h=f['managed']
+    # Manager pairs their own device and revokes it from the scanner desk.
+    pairing=post('scanner/pairings',None,h,201)
+    key=ec.generate_private_key(ec.SECP256R1());pub=encode(key.public_key().public_bytes(serialization.Encoding.DER,serialization.PublicFormat.SubjectPublicKeyInfo))
+    device=post('scanner/pair',{'code':pairing['code'],'public_key':pub,'label':'管理教师扫描机'},{},200)['device']
+    challenge=post('scanner/challenge',{'device_id':device['id']},{})
+    signature=encode(key.sign(message(challenge),ec.ECDSA(hashes.SHA256())))
+    token=post('scanner/authenticate',{'challenge_id':challenge['id'],'signature':signature},{})['token']
+    assert c.get('/api/v1/scanner/catalog',headers={'Authorization':'Bearer '+token}).status_code==200
+    revoked=c.post(f"/api/v1/scanner/devices/{device['id']}/revoke",json={'reason':'更换扫描电脑'},headers=h)
+    assert revoked.status_code==200 and revoked.json()['revoked'] is True
+    assert c.get('/api/v1/scanner/catalog',headers={'Authorization':'Bearer '+token}).status_code==403
+
+    # Manager cannot revoke admin's device, but admin can revoke any device.
+    admin_pairing=post('scanner/pairings',None,f['system'],201)
+    key2=ec.generate_private_key(ec.SECP256R1());pub2=encode(key2.public_key().public_bytes(serialization.Encoding.DER,serialization.PublicFormat.SubjectPublicKeyInfo))
+    admin_device=post('scanner/pair',{'code':admin_pairing['code'],'public_key':pub2,'label':'管理员扫描机'},{},200)['device']
+    assert c.post(f"/api/v1/scanner/devices/{admin_device['id']}/revoke",json={},headers=h).status_code==403
+    assert c.post(f"/api/v1/scanner/devices/{admin_device['id']}/revoke",json={},headers=f['system']).status_code==200

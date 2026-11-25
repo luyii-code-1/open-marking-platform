@@ -15,6 +15,8 @@ public sealed class BatchRow
     public string TemplateId { get; set; } = "";
     public int TemplateRevision { get; set; }
     public string Label { get; set; } = "";
+    public string LocalGroupId { get; set; } = "";
+    public int ExpectedCount { get; set; }
     public string Room { get; set; } = "";
     public string RoomTagsJson { get; set; } = "[]";
     public string Paper { get; set; } = "A4";
