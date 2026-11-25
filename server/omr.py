@@ -4,7 +4,7 @@ from itertools import product
 import cv2
 import numpy as np
 import zxingcpp
-from . import compatible_omr
+from . import compatible_omr, statistics_sheet
 
 ABSENT_X, ABSENT_Y = 124, 45
 ENGINE_VERSION = "omp-omr-3"
@@ -38,6 +38,7 @@ def code(template,side):
 
 
 def bubbles(question,region):
+    if question.get('choice_style')=='statistics':return statistics_sheet.bubbles(question,region)
     count=int(question.get('options',4))
     if question.get('choice_style')=='compact':return [(chr(65+i),region['x']+9+i*5,region['y']+2.4) for i in range(count)]
     if question.get('choice_style')=='bracket':return [(chr(65+i),region['x']+14+i*9.5,region['y']+3) for i in range(count)]
@@ -141,6 +142,7 @@ def manual_align(image,template,corners):
 
 
 def absent_mark(normalized,side,template=None):
+    if template and statistics_sheet.enabled(template):return False
     if template and compatible_omr.profile(template):
         return compatible_omr.absent(normalized, template, side)
     if side!='front':return False
@@ -201,7 +203,7 @@ def recognize(image,template,side,corners=None):
         crop=normalized[round((y-.75)*4):round((y+.75)*4),round((x-radius)*4):round((x+radius)*4)]
         return float(np.mean(crop<(calibrated if style else 135))) if crop.size else 0
     candidate=None
-    if side=='front':
+    if side=='front' and not statistics_sheet.enabled(template):
         digits=[]
         for column in range(int(template.get('candidate_length',8))):
             marked=[str(d) for d in range(10) if ink(18+column*6,57+d*3.5)>.45]

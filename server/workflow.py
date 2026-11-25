@@ -24,9 +24,9 @@ def membership(db,group):
             'removed':removed,'retained':retained,'needs_review':False}
 
 
-def batch_progress(db,batch):
+def batch_progress(db,batch,*,anonymous=False):
     pages=[p for p in find(db,'pages',batch_id=batch['id']) if not p.get('excluded')]
-    submissions=find(db,'submissions',group_id=batch['group_id'])
+    submissions=(find(db,'statistics-responses',batch_id=batch['id']) if anonymous else find(db,'submissions',group_id=batch['group_id']))
     linked={pid for s in submissions for pid in s.get('pages',[])}
     return {'received_pages':len(pages),'processing_pages':sum(p.get('status')=='received' for p in pages),
             'recognized_pages':sum(p.get('status')=='recognized' for p in pages),
@@ -124,7 +124,11 @@ def overview(db,group,current):
 def workflow(identifier:str,current=Depends(admin)):
     with connect() as db:
         db.execute('BEGIN')
-        return overview(db,require(db,identifier,'groups'),current)
+        group=require(db,identifier,'groups')
+        if group.get('statistics_group'):
+            batches=find(db,'scan-batches',group_id=identifier)
+            return {'group_id':identifier,'batches':[{**batch,**batch_progress(db,batch,anonymous=True)} for batch in batches]}
+        return overview(db,group,current)
 
 
 @router.get('/groups/{identifier}/roster/changes')

@@ -28,6 +28,7 @@ public sealed class BatchRow
     public string TemplateJson { get; set; } = "{}";
     public bool ManualBinding { get { using var document=System.Text.Json.JsonDocument.Parse(TemplateJson);return document.RootElement.TryGetProperty("layout_version",out var version)&&version.GetInt32()>=3; } }
     public bool ExternalSheet { get { using var document=System.Text.Json.JsonDocument.Parse(TemplateJson);return document.RootElement.TryGetProperty("external_sheet",out _); } }
+    public bool StatisticsSheet { get { using var document=System.Text.Json.JsonDocument.Parse(TemplateJson);return document.RootElement.TryGetProperty("statistics_sheet",out var value)&&value.ValueKind==System.Text.Json.JsonValueKind.True; } }
     public string RosterJson { get; set; } = "null";
     public string LocalPairsJson { get; set; } = "[]";
     public string Status { get; set; } = "open";

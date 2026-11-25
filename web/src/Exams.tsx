@@ -44,6 +44,7 @@ const ProjectStorage = loadPage(() => import('./StorageConnections').then(module
 const Results = loadPage(() => import('./Results').then(module => ({ default: module.Results })))
 const SheetLookup = loadPage(() => import('./SheetLookup').then(module => ({ default: module.SheetLookup })))
 const TemplateEditor = loadPage(() => import('./TemplateEditor').then(module => ({ default: module.TemplateEditor })))
+const StatisticsWorkspace = loadPage(() => import('./StatisticsWorkspace').then(module => ({ default: module.StatisticsWorkspace })))
 
 const { Title, Text } = Typography
 
@@ -535,6 +536,9 @@ export function Exams({ location, navigate }: { location: ExamLocation; navigate
       </Card>
     )
   }
+  if (project?.category === 'statistics') {
+    return <StatisticsWorkspace project={project} back={() => go({})} />
+  }
 
   const back: ExamLocation = group
     ? { projectId: project!.id }
@@ -757,13 +761,12 @@ export function Exams({ location, navigate }: { location: ExamLocation; navigate
                         <Form.Item name="category" label="项目类别" initialValue="exam">
                           <Radio.Group>
                             <Radio.Button value="exam">考试</Radio.Button>
-                            <Radio.Button value="statistics" disabled>
-                              统计（开发中，暂不可选）
-                            </Radio.Button>
+                            <Radio.Button value="statistics">统计</Radio.Button>
                           </Radio.Group>
                         </Form.Item>
-                        <Form.Item name="catalog_ids" label="同时创建科目">
-                          <CatalogPicker />
+                        <Form.Item noStyle shouldUpdate={(before, after) => before.category !== after.category}>
+                          {({ getFieldValue }) => getFieldValue('category') === 'statistics' ? null :
+                            <Form.Item name="catalog_ids" label="同时创建科目" preserve={false}><CatalogPicker /></Form.Item>}
                         </Form.Item>
                       </>
                     }
@@ -776,11 +779,11 @@ export function Exams({ location, navigate }: { location: ExamLocation; navigate
                     }}
                     columns={[
                       {
-                        title: '考试名称',
+                        title: '项目名称',
                         dataIndex: 'name',
-                        render: (name: string, row: Row) => <a href={examPath({ projectId: row.id })}>{name}</a>,
+                        render: (name: string, row: Row) => <Space><a href={examPath({ projectId: row.id })}>{name}</a>{row.category === 'statistics' && <Tag>统计</Tag>}</Space>,
                       },
-                      { title: '科目', render: (_: unknown, row: Row) => `${subjects.data.filter(s => s.project_id === row.id).length} 门` },
+                      { title: '科目', render: (_: unknown, row: Row) => row.category === 'statistics' ? '—' : `${subjects.data.filter(s => s.project_id === row.id).length} 门` },
                       {
                         title: '后台任务',
                         render: (_: unknown, row: Row) => {

@@ -3,6 +3,7 @@ import hashlib
 import io
 import json
 import zipfile
+from string import ascii_uppercase
 from uuid import UUID
 import cv2
 import numpy as np
@@ -12,7 +13,7 @@ from .db import connect, find, get, objects, put
 from .dependencies import require, scan_admin, scan_batch
 from .lifecycle import writable
 from .omr import ENGINE_VERSION, dimensions
-from . import compatible_omr
+from . import compatible_omr, statistics_sheet
 from .storage import local_path
 from .exam_status import ExamStatusFilter, STATUS_FIELDS, project_views, filter_projects
 
@@ -27,6 +28,8 @@ def configuration(template):
     fields = ('id', 'name', 'paper', 'sides', 'revision', 'layout_version', 'candidate_length', 'sheet_columns')
     result = {k: template[k] for k in fields if k in template}
     result['questions'] = [{k: q[k] for k in ('id', 'number', 'type', 'options', 'regions', 'choice_style') if k in q} for q in template['questions']]
+    if statistics_sheet.enabled(template):
+        result['statistics_sheet'] = True
     if compatible_omr.profile(template):
         result['external_sheet'] = template['external_sheet']
         for question, configured in zip(template['questions'], result['questions']):
@@ -52,7 +55,7 @@ def catalog(exam_status: ExamStatusFilter='all', current=Depends(scan_admin)):
             groups=[g for g in groups if g.get('subject_id') in subject_ids]
         values={'projects':projects,'subjects':subjects,'groups':groups}
         return {kind: [{k: value[k] for k in fields if k in value} for value in values[kind]] for kind, fields in (
-            ('projects', ('id', 'name', 'status', *STATUS_FIELDS)), ('subjects', ('id', 'name', 'project_id', 'default_group_id')),
+            ('projects', ('id', 'name', 'status', 'category', *STATUS_FIELDS)), ('subjects', ('id', 'name', 'project_id', 'default_group_id')),
             ('groups', ('id', 'name', 'subject_id', 'template_id', 'frozen', 'grade_id')))}
 
 
@@ -67,7 +70,17 @@ def project_package(identifier: str, capability: str = '', current=Depends(scan_
         for group in groups:
             template = get(db, group.get('template_id'), 'templates')
             if not template or template['status'] != 'published': continue
-            if compatible_omr.profile(template) and capability != compatible_omr.CAPABILITY: continue
+            capabilities = capability.split(',')
+            if compatible_omr.profile(template) and compatible_omr.CAPABILITY not in capabilities: continue
+            if statistics_sheet.enabled(template):
+                if statistics_sheet.CAPABILITY not in capabilities: continue
+                confirmed = find(db, 'statistics-responses', group_id=group['id'])
+                packaged.append({'id': group['id'], 'name': group['name'], 'subject_id': group['subject_id'],
+                                 'frozen': bool(group.get('frozen')), 'roster_mode': 'open', 'roster': [],
+                                 'template': configuration(template), 'config_sha256': config_hash(template),
+                                 'confirmed_candidates': [], 'confirmed_students': 0, 'confirmed_sheets': len(confirmed),
+                                 'unassigned_sheets': sum(not response.get('room_tags') for response in confirmed)})
+                continue
             from .school import group_students
             roster = group_students(db,group)
             is_open_roster = group.get('roster_mode') == 'open' or not roster
@@ -86,7 +99,7 @@ def project_package(identifier: str, capability: str = '', current=Depends(scan_
         rooms=[{**view(db,[t])[0],**progress(db,t)} for t in find(db,'room-tags',project_id=identifier)]
         return {'protocol': 'omp-scanner-4', 'engine_version': ENGINE_VERSION,
                 'room_tags':rooms,
-                'project': {k: project[k] for k in ('id', 'name', 'status', *STATUS_FIELDS) if k in project},
+                'project': {k: project[k] for k in ('id', 'name', 'status', 'category', *STATUS_FIELDS) if k in project},
                 'subjects': [{k: s[k] for k in ('id', 'name', 'default_group_id') if k in s} for s in subjects], 'groups': packaged}
 
 
@@ -164,19 +177,24 @@ def verify_result(template, side, result, original, normalized, cuts):
     supported={ENGINE_VERSION} if template.get('layout_version',2)>=3 or any(q.get('choice_style')=='compact' for q in template['questions']) else {ENGINE_VERSION,'omp-omr-2'} if any(q.get('choice_style')=='bracket' for q in template['questions']) else {ENGINE_VERSION,'omp-omr-2','omp-omr-1'}
     if compatible_omr.profile(template):
         supported = {compatible_omr.ENGINE_VERSION}
+    anonymous = statistics_sheet.enabled(template)
+    if anonymous:
+        supported = {statistics_sheet.ENGINE_VERSION}
     if result.get('engine_version') not in supported or result.get('template_id') != template['id'] or result.get('template_revision') != template['revision'] or result.get('config_sha256') != config_hash(template): raise HTTPException(409, '本地识读引擎或题卡版本不匹配，请更新扫描端并下载配置')
     checks = (('normalized_sha256', normalized),) if result.get('upload_format') == 'jpeg-sheet-1' else (('source_sha256', original), ('normalized_sha256', normalized), ('local_cuts_sha256', cuts))
     if any(result.get(key) != checksum(data) for key, data in checks): raise HTTPException(422, '上传文件与本地识读校验值不一致')
     candidate = result.get('candidate_number')
-    if side == 'front' and (not isinstance(candidate, str) or len(candidate) != template.get('candidate_length', 8) or any(c not in '0123456789?' for c in candidate)): raise HTTPException(422, '本地考号识读结果无效')
-    if side == 'back' and candidate is not None: raise HTTPException(422, '背面不应包含独立考号')
+    if side == 'front' and not anonymous and (not isinstance(candidate, str) or len(candidate) != template.get('candidate_length', 8) or any(c not in '0123456789?' for c in candidate)): raise HTTPException(422, '本地考号识读结果无效')
+    if (side == 'back' or anonymous) and candidate is not None: raise HTTPException(422, '扫描面不接受考号')
     if not isinstance(result.get('absent_mark'), bool): raise HTTPException(422, '缺考识读结果无效')
+    if anonymous and result['absent_mark']: raise HTTPException(422, '统计答卷不接受缺考标记')
     page = 1 if side == 'front' else 2
     questions = {q['id']: q for q in template['questions'] if q['type'] != 'subjective' and any(r['page'] == page for r in q['regions'])}
     selected = result.get('selections')
     if not isinstance(selected, dict) or set(selected) != set(questions): raise HTTPException(422, '客观题识读范围与题卡不一致')
     for qid, values in selected.items():
-        if not isinstance(values, list) or len(values) > 7 or len(set(str(v) for v in values)) != len(values) or any(not isinstance(v, str) or len(v) != 1 or v not in 'ABCDEFG'[:questions[qid].get('options', 4)] for v in values): raise HTTPException(422, '客观题选项无效')
+        letters = (ascii_uppercase if anonymous else 'ABCDEFG')[:questions[qid].get('options', 4)]
+        if not isinstance(values, list) or len(values) > len(letters) or len(set(str(v) for v in values)) != len(values) or any(not isinstance(v, str) or len(v) != 1 or v not in letters for v in values): raise HTTPException(422, '客观题选项无效')
     if result.get('upload_format') == 'jpeg-sheet-1':
         if not isinstance(result.get('source_sha256'),str) or len(result['source_sha256'])!=64 or any(c not in '0123456789abcdef' for c in result['source_sha256']): raise HTTPException(422,'扫描原图校验值无效')
         return
@@ -229,6 +247,7 @@ def upload_processed(identifier: str, normalized: UploadFile = File(), file: Upl
             existing = get(db, capture_id, 'pages')
             correction=result.get('operator_correction')
             if 'operator_correction' in result:
+                if statistics_sheet.enabled(template):raise HTTPException(422,'统计答卷使用匿名识读')
                 if side!='front' or not isinstance(correction,dict) or not isinstance(correction.get('original_number'),str) or len(correction['original_number'])>11 or type(correction.get('original_absent')) is not bool:
                     raise HTTPException(422,'人工更正记录无效')
                 correction={k:correction[k] for k in ('original_number','original_absent')}

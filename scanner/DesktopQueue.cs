@@ -89,13 +89,14 @@ public sealed partial class LocalQueue
         if(fronts.Length==0||(batch.Sides==2&&fronts.Length!=backs.Length))throw new InvalidOperationException("正反面数量不符，请处理缺面后再确认。");
         if(batch.CaptureMode=="duplex"&&fronts.Any(p=>!backs.Any(b=>b.Sequence==p.Sequence)))throw new InvalidOperationException("自动双面的纸张序号不完整。");
         var candidates=new HashSet<string>();var pairs=new List<object>();
+        var anonymous=batch.StatisticsSheet;
         using var roster=JsonDocument.Parse(batch.RosterJson);
         var known=roster.RootElement.ValueKind==JsonValueKind.Array?roster.RootElement.EnumerateArray().Select(s=>s.GetProperty("candidate_number").GetString()).ToHashSet():null;
         for(var i=0;i<fronts.Length;i++)
         {
-            using var result=JsonDocument.Parse(fronts[i].RecognitionJson);var candidate=result.RootElement.GetProperty("candidate_number").GetString()??"";
-            if(candidate.Length==0||candidate.Contains('?')||!candidates.Add(candidate))throw new InvalidOperationException("存在未识别或重复考号，请核查后再确认。");
-            if(known is not null&&!known.Contains(candidate))throw new InvalidOperationException("考号不在下载的应考名单中，请核查项目配置。");
+            using var result=JsonDocument.Parse(fronts[i].RecognitionJson);var candidate=result.RootElement.GetProperty("candidate_number").GetString();
+            if(!anonymous&&(string.IsNullOrEmpty(candidate)||candidate.Contains('?')||!candidates.Add(candidate)))throw new InvalidOperationException("存在未识别或重复考号，请核查后再确认。");
+            if(!anonymous&&known is not null&&!known.Contains(candidate))throw new InvalidOperationException("考号不在下载的应考名单中，请核查项目配置。");
             pairs.Add(new {candidate_number=candidate,pages=batch.Sides==2?new[]{fronts[i].CaptureId,backs[i].CaptureId}:new[]{fronts[i].CaptureId}});
         }
         return JsonSerializer.Serialize(pairs);

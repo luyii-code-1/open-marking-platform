@@ -2,6 +2,7 @@ import io
 import hashlib
 import time
 from pathlib import Path
+from string import ascii_uppercase
 from uuid import uuid4
 from fastapi import APIRouter,Depends,HTTPException,File,UploadFile
 from fastapi.responses import FileResponse
@@ -77,6 +78,10 @@ def correct_page(identifier:str,body:dict,current=Depends(admin)):
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
         page=require(db,identifier,'pages'); batch=require(db,page['batch_id'],'scan-batches')
+        template=require(db,batch['template_id'],'templates')
+        anonymous=bool(template.get('statistics_sheet'))
+        if anonymous and ('candidate_number' in body or 'absent_mark' in body):
+            raise HTTPException(422,'请核对统计答卷的选项或页面顺序')
         from .lifecycle import writable
         writable(db,'pages',page)
         if batch['status']=='paired': raise HTTPException(409,'已配对页面请使用答卷补扫替换')
@@ -100,12 +105,14 @@ def correct_page(identifier:str,body:dict,current=Depends(admin)):
             if candidate not in known: raise HTTPException(422,'考号不在学生名单中')
             page['candidate_number']=candidate
         if 'selections' in body:
-            template=require(db,batch['template_id'],'templates')
-            by_id={q['id']:q for q in template['questions'] if q['type']!='subjective'}
+            by_id={q['id']:q for q in template['questions'] if q['type']!='subjective'
+                   and (not anonymous or q['regions'][0]['page']==(1 if page['side']=='front' else 2))}
             selections=body['selections']
             if not isinstance(selections,dict): raise HTTPException(422,'选项数据无效')
             for qid,answers in selections.items():
-                if qid not in by_id or not isinstance(answers,list) or not set(answers)<=set('ABCDEFG'[:by_id[qid].get('options',4)]): raise HTTPException(422,'选项超出题目范围')
+                letters=(ascii_uppercase if anonymous else 'ABCDEFG')[:by_id.get(qid,{}).get('options',4)]
+                if qid not in by_id or not isinstance(answers,list) or any(not isinstance(value,str) or len(value)!=1 or value not in letters for value in answers): raise HTTPException(422,'选项超出题目范围')
+                selections[qid]=sorted(set(answers))
             page['selections']={**page.get('selections',{}),**selections}
         if 'absent_mark' in body:
             if page['side']!='front' or type(body['absent_mark']) is not bool:raise HTTPException(422,'缺考标记只用于正面，值需为布尔值')

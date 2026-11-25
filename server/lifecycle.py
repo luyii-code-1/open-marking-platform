@@ -12,7 +12,7 @@ PARENTS = {
     'room-tags': ('project_id','group_id'),
     'subjects': ('project_id',), 'groups': ('subject_id',),
     'templates': ('group_id',), 'scan-batches': ('group_id',), 'rosters': ('group_id',),
-    'pages': ('batch_id',), 'submissions': ('group_id',),
+    'pages': ('batch_id',), 'submissions': ('group_id',), 'statistics-responses': ('group_id',),
     'assignments': ('template_id',), 'tasks': ('template_id', 'submission_id'),
     'answer-slices': ('group_id', 'template_id', 'submission_id'),
     'exceptions': ('group_id', 'batch_id', 'page_id', 'submission_id', 'task_id'),

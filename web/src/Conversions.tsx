@@ -133,7 +133,7 @@ export function Conversions({ projectId }: { projectId?: string }) {
           {
             key: 'project',
             label: '来源考试',
-            options: projects.data.map(p => ({ value: p.id, label: p.name })),
+            options: projects.data.filter(p => p.category !== 'statistics').map(p => ({ value: p.id, label: p.name })),
             values: r => (r.project_id ? [r.project_id] : []),
           },
         ]}

@@ -86,7 +86,7 @@ export function Gradebook({ projectId, subjectId, gradeId, groupId }: Scope) {
         <Card>
           <Space direction="vertical" size={8} style={{ width: '100%' }}>
             <ErrorNotice error={projects.error} retry={projects.reload} />
-            <RecordSelect title="考试项目" records={projects.data} value={chosen} onChange={setChosen} />
+            <RecordSelect title="考试项目" records={projects.data.filter(p => p.category !== 'statistics')} value={chosen} onChange={setChosen} />
           </Space>
         </Card>
       )}

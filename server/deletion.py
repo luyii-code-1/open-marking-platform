@@ -18,7 +18,7 @@ LABELS = {
     'room-tags': '考场标签',
     'projects': '考试项目', 'subjects': '科目', 'groups': '题卡组', 'templates': '题卡',
     'scan-batches': '扫描批次', 'pages': '扫描页面', 'rosters': '应考名单',
-    'submissions': '答卷', 'assignments': '教师分配', 'tasks': '阅卷任务',
+    'submissions': '答卷', 'statistics-responses': '统计答卷', 'assignments': '教师分配', 'tasks': '阅卷任务',
     'answer-slices': '答题图版本', 'exceptions': '异常与优秀卷记录',
     'page-alignments': '页面定位记录', 'publication-events': '成绩发布记录', 'regrade-events': '重阅记录',
 }
@@ -28,7 +28,7 @@ CHILDREN = (
     ('subjects', ('project_id',)), ('groups', ('subject_id',)),
     ('room-tags', ('project_id','group_id')),
     ('templates', ('group_id',)), ('scan-batches', ('group_id',)), ('rosters', ('group_id',)),
-    ('pages', ('batch_id',)), ('submissions', ('group_id',)),
+    ('pages', ('batch_id',)), ('submissions', ('group_id',)), ('statistics-responses', ('group_id',)),
     ('assignments', ('template_id',)), ('tasks', ('template_id', 'submission_id')),
     ('answer-slices', ('group_id', 'template_id', 'submission_id')),
     ('exceptions', ('group_id', 'batch_id', 'page_id', 'submission_id', 'task_id')),

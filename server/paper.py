@@ -10,7 +10,7 @@ from .paper_fonts import FONT
 from reportlab.lib.utils import ImageReader
 from . import db as database
 from .richtext import PaperCanvas,layout as rich_layout
-from . import compatible_omr, sheet_notices, sheet_style
+from . import compatible_omr, sheet_notices, sheet_style, statistics_sheet
 
 from .omr import ABSENT_X, ABSENT_Y, dimensions, code, bubbles, decode, align, manual_align, absent_mark, recognize, manual_binding, panels, absent_position
 
@@ -147,6 +147,8 @@ def forbidden_regions(template,page):
 
 
 def pdf(template, only_page=None):
+    if statistics_sheet.enabled(template):
+        return statistics_sheet.pdf(template, only_page)
     from .merged_questions import print_questions
     template={**template,'questions':list(print_questions(template))}
     validate(template)

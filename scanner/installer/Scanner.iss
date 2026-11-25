@@ -11,7 +11,7 @@
 [Setup]
 AppId={{91DE2170-7F7E-4ED0-A384-E0956AEB5E8F}
 AppName=Open Marking Platform Scanner
-AppVersion=0.1.13
+AppVersion=0.1.14
 AppPublisher=Open Marking Platform
 DefaultDirName={localappdata}\Programs\OpenMarkingPlatform\Scanner
 DefaultGroupName=Open Marking Platform

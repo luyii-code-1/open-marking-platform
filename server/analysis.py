@@ -88,6 +88,8 @@ def group_analysis(group_id:str,metric:str='raw',include_absent:bool=False,pass_
 
 def project_result_groups(db,identifier,current):
     project=require(db,identifier,'projects')
+    if project.get('category')=='statistics':
+        raise HTTPException(404,'请在统计项目中查看选项汇总')
     subjects={s['id']:s for s in find(db,'subjects',project_id=identifier)}
     groups=[g for g in objects(db,'groups') if g.get('subject_id') in subjects and g.get('template_id')]
     if current['role'] not in ('admin','manager') and not any(current['id'] in c.get('teacher_ids',[]) for c in objects(db,'classes')):raise HTTPException(403,'未配置任教班级')

@@ -39,6 +39,7 @@ def save_draft(group_id:str,identifier:str,body:dict,current=Depends(admin)):
     signature=hashlib.sha256(json.dumps(body,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
     with connect() as db:
         db.execute('BEGIN IMMEDIATE');group=require(db,group_id,'groups')
+        if group.get('statistics_group'):raise HTTPException(422,'请在统计项目中设计题卡')
         old=get(db,identifier,'templates')
         if old and old.get('group_id')!=group_id:raise HTTPException(409,'草稿属于另一题卡')
         if group.get('frozen') or old and old.get('status') in ('published','superseded'):raise HTTPException(409,'题卡已发布，不能保存草稿')

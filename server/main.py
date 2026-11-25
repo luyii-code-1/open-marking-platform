@@ -228,8 +228,9 @@ def create_route(kind):
                 raise HTTPException(422,'请填写名称')
             if kind=='projects':
                 category=value.get('category','exam')
-                if category!='exam':raise HTTPException(422,'统计类项目正在开发中，暂不可创建')
-                value['category']='exam'
+                if category not in ('exam','statistics'):raise HTTPException(422,'项目类别无效')
+                value['category']=category
+                value.pop('statistics_group_id',None)
                 value['status']='draft'
                 for field in STATUS_FIELDS:value.pop(field,None)
                 value['exam_status_mode']='auto'
@@ -255,7 +256,10 @@ def create_route(kind):
                 from .school import assign_class
                 assign_class(db,value,body,current['id'])
             if kind=='templates':
-                if require(db,value['group_id'],'groups').get('frozen'):raise HTTPException(409,RESULTS_REVIEW_GUIDE)
+                group=require(db,value['group_id'],'groups')
+                if group.get('statistics_group'):raise HTTPException(422,'请在统计项目中设计题卡')
+                if group.get('frozen'):raise HTTPException(409,RESULTS_REVIEW_GUIDE)
+                value.pop('statistics_sheet',None)
                 if value.get('paper') not in ('A3','A4') or value.get('sides') not in (1,2):
                     raise HTTPException(422,'纸型或单双面无效')
                 value.update(revision=0,status='draft',layout_version=3)
@@ -321,7 +325,10 @@ def create_route(kind):
                 value.update(name=tag['name'],subject_tag_id=tag['id'])
             catalog_ids=value.pop('catalog_ids',[]) if kind=='projects' else []
             result=put(db,kind,value,current['id'])
-            if kind=='projects' and catalog_ids:
+            if kind=='projects' and result['category']=='statistics':
+                from .statistics_projects import create_group
+                result=create_group(db,result,current['id'])
+            elif kind=='projects' and catalog_ids:
                 from .electives import create_exam_subjects
                 create_exam_subjects(db,result,catalog_ids,current['id'])
             if kind=='subjects' and value.get('group_mode')=='default':
@@ -364,6 +371,7 @@ def edit_template(identifier:str,body:dict,current=Depends(admin)):
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
         old=require(db,identifier,'templates')
+        if old.get('statistics_sheet') or body.get('statistics_sheet'):raise HTTPException(422,'请在统计项目中设计题卡')
         if old['status'] in ('published','superseded'): raise HTTPException(409,'已发布版式不能直接编辑，请复制新题卡')
         if body.get('draft_version',0)!=old.get('draft_version',0):raise HTTPException(409,'草稿已更新，请重新载入后编辑')
         body={**old,**body,'id':identifier,'group_id':old['group_id'],'status':'draft','revision':old['revision'],'layout_version':3,'draft_version':old.get('draft_version',0)+1}
@@ -538,6 +546,14 @@ def pair(identifier:str,body:dict|None=Body(default=None),current=Depends(scan_a
         if not fronts or (template['sides']==2 and len(fronts)!=len(backs)): raise HTTPException(409,'正反面数量不符')
         if any(p['status']=='received' for p in page_list):raise HTTPException(425,'页面正在后台识别，请稍后重试')
         if any(p['status']!='recognized' for p in page_list): raise HTTPException(409,'存在待处理识别异常')
+        if template.get('statistics_sheet'):
+            from .statistics_projects import confirm
+            page_sets=[[front]+([backs[i]] if template['sides']==2 else []) for i,front in enumerate(fronts)]
+            local=[{'candidate_number':None,'pages':[p['id'] for p in pages]} for pages in page_sets]
+            if body and 'local_pairs' in body and body['local_pairs']!=local:
+                raise HTTPException(409,'本地配页清单与服务器页面记录不一致，请核查后重新确认')
+            confirm(db,batch,template,page_sets,current['id'])
+            return put(db,'scan-batches',{**batch,'status':'paired'},current['id'])
         numbers=[p['candidate_number'] for p in fronts]
         if any(not number or '?' in number for number in numbers) or len(set(numbers))!=len(numbers): raise HTTPException(409,'考号缺失或重复，请处理后配对')
         if body and 'local_pairs' in body:
@@ -620,6 +636,8 @@ from .templates import router as templates_router
 app.include_router(templates_router)
 from .compatible_templates import router as compatible_templates_router
 app.include_router(compatible_templates_router)
+from .statistics_projects import router as statistics_projects_router
+app.include_router(statistics_projects_router)
 from .teacher_templates import router as teacher_templates_router
 app.include_router(teacher_templates_router)
 from .realtime import router as realtime_router

@@ -259,7 +259,7 @@ public sealed class DesktopController : IDisposable
                 Notify("项目状态已更新。");return State(args);
             case "downloadProject":
                 if(!_online||_api is null)throw new InvalidOperationException("下载项目需要连接服务器。");
-                var id=Guid.Parse(Text(args,"project_id")).ToString();var data=await _api.Get($"scanner/projects/{id}/package?capability=external-sheet-1",_lifetime.Token);
+                var id=Guid.Parse(Text(args,"project_id")).ToString();var data=await _api.Get($"scanner/projects/{id}/package?capability=external-sheet-1,statistics-sheet-1",_lifetime.Token);
                 var packageFields=JsonSerializer.Deserialize<Dictionary<string,JsonElement>>(data.GetRawText())!;packageFields["downloaded_at"]=JsonSerializer.SerializeToElement(DateTimeOffset.UtcNow.ToString("O"));
                 data=JsonSerializer.SerializeToElement(packageFields);Save(ProjectPath(id),data.GetRawText());_packages[id]=data;
                 foreach(var batch in _queue.Batches().Where(b=>b.ServerUrl==_server))
@@ -477,7 +477,7 @@ public sealed class DesktopController : IDisposable
         string? issue;
         try{
             var result=await _worker.Recognize(batch,page,_lifetime.Token);
-            issue=page.Side=="front"?CandidateIssue(batch,Text(result,"candidate_number")):null;
+            issue=page.Side=="front"&&!batch.StatisticsSheet?CandidateIssue(batch,Text(result,"candidate_number")):null;
             _queue.PageRecognized(page.CaptureId,result.GetRawText(),issue);
         }
         catch(Exception error)when(error is not (OutOfMemoryException or OperationCanceledException)){
@@ -595,6 +595,7 @@ public sealed class DesktopController : IDisposable
     {
         if(Capturing||_tickRunning||_revoked)throw new InvalidOperationException("当前无法编辑，请稍后再试。");
         var sheet=Batch(Text(args,"batch_id"));
+        if(sheet.StatisticsSheet)throw new InvalidOperationException("统计答卷按扫描页匿名确认。");
         var page=_queue.Pages(sheet.Id).Single(p=>p.CaptureId==Text(args,"page_id")&&p.Side=="front");
         if(sheet.Status=="paired"||page.Status is "uploaded" or "excluded"||page.RecognitionJson=="{}"||
             sheet.Status=="frozen"&&(sheet.Error.StartsWith("同步被服务器拒绝")||sheet.Error.StartsWith("原图已送交")))
@@ -630,7 +631,7 @@ public sealed class DesktopController : IDisposable
                 var front=sides.FirstOrDefault(p=>p.Side=="front");
                 var read=Json(front?.RecognitionJson??"{}");
                 bool? absent=read.TryGetProperty("absence_layout_known",out var known)&&known.ValueKind==JsonValueKind.True&&read.TryGetProperty("absent_mark",out var mark)&&mark.ValueKind is JsonValueKind.True or JsonValueKind.False?mark.GetBoolean():null;
-                rows.Add(new{id=sides[0].CaptureId,batch_id=sheet.Id,candidate=Text(read,"candidate_number"),absent,status=sheet.Status,editable=front is not null&&front.RecognitionJson!="{}"&&front.Status is "pending" or "blocked"&&sheet.Status!="paired",
+                rows.Add(new{id=sides[0].CaptureId,batch_id=sheet.Id,candidate=Text(read,"candidate_number"),absent,status=sheet.Status,editable=!sheet.StatisticsSheet&&front is not null&&front.RecognitionJson!="{}"&&front.Status is "pending" or "blocked"&&sheet.Status!="paired",
                     sides=sides.Select(p=>new{id=p.CaptureId,side=p.Side,sequence=p.Sequence,status=p.Status,error=p.Error}).ToArray()});
             }
             foreach(var pair in Json(sheet.LocalPairsJson).EnumerateArray()){
