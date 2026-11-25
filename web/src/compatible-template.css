@@ -1,27 +1,61 @@
+.compatible-layout {
+  display: grid;
+  gap: 12px;
+}
+.compatible-steps-card .ant-card-body {
+  padding: 12px 16px;
+}
 .compatible-workbench {
   display: grid;
-  grid-template-columns: minmax(300px, 410px) minmax(0, 1fr);
+  grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
   gap: 16px;
   align-items: start;
 }
 .compatible-controls .ant-form-item { margin-bottom: 12px; }
 .compatible-tools { margin: 12px 0; }
-.compatible-questions { display: grid; gap: 8px; }
+.compatible-panel-box {
+  margin: 12px 0;
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--ant-color-border-secondary, #e5e7eb);
+  background: var(--ant-color-fill-quaternary, #f7f8fa);
+}
+.compatible-step-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--ant-color-border-secondary, #f0f0f0);
+}
+.compatible-selection-bar {
+  margin-bottom: 10px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--ant-color-warning-border, #ffd8bf);
+  background: var(--ant-color-warning-bg, #fff7e6);
+}
+.compatible-questions { display: grid; gap: 8px; max-height: 320px; overflow: auto; }
 .compatible-question { display: grid; grid-template-columns: auto minmax(48px, 1fr) minmax(48px, 1fr) auto auto; gap: 6px; }
 .compatible-question .ant-input-number { width: 100%; }
 .compatible-canvas-viewport { overflow: auto; max-height: 78vh; padding: 8px; background: var(--ant-color-fill-quaternary, #f5f7f6); border-radius: 6px; }
 .compatible-canvas { position: relative; max-width: 920px; margin-inline: auto; background: white; }
 .compatible-canvas > img, .compatible-canvas > svg { display: block; position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; }
 .compatible-draw { cursor: crosshair; touch-action: none; }
+.compatible-edit { cursor: default; touch-action: none; }
 .compatible-canvas rect { stroke-width: .45; fill: transparent; stroke: #1677ff; }
 .compatible-canvas circle, .compatible-canvas text { fill: #1677ff; }
-.compatible-canvas .compatible-label { font-size: 3.1px; font-weight: 600; pointer-events: none; user-select: none; paint-order: stroke; stroke: #ffffff; stroke-width: 0.9px; }
-.compatible-canvas .compatible-mark-anchor { stroke: #6f42c1; fill: #6f42c11a; }
+.compatible-canvas .compatible-label { font-size: 2.7px; font-weight: 600; pointer-events: none; user-select: none; paint-order: stroke; stroke: #ffffff; stroke-width: 0.8px; }
+.compatible-canvas .compatible-mark-anchor { stroke: #6f42c1; fill: #6f42c118; }
 .compatible-canvas .compatible-label-anchor { fill: #6f42c1; }
-.compatible-canvas .compatible-mark-candidate, .compatible-canvas .compatible-mark-absent { stroke: #047857; fill: #04785716; }
-.compatible-canvas .compatible-label-candidate, .compatible-canvas .compatible-label-absent { fill: #047857; }
-.compatible-canvas .compatible-mark-selected { stroke: #e35d03; fill: #e35d0326; }
+.compatible-canvas .compatible-mark-candidate, .compatible-canvas .compatible-mark-absent { stroke: #047857; fill: #04785714; }
+.compatible-canvas .compatible-mark-candidate-group { stroke: #047857; stroke-dasharray: 1.2 0.8; fill: #0478570c; }
+.compatible-canvas .compatible-label-candidate, .compatible-canvas .compatible-label-candidate-group, .compatible-canvas .compatible-label-absent { fill: #047857; }
+.compatible-canvas .compatible-mark-selected { stroke: #e35d03; stroke-width: .65; fill: #e35d0324; }
 .compatible-canvas .compatible-label-selected { fill: #e35d03; }
+.compatible-canvas .compatible-mark-interactive { cursor: move; pointer-events: all; }
+.compatible-canvas .compatible-mark-interactive:hover { stroke-width: .7; fill-opacity: .28; }
+.compatible-canvas .compatible-handle { fill: #ffffff; stroke: #e35d03; stroke-width: .45; pointer-events: all; }
 .compatible-canvas .compatible-corners-poly { fill: #1677ff14; stroke: #1677ff; stroke-width: 2; }
 @media (max-width: 860px) {
   .compatible-workbench { grid-template-columns: minmax(0, 1fr); }

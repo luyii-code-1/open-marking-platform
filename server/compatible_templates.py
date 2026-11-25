@@ -82,15 +82,15 @@ def box_from_pixels(x, y, w, h):
 
 def suggest_anchors(page):
     height, width = page.shape
-    mask = np.uint8(page < 150)
+    mask = np.uint8(page < 155)
     _, _, stats, _ = cv2.connectedComponentsWithStats(mask)
     candidates = []
     for x, y, w, h, area in stats[1:]:
-        if 7 <= w <= 32 and 7 <= h <= 32 and .65 <= w / h <= 1.55 and area >= .68 * w * h:
-            candidates.append((x + w / 2, y + h / 2, w, h))
+        if 6 <= w <= 34 and 6 <= h <= 34 and .55 <= w / h <= 1.85 and area >= .66 * w * h:
+            candidates.append((int(x), int(y), int(w), int(h), x + w / 2, y + h / 2))
     anchors = []
     for tx, ty in ((.08, .08), (.92, .08), (.92, .92), (.08, .92)):
-        options = [c for c in candidates if abs(c[0] / width - tx) < .15 and abs(c[1] / height - ty) < .16]
+        options = [c for c in candidates if abs(c[4] / width - tx) < .15 and abs(c[5] / height - ty) < .16]
         if not options:
             horizontal = range(18, int(width * .26), 34) if tx < .5 else range(int(width * .70), width - 97, 34)
             vertical = range(20, int(height * .18), 32) if ty < .5 else range(int(height * .78), height - 60, 32)
@@ -98,7 +98,7 @@ def suggest_anchors(page):
             for y in vertical:
                 for x in horizontal:
                     try:
-                        anchor = omr.make_anchor(page, box_from_pixels(x, y, 92, 56))
+                        anchor = omr.make_anchor(page, box_from_pixels(x, y, 80, 48))
                     except ValueError:
                         continue
                     pattern = omr.patch_data(anchor)
@@ -108,15 +108,29 @@ def suggest_anchors(page):
             if proposals:
                 anchors.append(max(proposals, key=lambda item: item[0])[1])
             continue
-        x, y, w, h = min(options, key=lambda c: (c[0] / width - tx) ** 2 + (c[1] / height - ty) ** 2)
-        size = max(26, int(max(w, h) * 1.9))
-        left, top = max(0, min(width - size, int(x - size / 2))), max(0, min(height - size, int(y - size / 2)))
-        anchors.append(omr.make_anchor(page, box_from_pixels(left, top, size, size)))
+        bx, by, bw, bh, cx, cy = min(options, key=lambda c: (c[4] / width - tx) ** 2 + (c[5] / height - ty) ** 2)
+        # Tight ROI around the detected solid fiducial block, then snap tightly away from nearby lines.
+        pad = max(3, min(6, round(max(bw, bh) * 0.35)))
+        left = max(0, bx - pad)
+        top = max(0, by - pad)
+        right = min(width, bx + bw + pad)
+        bottom = min(height, by + bh + pad)
+        if right - left < 12:
+            left = max(0, min(width - 12, int(cx - 6)))
+            right = left + 12
+        if bottom - top < 12:
+            top = max(0, min(height - 12, int(cy - 6)))
+            bottom = top + 12
+        anchors.append(omr.make_anchor(page, box_from_pixels(left, top, right - left, bottom - top), tighten=True))
     if len(anchors) == 4:
-        for y in (64, 100, 140):
-            for x in range(90, width - 190, 80):
+        for y in (56, 92, 132):
+            for x in range(90, width - 160, 76):
+                box = box_from_pixels(x, y, 96, 44)
+                if any(box['x'] < a['x'] + a['width'] and box['x'] + box['width'] > a['x']
+                       and box['y'] < a['y'] + a['height'] and box['y'] + box['height'] > a['y'] for a in anchors):
+                    continue
                 try:
-                    anchor = omr.make_anchor(page, box_from_pixels(x, y, 132, 60))
+                    anchor = omr.make_anchor(page, box)
                 except ValueError:
                     continue
                 if omr.distinctive(omr.patch_data(anchor)):
@@ -197,7 +211,7 @@ def draft_in_group(db, group_id, current):
 @router.post('/groups/{group_id}/compatible/reference')
 def reference(group_id: str, files: list[UploadFile] = File(), paper: str = Form(),
               rotation: int = Form(0), corners: str = Form(''), combine: bool = Form(False),
-              already_corrected: bool = Form(False), current=Depends(admin)):
+              already_corrected: bool = Form(False), apply_grayscale: bool = Form(True), current=Depends(admin)):
     with connect() as db:
         draft_in_group(db, group_id, current)
     if not 1 <= len(files) <= (5 if combine else 2) or not 0 <= rotation <= 3:
@@ -246,7 +260,8 @@ def reference(group_id: str, files: list[UploadFile] = File(), paper: str = Form
                 pages = pages[:1]
         for index, page, source in pages:
             normalized = omr.grayscale(page)
-            result[index] = {'source': picture(source, '.jpg'), 'image': picture(page),
+            rendered = normalized if apply_grayscale else page
+            result[index] = {'source': picture(source, '.jpg'), 'image': picture(rendered),
                              'anchors': suggest_anchors(normalized), **suggest_regions(normalized)}
         return JSONResponse({'pages': [result[index] for index in sorted(result)]}, headers={'Cache-Control': 'private, no-store'})
     except (ValueError, OSError, cv2.error, subprocess.SubprocessError) as error:
@@ -255,7 +270,7 @@ def reference(group_id: str, files: list[UploadFile] = File(), paper: str = Form
         _slots.release()
 
 
-def _decode_page_for_anchor(content, width, height):
+def _decode_page_for_anchor(content, width, height, apply_grayscale=True):
     image = cv2.imdecode(np.frombuffer(content, np.uint8), cv2.IMREAD_GRAYSCALE)
     if image is None:
         raise ValueError('请先校正并载入当前纸面的样张')
@@ -264,23 +279,25 @@ def _decode_page_for_anchor(content, width, height):
         if not .96 <= ratio <= 1.04:
             raise ValueError('请先校正并载入当前纸面的样张')
         image = cv2.resize(image, (width, height), interpolation=cv2.INTER_AREA if image.shape[1] > width else cv2.INTER_CUBIC)
-    return omr.grayscale(image)
+    return omr.grayscale(image) if apply_grayscale else image
 
 
 @router.post('/groups/{group_id}/compatible/anchor')
-def anchor(group_id: str, file: UploadFile = File(), box: str = Form(), paper: str = Form(), current=Depends(admin)):
+def anchor(group_id: str, file: UploadFile = File(), box: str = Form(), paper: str = Form(),
+           tighten: bool = Form(True), current=Depends(admin)):
     with connect() as db:
         draft_in_group(db, group_id, current)
     try:
         width, height = prep_dimensions(paper)
         normalized = _decode_page_for_anchor(read_file(file), width, height)
-        return omr.make_anchor(normalized, json.loads(box))
+        return omr.make_anchor(normalized, json.loads(box), tighten=tighten)
     except (ValueError, cv2.error) as error:
         raise HTTPException(422, str(error)) from error
 
 
 @router.post('/groups/{group_id}/compatible/reextract-anchors')
-def reextract_anchors(group_id: str, file: UploadFile = File(), boxes: str = Form(), paper: str = Form(), current=Depends(admin)):
+def reextract_anchors(group_id: str, file: UploadFile = File(), boxes: str = Form(), paper: str = Form(),
+                      tighten: bool = Form(True), current=Depends(admin)):
     with connect() as db:
         draft_in_group(db, group_id, current)
     try:
@@ -289,9 +306,64 @@ def reextract_anchors(group_id: str, file: UploadFile = File(), boxes: str = For
         raw_boxes = json.loads(boxes)
         if not isinstance(raw_boxes, list) or not 1 <= len(raw_boxes) <= 8:
             raise ValueError('定位参照数量应为 1 至 8 个')
-        return {'anchors': [omr.make_anchor(normalized, {k: item[k] for k in ('x', 'y', 'width', 'height')}) for item in raw_boxes]}
+        return {'anchors': [omr.make_anchor(normalized, {k: item[k] for k in ('x', 'y', 'width', 'height')}, tighten=tighten) for item in raw_boxes]}
     except (ValueError, KeyError, TypeError, cv2.error) as error:
         raise HTTPException(422, str(error)) from error
+
+
+@router.post('/groups/{group_id}/compatible/rectify')
+def rectify(group_id: str, file: UploadFile = File(), paper: str = Form(),
+            corners: str = Form(''), anchors: str = Form(''),
+            apply_grayscale: bool = Form(True), detect_regions: bool = Form(True),
+            already_rectified: bool = Form(False), current=Depends(admin)):
+    """Run grayscale + rectangular perspective correction first, then detect regions on the clean sheet."""
+    with connect() as db:
+        draft_in_group(db, group_id, current)
+    if not _slots.acquire(blocking=False):
+        raise HTTPException(503, '题卡校正较繁忙，请稍后重试')
+    try:
+        width, height = prep_dimensions(paper)
+        raw_content = read_file(file)
+        if corners:
+            images = input_pages(raw_content, width, height)
+            if len(images) != 1:
+                raise ValueError('四角校正请逐面处理')
+            image = images[0]
+            factor = min(1, 1800 / max(image.shape))
+            if factor < 1:
+                image = cv2.resize(image, None, fx=factor, fy=factor, interpolation=cv2.INTER_AREA)
+            warped = omr.warp(image, json.loads(corners), width, height)
+            cleaned = omr.grayscale(warped) if apply_grayscale else warped
+            normalized = cleaned if apply_grayscale else omr.grayscale(warped)
+            found_anchors = suggest_anchors(normalized)
+        elif anchors:
+            page = _decode_page_for_anchor(raw_content, width, height, apply_grayscale=False)
+            raw_anchors = json.loads(anchors)
+            cleaned, mapped_boxes = omr.rectify_by_anchors(page, raw_anchors, apply_grayscale=apply_grayscale)
+            normalized = cleaned if apply_grayscale else omr.grayscale(cleaned)
+            found_anchors = [omr.make_anchor(normalized, box, tighten=True) for box in mapped_boxes]
+        elif already_rectified:
+            page = _decode_page_for_anchor(raw_content, width, height, apply_grayscale=False)
+            cleaned = omr.grayscale(page) if apply_grayscale else page
+            normalized = cleaned if apply_grayscale else omr.grayscale(page)
+            found_anchors = suggest_anchors(normalized)
+        else:
+            images = input_pages(raw_content, width, height)
+            if len(images) != 1:
+                raise ValueError('自动矩形校正请逐面处理')
+            image = images[0]
+            if (image.shape[1] > image.shape[0]) != (width > height):
+                image = np.ascontiguousarray(np.rot90(image))
+            warped = omr.rectangular_page(image, width, height)
+            cleaned = omr.grayscale(warped) if apply_grayscale else warped
+            normalized = cleaned if apply_grayscale else omr.grayscale(warped)
+            found_anchors = suggest_anchors(normalized)
+        regions = suggest_regions(normalized) if detect_regions else {'candidate': [], 'choices': [], 'frames': []}
+        return JSONResponse({'image': picture(cleaned), 'anchors': found_anchors, **regions}, headers={'Cache-Control': 'private, no-store'})
+    except (ValueError, KeyError, TypeError, OSError, cv2.error) as error:
+        raise HTTPException(422, f'灰度与矩形校正失败：{error}') from error
+    finally:
+        _slots.release()
 
 
 def fingerprint(template):

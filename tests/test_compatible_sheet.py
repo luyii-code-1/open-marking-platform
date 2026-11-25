@@ -232,3 +232,61 @@ def test_compatible_adopt_auto_corrected_and_reextract_anchors(tmp_path, monkeyp
         refreshed = client.post(group_url + '/compatible/reextract-anchors', data={'paper': 'A4', 'boxes': json.dumps(boxes)},
                                 files={'file': ('corrected.png', sample)}, headers=headers)
         assert refreshed.is_success and len(refreshed.json()['anchors']) == len(boxes), refreshed.text
+
+
+def test_external_tight_anchor_excludes_dashed_line_and_rectifies_by_anchors():
+    from server.compatible_templates import suggest_anchors, suggest_regions
+
+    width, height = prep_dimensions('A4')
+    page = np.full((height, width), 236, np.uint8)
+    # Four 12x12 px (3x3 mm) black corner fiducials, with a vertical dashed fold line 4 px left of bottom-left anchor.
+    corners_px = [(40, 40), (width - 52, 40), (width - 52, height - 52), (40, height - 52)]
+    for cx, cy in corners_px:
+        page[cy:cy + 12, cx:cx + 12] = 20
+    dashed_x = 34
+    for dy in range(height - 120, height - 10, 12):
+        page[dy:dy + 5, dashed_x:dashed_x + 2] = 25
+    # Add distinctive header text so a 5th anchor can be found.
+    cv2.putText(page, 'EXAM-SHEET-2026', (120, 90), cv2.FONT_HERSHEY_SIMPLEX, 1.0, 20, 2)
+    # Draw clean 3-column candidate grid + 1 objective choice row so suggest_regions works after rectification.
+    for col in range(3):
+        for d in range(10):
+            x, y = 100 + col * 32, 160 + d * 24
+            cv2.rectangle(page, (x, y), (x + 20, y + 14), 40, 1)
+    for opt in range(4):
+        x, y = 100 + opt * 38, 460
+        cv2.rectangle(page, (x, y), (x + 20, y + 14), 40, 1)
+
+    suggested = suggest_anchors(external.grayscale(page))
+    assert len(suggested) >= 4
+    bl = min(suggested[:4], key=lambda a: (a['x'] ** 2 + (height / 4 - a['y']) ** 2))
+    # Tightened box should stay compact (<= 5.5 mm) and stay strictly to the right of the dashed fold line.
+    assert bl['width'] <= 5.5 and bl['height'] <= 5.5, bl
+    assert bl['x'] * external.SCALE > dashed_x + 1, bl
+
+    # Manual loose draw covering both the black square and the dashed line should still tighten tightly onto the black square.
+    loose = box(7.0, (height - 62) / 4, 12.0, 10.0)
+    tight_anchor = external.make_anchor(external.grayscale(page), loose, tighten=True)
+    assert tight_anchor['width'] <= 5.5 and tight_anchor['height'] <= 5.5, tight_anchor
+    assert tight_anchor['x'] * external.SCALE > dashed_x + 1, tight_anchor
+
+    # Warp the page with trapezoid perspective distortion + uneven shading, then rectify via the 4 skewed anchors.
+    src_q = np.float32([[0, 0], [width - 1, 0], [width - 1, height - 1], [0, height - 1]])
+    dst_q = np.float32([[14, 18], [width - 26, 8], [width - 8, height - 20], [22, height - 10]])
+    H = cv2.getPerspectiveTransform(src_q, dst_q)
+    skewed = cv2.warpPerspective(page, H, (width, height), borderValue=225)
+    grad = np.linspace(0.75, 1.0, width, dtype=np.float32)[None, :]
+    shaded_skewed = np.clip(skewed.astype(np.float32) * grad, 0, 255).astype(np.uint8)
+    warped_anchors = []
+    for cx, cy in corners_px:
+        pt = cv2.perspectiveTransform(np.float32([[[cx + 6, cy + 6]]]), H)[0, 0]
+        warped_anchors.append(box((pt[0] - 10) / 4, (pt[1] - 10) / 4, 5.0, 5.0))
+    rectified, mapped = external.rectify_by_anchors(shaded_skewed, warped_anchors, apply_grayscale=True)
+    assert rectified.shape == (height, width)
+    # Mapped 4 corner anchors should now be axis-aligned horizontally and vertically.
+    c_mapped = [(a['x'] + a['width'] / 2, a['y'] + a['height'] / 2) for a in mapped]
+    assert abs(c_mapped[0][0] - c_mapped[3][0]) < 1.0 and abs(c_mapped[0][1] - c_mapped[1][1]) < 1.0, c_mapped
+    # Grayscale normalization evens out left-right shading so left paper background is bright (> 220).
+    assert float(np.median(rectified[200:260, 10:40])) > 220
+    regions = suggest_regions(rectified)
+    assert len(regions['candidate']) == 3 and len(regions['choices']) >= 1, regions

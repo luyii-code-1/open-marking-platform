@@ -89,8 +89,8 @@ def validate(template):
             raise ValueError('每面需确认至少四个固定印刷参照')
         centers, distinctive_count = [], 0
         for anchor in anchors:
-            if not valid_box(anchor, width, height, 5) or max(anchor['width'], anchor['height']) > 36:
-                raise ValueError('定位参照的边长应为 5 至 36 毫米')
+            if not valid_box(anchor, width, height, 3) or max(anchor['width'], anchor['height']) > 36:
+                raise ValueError('定位参照的边长应为 3 至 36 毫米')
             pattern = patch_data(anchor)
             if not .025 < pattern.mean() < .92:
                 raise ValueError('定位参照需包含清晰的固定印刷图案')
@@ -234,9 +234,146 @@ def rectangular_page(image, width, height):
     return cv2.resize(deskewed, (width, height), interpolation=cv2.INTER_AREA if iw > width else cv2.INTER_CUBIC)
 
 
-def make_anchor(image, box):
-    if not valid_box(box, image.shape[1] / SCALE, image.shape[0] / SCALE, 5) or max(box['width'], box['height']) > 36:
-        raise ValueError('定位参照的边长应为 5 至 36 毫米')
+def tighten_anchor_box(image, box):
+    """Snap a loose anchor box tightly around a compact solid fiducial block, avoiding nearby lines."""
+    ih, iw = image.shape
+    x, y, r, b = bounds(box)
+    x, y = max(0, x), max(0, y)
+    r, b = min(iw, r), min(ih, b)
+    roi = image[y:b, x:r]
+    if roi.size == 0 or roi.shape[0] < 10 or roi.shape[1] < 10:
+        return box
+    otsu_thresh, _ = cv2.threshold(roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    threshold = float(np.clip(otsu_thresh, 145, 195)) if roi.max() - roi.min() >= 35 else 160.0
+    dark = (roi < threshold).astype(np.uint8)
+    count, labels, stats, centroids = cv2.connectedComponentsWithStats(dark)
+    if count <= 1:
+        return box
+    rcx, rcy = roi.shape[1] / 2.0, roi.shape[0] / 2.0
+    solid = []
+    other_substantial = 0
+    for idx in range(1, count):
+        cx_i, cy_i, cw, ch, area = stats[idx]
+        if area < 20:
+            continue
+        fill = area / max(1, cw * ch)
+        ratio = cw / max(1, ch)
+        touches_edge = cx_i == 0 or cy_i == 0 or cx_i + cw >= roi.shape[1] or cy_i + ch >= roi.shape[0]
+        if 6 <= cw <= 38 and 6 <= ch <= 38 and 0.50 <= ratio <= 2.0 and fill >= 0.62:
+            dist = math.hypot(centroids[idx][0] - rcx, centroids[idx][1] - rcy)
+            solid.append((idx, int(cx_i), int(cy_i), int(cw), int(ch), int(area), dist, touches_edge))
+        elif not touches_edge:
+            other_substantial += int(area)
+    if not solid:
+        return box
+    # Prefer interior solid blocks closest to the ROI center; ignore multi-element text/logo anchors.
+    solid.sort(key=lambda item: (item[7], item[6], -item[5]))
+    best_idx, bx, by, bw, bh, b_area, _, _ = solid[0]
+    other_solid = sum(item[5] for item in solid[1:] if not item[7])
+    if other_solid + other_substantial > b_area * 0.45:
+        return box
+
+    # Expand tightly around the solid block without touching neighboring dark strokes/dashed lines.
+    other_dark = (dark > 0) & (labels != best_idx)
+    max_pad = max(2, min(4, round(min(bw, bh) * 0.22)))
+    pl = pr = pt = pb = 0
+    for step in range(1, max_pad + 1):
+        col = bx - step
+        if col < 0 or other_dark[max(0, by - 1):min(roi.shape[0], by + bh + 1), col].any():
+            break
+        pl = step
+    for step in range(1, max_pad + 1):
+        col = bx + bw - 1 + step
+        if col >= roi.shape[1] or other_dark[max(0, by - 1):min(roi.shape[0], by + bh + 1), col].any():
+            break
+        pr = step
+    for step in range(1, max_pad + 1):
+        row = by - step
+        if row < 0 or other_dark[row, max(0, bx - pl):min(roi.shape[1], bx + bw + pr)].any():
+            break
+        pt = step
+    for step in range(1, max_pad + 1):
+        row = by + bh - 1 + step
+        if row >= roi.shape[0] or other_dark[row, max(0, bx - pl):min(roi.shape[1], bx + bw + pr)].any():
+            break
+        pb = step
+
+    nx1 = x + bx - pl
+    ny1 = y + by - pt
+    nx2 = x + bx + bw + pr
+    ny2 = y + by + bh + pb
+    min_px = 3 * SCALE
+    if nx2 - nx1 < min_px:
+        need = min_px - (nx2 - nx1)
+        nx1 = max(0, nx1 - need // 2)
+        nx2 = min(iw, nx1 + min_px)
+        nx1 = max(0, nx2 - min_px)
+    if ny2 - ny1 < min_px:
+        need = min_px - (ny2 - ny1)
+        ny1 = max(0, ny1 - need // 2)
+        ny2 = min(ih, ny1 + min_px)
+        ny1 = max(0, ny2 - min_px)
+    return {
+        'x': round(nx1 / SCALE, 2),
+        'y': round(ny1 / SCALE, 2),
+        'width': round((nx2 - nx1) / SCALE, 2),
+        'height': round((ny2 - ny1) / SCALE, 2),
+    }
+
+
+def rectify_by_anchors(page, anchors, apply_grayscale=True):
+    """Rectify perspective skew using the 4 outermost corner anchors, then normalize grayscale."""
+    ih, iw = page.shape
+    if not isinstance(anchors, list) or len(anchors) < 4:
+        raise ValueError('请先标定至少 4 个四角定位块再执行矩形校正')
+    centers = np.float32([[(a['x'] + a['width'] / 2.0) * SCALE, (a['y'] + a['height'] / 2.0) * SCALE] for a in anchors])
+    sums = centers[:, 0] + centers[:, 1]
+    diffs = centers[:, 0] - centers[:, 1]
+    tl_i = int(np.argmin(sums))
+    br_i = int(np.argmax(sums))
+    tr_i = int(np.argmax(diffs))
+    bl_i = int(np.argmin(diffs))
+    if len({tl_i, tr_i, br_i, bl_i}) != 4:
+        raise ValueError('请将 4 个定位块分别分布在纸面左上、右上、右下、左下四周')
+    src = np.float32([centers[tl_i], centers[tr_i], centers[br_i], centers[bl_i]])
+    if not cv2.isContourConvex(src) or cv2.contourArea(src) < iw * ih * 0.12:
+        raise ValueError('四角定位块围成面积过小或未形成有效四边形，请调整位置')
+    x_left = float((src[0, 0] + src[3, 0]) * 0.5)
+    x_right = float((src[1, 0] + src[2, 0]) * 0.5)
+    y_top = float((src[0, 1] + src[1, 1]) * 0.5)
+    y_bot = float((src[3, 1] + src[2, 1]) * 0.5)
+    if x_right - x_left < iw * 0.30 or y_bot - y_top < ih * 0.30:
+        raise ValueError('定位块水平或垂直跨度不足，无法执行矩形校正')
+    dst = np.float32([[x_left, y_top], [x_right, y_top], [x_right, y_bot], [x_left, y_bot]])
+    matrix = cv2.getPerspectiveTransform(src, dst)
+    rectified = cv2.warpPerspective(page, matrix, (iw, ih), flags=cv2.INTER_CUBIC, borderValue=255)
+    cleaned = grayscale(rectified) if apply_grayscale else rectified
+
+    # Map every anchor box through the same homography so subsequent anchor re-extraction stays aligned.
+    mapped = []
+    max_w, max_h = iw / SCALE, ih / SCALE
+    for a in anchors:
+        x1, y1, x2, y2 = bounds(a)
+        quad = np.float32([[[x1, y1], [x2, y1], [x2, y2], [x1, y2]]])
+        warped_quad = cv2.perspectiveTransform(quad, matrix)[0]
+        mx1 = float(np.clip(warped_quad[:, 0].min() / SCALE, 0.0, max_w - 3.0))
+        my1 = float(np.clip(warped_quad[:, 1].min() / SCALE, 0.0, max_h - 3.0))
+        mx2 = float(np.clip(warped_quad[:, 0].max() / SCALE, mx1 + 3.0, max_w))
+        my2 = float(np.clip(warped_quad[:, 1].max() / SCALE, my1 + 3.0, max_h))
+        mapped.append({
+            'x': round(mx1, 2),
+            'y': round(my1, 2),
+            'width': round(mx2 - mx1, 2),
+            'height': round(my2 - my1, 2),
+        })
+    return cleaned, mapped
+
+
+def make_anchor(image, box, tighten=False):
+    if tighten:
+        box = tighten_anchor_box(image, box)
+    if not valid_box(box, image.shape[1] / SCALE, image.shape[0] / SCALE, 3) or max(box['width'], box['height']) > 36:
+        raise ValueError('定位参照的边长应为 3 至 36 毫米')
     x, y, r, b = bounds(box)
     crop = cv2.resize(image[y:b, x:r], (PATCH_SIZE, PATCH_SIZE), interpolation=cv2.INTER_AREA)
     otsu_thresh, _ = cv2.threshold(crop, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
