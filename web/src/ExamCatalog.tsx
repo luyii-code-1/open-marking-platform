@@ -33,7 +33,7 @@ export function ExamCatalog(){
       {title:'题卡',render:(_,r)=><a href={path(r)}>{cardName(r,{id:r.subject_id,name:r.subject_name})}</a>},
       {title:'班级',render:(_,r)=>(r.class_names||[]).join('、')||'—'},
       {title:'应考人数',dataIndex:'roster_count',render:value=>value??'待设置'},
-      {title:'成绩',render:(_,r)=><Tag color={r.frozen?'green':undefined}>{r.frozen?'已发布':'未发布'}</Tag>},
+      {title:'结果状态',render:(_,r)=><Tag color={r.frozen?'green':undefined}>{r.project_category==='statistics'?(r.frozen?'收集已结束':'收集中'):(r.frozen?'成绩已发布':'成绩未发布')}</Tag>},
     ]}/>
   </Card>
 }

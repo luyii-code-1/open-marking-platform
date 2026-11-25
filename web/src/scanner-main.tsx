@@ -288,7 +288,7 @@ function Scanner() {
           action:<Button block loading={busyKey===actionKey('downloadProject',{project_id:row.id})} disabled={!state.online||locked} onClick={()=>action('downloadProject',{project_id:row.id},enterProject)}>{cached.has(row.id)?'更新项目资料':'下载并进入项目'}</Button>
         }))} onOpen={id=>void openProject(id)}/>
         : !subject && pack.project.category==='statistics' ? <Card title={pack.project.name}><Space>
-          <Typography.Text>发布统计题卡后可开始扫描。</Typography.Text><Button disabled={!state.online||locked} onClick={()=>action('downloadProject',{project_id:pack.project.id},enterProject)}>刷新题卡</Button>
+          <Typography.Text>{pack.project.required_scanner_capability ? '请从管理后台下载最新版扫描客户端，以识读外部统计题卡。' : '发布统计题卡后可开始扫描。'}</Typography.Text><Button disabled={!state.online||locked} onClick={()=>action('downloadProject',{project_id:pack.project.id},enterProject)}>刷新题卡</Button>
         </Space></Card>
         : !subject ? <ScanChoices title={pack.project.name} description="选择扫描科目" items={pack.subjects.map((row:Row)=>({id:row.id,name:row.name,disabled:locked,facts:[{label:'可扫描年级',value:subjectGrades(row,pack.groups).filter(g=>g.count).length},{label:'题卡',value:pack.groups.filter((g:Row)=>g.subject_id===row.id).length}]}))} onOpen={openSubject} extra={<Button disabled={!state.online||locked} onClick={()=>action('downloadProject',{project_id:pack.project.id})}>更新考试资料</Button>}/>
         : !grade ? <ScanChoices title={subject.name} description="选择年级" items={subjectGrades(subject,pack.groups).filter(g=>g.count).map(row=>({id:row.id,name:row.name,disabled:locked,facts:[{label:'题卡',value:row.count}]}))} onOpen={id=>{setGrade(id);setGroup('');setBatch('')}}/>

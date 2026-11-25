@@ -24,7 +24,7 @@ def exam_catalog(exam_status:ExamStatusFilter='all',current=Depends(admin)):
             if not project or not subject:continue
             students=group_students(db,group)
             class_ids=sorted({s['class_id'] for s in students or [] if s.get('class_id')})
-            rows.append({**group,'project_id':project['id'],'project_name':project['name'],
+            rows.append({**group,'project_id':project['id'],'project_name':project['name'],'project_category':project.get('category','exam'),
                          'project_exam_status':project['exam_status'],'project_exam_status_mode':project['exam_status_mode'],
                          'subject_name':subject['name'],'subject_key':subject.get('subject_tag_id') or subject['name'],
                          'grade_name':grades.get(group.get('grade_id'),{}).get('name') or group.get('grade_name') or '待设置年级',

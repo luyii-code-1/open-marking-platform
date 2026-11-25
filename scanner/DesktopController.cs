@@ -259,7 +259,7 @@ public sealed class DesktopController : IDisposable
                 Notify("项目状态已更新。");return State(args);
             case "downloadProject":
                 if(!_online||_api is null)throw new InvalidOperationException("下载项目需要连接服务器。");
-                var id=Guid.Parse(Text(args,"project_id")).ToString();var data=await _api.Get($"scanner/projects/{id}/package?capability=external-sheet-1,statistics-sheet-1",_lifetime.Token);
+                var id=Guid.Parse(Text(args,"project_id")).ToString();var data=await _api.Get($"scanner/projects/{id}/package?capability=external-sheet-1,statistics-sheet-1,statistics-external-1",_lifetime.Token);
                 var packageFields=JsonSerializer.Deserialize<Dictionary<string,JsonElement>>(data.GetRawText())!;packageFields["downloaded_at"]=JsonSerializer.SerializeToElement(DateTimeOffset.UtcNow.ToString("O"));
                 data=JsonSerializer.SerializeToElement(packageFields);Save(ProjectPath(id),data.GetRawText());_packages[id]=data;
                 foreach(var batch in _queue.Batches().Where(b=>b.ServerUrl==_server))

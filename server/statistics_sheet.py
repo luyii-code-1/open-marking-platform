@@ -2,6 +2,7 @@
 from string import ascii_uppercase
 
 CAPABILITY = 'statistics-sheet-1'
+EXTERNAL_CAPABILITY = 'statistics-external-1'
 ENGINE_VERSION = 'omp-statistics-1'
 PER_LINE = 13
 STEP_X = 13.5

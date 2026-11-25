@@ -611,6 +611,8 @@ def results(group_id:str,room_tag_id:str|None=None,current=Depends(user)):
 
 def results_for(db,group_id,current,convert_scores=True):
     group=require(db,group_id,'groups')
+    from .statistics_projects import is_statistics_group
+    if is_statistics_group(db,group):raise HTTPException(404,'请选择考试项目查看成绩')
     allowed_classes=result_class_scope(db,group,current)
     rows=card_result_rows(db,group,convert_scores)
     return [r for r in rows if allowed_classes is None or r['class_id'] in allowed_classes]

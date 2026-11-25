@@ -28,6 +28,8 @@ async def lifespan(app):
     initialize()
     from .school import migrate
     migrate()
+    from .statistics_projects import restore_empty_project_workspaces
+    restore_empty_project_workspaces()
     from .request_log import Journal
     app.state.request_journal=Journal(database.ROOT)
     from .realtime import Hub
@@ -237,7 +239,9 @@ def create_route(kind):
                 value['exam_status_mode']='auto'
             if kind=='subjects' and value.get('group_mode','custom') not in ('custom','default'):raise HTTPException(422,'分组方式无效')
             if kind=='groups':
+                from .statistics_projects import is_statistics_group
                 value['template_id']=None
+                value.pop('statistics_group', None)
                 value.setdefault('roster_mode','open')
                 if value.get('template_creation','native') not in ('native','blank','completed'):
                     raise HTTPException(422,'制卡方式无效')
@@ -245,6 +249,7 @@ def create_route(kind):
                 enabled=bool(value.pop('conversion_enabled',False))
                 cid=value.get('conversion_id') or None
                 if enabled or cid:
+                    if is_statistics_group(db, value):raise HTTPException(422,'请选择考试项目设置赋分')
                     if not cid:raise HTTPException(422,'启用赋分时请选择赋分方案')
                     config=require(db,cid,'score-conversions')
                     value['conversion_mode']='override'
@@ -268,8 +273,12 @@ def create_route(kind):
                 from .sheet_style import defaults
                 defaults(value)
                 prepare_questions(value)
+                from .statistics_projects import set_template_mode
+                set_template_mode(db,group,value)
             if kind=='assignments':
                 template=require(db,value['template_id'],'templates')
+                if template.get('statistics_mode') or template.get('statistics_sheet'):
+                    raise HTTPException(422,'请选择考试题卡分配评阅')
                 if not any(q['id']==value.get('question_id') for q in template['questions']): raise HTTPException(422,'题目不存在')
                 ids=value.get('user_ids',[])
                 if not ids or not isinstance(ids,list) or len(set(ids))!=len(ids): raise HTTPException(422,'请选择不重复的阅卷教师')
@@ -320,10 +329,7 @@ def create_route(kind):
                 value.update(name=tag['name'],subject_tag_id=tag['id'])
             catalog_ids=value.pop('catalog_ids',[]) if kind=='projects' else []
             result=put(db,kind,value,current['id'])
-            if kind=='projects' and result['category']=='statistics':
-                from .statistics_projects import create_group
-                result=create_group(db,result,current['id'])
-            elif kind=='projects' and catalog_ids:
+            if kind=='projects' and catalog_ids:
                 from .electives import create_exam_subjects
                 create_exam_subjects(db,result,catalog_ids,current['id'])
             if kind=='subjects' and value.get('group_mode')=='default':
@@ -377,6 +383,9 @@ def edit_template(identifier:str,body:dict,current=Depends(admin)):
         from .sheet_style import defaults
         defaults(body)
         prepare_questions(body)
+        from .statistics_projects import set_template_mode
+        group=require(db,old['group_id'],'groups')
+        set_template_mode(db,group,body)
         return put(db,'templates',body,current['id'])
 
 
@@ -394,6 +403,9 @@ def publish(identifier:str,body:dict|None=None,current=Depends(admin)):
             from .templates import require_replaceable
             require_replaceable(db,group['id'])
         from .template_checks import issues,asset_ids
+        if not group.get('statistics_group'):
+            from .statistics_projects import set_template_mode
+            set_template_mode(db,group,template)
         errors=issues(template,complete=True,require_answers=False)
         if errors:raise HTTPException(422,'；'.join(errors))
         if template['status']!='published' and template.get('external_sheet'):
@@ -411,6 +423,8 @@ def publish(identifier:str,body:dict|None=None,current=Depends(admin)):
             put(db,'templates',template,current['id'])
             group=require(db,template['group_id'],'groups')
             group['template_id']=identifier
+            if group.get('statistics_group'):
+                group.update(statistics_external_draft_id=None,statistics_draft=None)
             put(db,'groups',group,current['id'])
         return template
 
@@ -575,7 +589,12 @@ def pair(identifier:str,body:dict|None=Body(default=None),current=Depends(scan_a
             scanned_student_objs.append(student)
             from .student_history import snapshot
             student=snapshot(db,student)
-            if any(s['group_id']==batch['group_id'] and s['student_id']==student['id'] for s in objects(db,'submissions')): raise HTTPException(409,'已有该学生答卷，请明确执行补扫替换')
+            existing=find(db,'submissions',student_id=student['id'])
+            if any(s['group_id']==group['id'] for s in existing):raise HTTPException(409,'已有该学生答卷，请明确执行补扫替换')
+            if template.get('statistics_mode'):
+                sibling_ids={item['id'] for item in find(db,'groups',subject_id=group['subject_id'])}
+                if any(s['group_id'] in sibling_ids and s.get('pages') for s in existing):
+                    raise HTTPException(409,'同一学生在本科目已有答卷，请核查题卡或执行补扫替换')
             submission=put(db,'submissions',{'group_id':batch['group_id'],'template_id':template['id'],'student_id':student['id'],'student_snapshot':student,'room_tags':batch.get('room_tags',[]),'grade_id':batch.get('grade_id'),'candidate_number':front['candidate_number'],'pages':[front['id']]+([backs[index]['id']] if template['sides']==2 else []),'status':'absent' if front.get('absent_mark') else 'ready','attendance_source':'scan_mark' if front.get('absent_mark') else 'scan'},current['id'])
             from .answer_slices import sync
             submission=sync(db,submission,template,current['id'])

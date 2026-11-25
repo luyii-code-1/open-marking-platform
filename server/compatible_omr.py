@@ -5,6 +5,7 @@ import math
 
 import cv2
 import numpy as np
+from . import statistics_sheet
 
 CAPABILITY = 'external-sheet-1'
 ENGINE_VERSION = 'omp-external-1'
@@ -100,7 +101,7 @@ def validate(template):
             raise ValueError('请将定位参照分布在纸面的四周')
         if not distinctive_count:
             raise ValueError('请增加一处能辨别当前版式和方向的固定印刷参照')
-        if page == '1':
+        if page == '1' and not statistics_sheet.enabled(template):
             reference = definition.get('candidate', [])
             length = template.get('candidate_length')
             if type(length) is not int or not 1 <= length <= 20 or not isinstance(reference, list) or len(reference) != length:
@@ -548,7 +549,7 @@ def mark(image, box):
 def read(normalized, template, side):
     page = 1 if side == 'front' else 2
     candidate = None
-    if page == 1:
+    if page == 1 and not statistics_sheet.enabled(template):
         digits = []
         for column in page_profile(template, side)['candidate']:
             levels = [mark(normalized, cell) for cell in column]
@@ -576,6 +577,8 @@ def read(normalized, template, side):
 
 
 def absence_level(normalized, template, side):
+    if statistics_sheet.enabled(template):
+        return 0
     box = page_profile(template, side).get('absent') if side == 'front' else None
     return mark(normalized, box) if box else 0
 

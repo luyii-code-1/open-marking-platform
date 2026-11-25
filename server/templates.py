@@ -39,7 +39,15 @@ def save_draft(group_id:str,identifier:str,body:dict,current=Depends(admin)):
     signature=hashlib.sha256(json.dumps(body,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
     with connect() as db:
         db.execute('BEGIN IMMEDIATE');group=require(db,group_id,'groups')
-        if group.get('statistics_group'):raise HTTPException(422,'请在统计项目中设计题卡')
+        statistics = bool(group.get('statistics_group'))
+        if statistics:
+            if definition.get('statistics_sheet') is not True or not isinstance(definition.get('external_sheet'), dict):
+                raise HTTPException(422,'请选择从外部兼容导入')
+            from .lifecycle import writable
+            writable(db,'groups',group)
+            require_replaceable(db,group_id)
+            if group.get('statistics_external_draft_id') not in (None, identifier):
+                raise HTTPException(409,'已有兼容草稿，请重新载入后继续')
         old=get(db,identifier,'templates')
         if old and old.get('group_id')!=group_id:raise HTTPException(409,'草稿属于另一题卡')
         if group.get('frozen') or old and old.get('status') in ('published','superseded'):raise HTTPException(409,'题卡已发布，不能保存草稿')
@@ -56,7 +64,15 @@ def save_draft(group_id:str,identifier:str,body:dict,current=Depends(admin)):
         value.setdefault('notice_template','standard-v1')
         from .sheet_style import defaults
         defaults(value);prepare_questions(value)
-        return put(db,'templates',value,current['id'])
+        if statistics:
+            value['statistics_sheet'] = True
+        else:
+            from .statistics_projects import set_template_mode
+            set_template_mode(db,group,value)
+        draft = put(db,'templates',value,current['id'])
+        if statistics and not group.get('statistics_external_draft_id'):
+            put(db,'groups',{**group,'statistics_external_draft_id':identifier},current['id'])
+        return draft
 
 
 def require_replaceable(db,group_id):
@@ -80,6 +96,8 @@ def delete_template(identifier:str,draft_version:int|None=None,expected_status:s
         if group.get('template_id')==identifier:
             require_replaceable(db,group['id'])
             put(db,'groups',{**group,'template_id':None},current['id'])
+        if group.get('statistics_external_draft_id')==identifier:
+            put(db,'groups',{**group,'statistics_external_draft_id':None},current['id'])
         assignments=find(db,'assignments',template_id=identifier)
         for object_id in [a['id'] for a in assignments]+[identifier]:
             db.execute("INSERT INTO audit(id,actor,action,object_id,body) SELECT ?,?,'delete',id,body FROM objects WHERE id=?",(str(uuid4()),current['id'],object_id))
@@ -125,6 +143,8 @@ def save_to_library(identifier:str,body:dict,current=Depends(admin)):
         except (ValueError,KeyError,TypeError) as error:raise HTTPException(422,str(error))
         for asset in assets:require(db,asset,'assets')
         definition=deepcopy({k:source[k] for k in DEFINITION_FIELDS if k in source})
+        if source.get('statistics_mode'):
+            definition['statistics_mode']=True
         for question in definition.get('questions',[]):question.pop('id',None)
         return put(db,'template-library',{'name':name.strip(),'description':description,'source_template_id':identifier,'definition':definition},current['id'])
 
@@ -137,6 +157,13 @@ def instantiate(identifier:str,body:dict,current=Depends(admin)):
         group=require(db,body['group_id'],'groups') if body.get('group_id') else default_group(db,body.get('subject_id'),current['id'])
         if group.get('frozen'):raise HTTPException(409,RESULTS_REVIEW_GUIDE + '也可以选择其他题卡。')
         definition=deepcopy(entry['definition'])
+        from .statistics_projects import is_statistics_group, set_template_mode
+        statistics=is_statistics_group(db,group)
+        if group.get('statistics_group') or (definition.get('statistics_mode') and not statistics):
+            raise HTTPException(422,'请选择同类项目的题卡版式')
+        if statistics and any(q['type']=='subjective' for q in definition['questions']):
+            raise HTTPException(422,'请选择只含选择题的版式')
+        set_template_mode(db,group,definition)
         name=body.get('name',entry['name'])
         if not isinstance(name,str) or not 1<=len(name.strip())<=100:raise HTTPException(422,'请填写100字以内题卡标题')
         definition.update(name=name.strip(),group_id=group['id'],revision=0,status='draft',layout_version=3,library_id=identifier)
@@ -201,7 +228,12 @@ def preview_template(body:dict,page:int=1,current=Depends(user)):
     if not 1<=page<=body['sides']:raise HTTPException(422,'预览页码超出题卡范围')
     check_assets(body)
     template={**body,'id':body.get('id') or str(uuid4()),'revision':body.get('revision',0),'layout_version':body.get('layout_version',3)}
+    return render_preview(template,page)
+
+
+def render_preview(template, page):
     cache_payload={k:template.get(k) for k in DEFINITION_FIELDS}
+    cache_payload.update({k:template.get(k) for k in ('id','revision','status','statistics_sheet','statistics_mode')})
     cache_key=(hashlib.sha256(json.dumps(cache_payload,sort_keys=True,ensure_ascii=False).encode()).hexdigest(),page)
     with _preview_cache_lock:
         cached=_preview_cache.get(cache_key)
