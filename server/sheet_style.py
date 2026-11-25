@@ -20,6 +20,12 @@ def header_geometry(template):
     return {'left': 15, 'right': right, 'top': 35, 'bottom': 94, 'notice_left': right + 1}
 
 
+def body_top(template, page, panel):
+    if template.get('layout_version', 2) >= 3 and (page != 1 or panel != 0):
+        return 35
+    return 44 if template.get('statistics_layout') == 1 and template.get('candidate_enabled') is False else 100
+
+
 def adjacent_choice_rows(bottom, top):
     gap = top - bottom
     # Older row-major layouts left a 3.2 mm gap after every fifth row.

@@ -26,6 +26,7 @@ export function Exceptions({groupId}:{groupId?:string}) {
     try{await send('/exceptions/resolve',{ids,resolution});setDetailId('');setBulk(false);setSelected([]);await list.reload();message.success('核查结论已保存')}catch(e){message.error((e as Error).message)}finally{setBusy(false)}
   }
   const item=details.data?.exception,scope=details.data?.context
+  const statistics=groups.data.some(g=>g.id===(scope?.group_id||group)&&g.statistics_mode)
   const correctionPath=scope?.project_id&&scope.subject_id&&scope.group_id?examPath({projectId:scope.project_id,subjectId:scope.subject_id,gradeId:scope.grade_id||unassignedGrade,groupId:scope.group_id,section:'scans',scanTab:'correct',correction:{batchId:scope.batch_id,pageId:scope.page_id,submissionId:scope.submission_id}}):undefined
   return <Space direction="vertical" size={16} style={{width:'100%'}}>
     <Card title="异常与优秀卷" extra={<Button onClick={list.reload} loading={list.loading}>刷新</Button>}>
@@ -56,7 +57,7 @@ export function Exceptions({groupId}:{groupId?:string}) {
       <ErrorNotice error={details.error} retry={details.reload}/>
       {details.loading&&<div className="workspace-loading"><Spin/></div>}
       {!details.loading&&details.data&&<Space direction="vertical" style={{width:'100%'}}>
-        <Descriptions column={2} items={Object.entries({考试:details.data.context.project,科目:details.data.context.subject,题卡:details.data.context.group,考场备注:details.data.context.room,准考证号:details.data.context.candidate_number,姓名:details.data.context.student_name,类型:kinds[item.kind]||item.kind,说明:item.reason,原核查结论:item.resolution}).map(([label,value])=>({label,children:String(value||'—')}))}/>
+        <Descriptions column={2} items={Object.entries({考试:details.data.context.project,科目:details.data.context.subject,题卡:details.data.context.group,...(!statistics?{考场备注:details.data.context.room}:{}),准考证号:details.data.context.candidate_number,姓名:details.data.context.student_name,类型:kinds[item.kind]||item.kind,说明:item.reason,原核查结论:item.resolution}).map(([label,value])=>({label,children:String(value||'—')}))}/>
         {item.evidence&&<Alert type="info" message="触发依据" description={<pre style={{whiteSpace:'pre-wrap'}}>{JSON.stringify(item.evidence,null,2)}</pre>}/>}
         {details.data.answer_image_url&&<AssetImage src={details.data.answer_image_url}/>}
         <Tabs items={details.data.pages.map((page:Row)=>({key:page.id,label:`${page.side==='front'?'正面':'背面'} · 序号 ${page.sequence}`,children:<><Typography.Paragraph>识读选项：{Object.entries(page.selections).map(([number,answer])=>`第${number}题 ${(answer as string[]).join('、')||'空白'}`).join('；')||'无客观题记录'}</Typography.Paragraph><AssetImage src={page.image_url}/></>}))}/>

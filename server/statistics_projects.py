@@ -46,8 +46,18 @@ def set_template_mode(db, group, value):
     value.pop('statistics_sheet', None)
     value.pop('statistics_mode', None)
     if not is_statistics_group(db, group):
+        value.pop('candidate_enabled', None)
+        value.pop('statistics_layout', None)
         return
     value['statistics_mode'] = True
+    value['statistics_layout'] = 1
+    if type(value.setdefault('candidate_enabled', True)) is not bool:
+        raise HTTPException(422, '请选择是否启用准考证号')
+    profile = value.get('external_sheet')
+    if isinstance(profile, dict) and isinstance(profile.get('pages'), dict):
+        for face in profile['pages'].values():
+            if isinstance(face, dict):
+                face.pop('absent', None)
     value['notice_template'] = 'none'
     value['uniform_subjective'] = False
     value['auto_subjective_layout'] = False
@@ -186,9 +196,12 @@ def aggregate(template, responses):
 def responses_for(db, group, template):
     if not template:
         return []
-    if group.get('statistics_group'):
-        return find(db, 'statistics-responses', group_id=group['id'])
     from .review import objective_selections
+    if not statistics_sheet.uses_candidate_number(template):
+        responses = find(db, 'statistics-responses', group_id=group['id'], template_id=template['id'])
+        if statistics_sheet.enabled(template):
+            return responses
+        return [{'selections': objective_selections(db, response)} for response in responses]
     return [{'selections': objective_selections(db, submission)}
             for submission in find(db, 'submissions', group_id=group['id'])
             if submission['template_id'] == template['id'] and submission['status'] != 'absent' and submission.get('pages')]

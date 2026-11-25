@@ -5,6 +5,7 @@ import time
 
 from fastapi import APIRouter, Depends, HTTPException
 from .lifecycle import RESULTS_REVIEW_GUIDE
+from .statistics_sheet import uses_candidate_number
 from .db import connect, find, get, put
 from .dependencies import admin, require
 
@@ -51,7 +52,7 @@ def check_candidate(db,page,actor=None):
     if not page.get('excluded') and page['side']=='front' and (not page.get('candidate_number') or '?' in page['candidate_number']):
         batch=get(db,page['batch_id'],'scan-batches')
         template=get(db,batch.get('template_id'),'templates') or {}
-        if template.get('statistics_sheet'):return
+        if not uses_candidate_number(template):return
         issues['candidate_number']={'group_id':batch['group_id'],'batch_id':page['batch_id'],'reason':'准考证号缺填、多填或无法可靠识读','evidence':{'candidate_number':page.get('candidate_number')}}
     sync(db,('page_id',page['id']),issues,actor)
 

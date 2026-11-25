@@ -142,7 +142,7 @@ def manual_align(image,template,corners):
 
 
 def absent_mark(normalized,side,template=None):
-    if template and statistics_sheet.enabled(template):return False
+    if template and not statistics_sheet.uses_absence_mark(template):return False
     if template and compatible_omr.profile(template):
         return compatible_omr.absent(normalized, template, side)
     if side!='front':return False
@@ -171,7 +171,7 @@ def normalize_scan(image, template, side):
     upright, inverted = has_strip(aligned), has_strip(reverse)
     if upright != inverted:
         return aligned if upright else reverse
-    if side == 'front':
+    if side == 'front' and statistics_sheet.uses_candidate_number(template):
         # The ten preprinted digit boxes are present even on an unfilled card.
         def grid_score(page):
             return sum(np.count_nonzero(page[round((57+d*3.5)*4)-4:round((57+d*3.5)*4)+5,
@@ -203,7 +203,7 @@ def recognize(image,template,side,corners=None):
         crop=normalized[round((y-.75)*4):round((y+.75)*4),round((x-radius)*4):round((x+radius)*4)]
         return float(np.mean(crop<(calibrated if style else 135))) if crop.size else 0
     candidate=None
-    if side=='front' and not statistics_sheet.enabled(template):
+    if side=='front' and statistics_sheet.uses_candidate_number(template):
         digits=[]
         for column in range(int(template.get('candidate_length',8))):
             marked=[str(d) for d in range(10) if ink(18+column*6,57+d*3.5)>.45]

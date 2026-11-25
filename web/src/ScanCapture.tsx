@@ -20,13 +20,14 @@ export function ScanCapture({groupId,selectedGroup:externalGroup,onGroupChange,s
   const selected=batches.data.find(b=>b.id===selectedId),pages=useResource<Row[]>(selectedId?`/scan-batches/${selectedId}/pages`:null,[])
   const [side,setSide]=useState('front'),[sequence,setSequence]=useState(1),[preview,setPreview]=useState<Row|null>(null)
   const currentGroup=groups.data.find(g=>g.id===group)
-  const anonymous=!!currentGroup?.statistics_group
   const workflow=useResource<Row>(group?`/groups/${group}/workflow`:null,{} as Row),templates=useResource<Row[]>('/templates',[])
   const pageRows=pages.data.filter(p=>p.batch_id===selectedId)
   const selectedGroup=groups.data.find(g=>g.id===selected?.group_id),selectedSubject=subjects.data.find(s=>s.id===selectedGroup?.subject_id)
   const readOnly=!!selectedGroup?.frozen||selected?.status==='paired'||selected?.status==='frozen'
   const hasPageExceptions=pageRows.some(p=>['error','exception','quarantined','needs_review'].includes(p.status))
-  const statistics=anonymous||!!templates.data.find(t=>t.id===currentGroup?.template_id)?.statistics_mode
+  const scanTemplate=templates.data.find(t=>t.id===(selected?.template_id||currentGroup?.template_id))
+  const anonymous=!!(selectedGroup||currentGroup)?.statistics_group||scanTemplate?.candidate_enabled===false
+  const statistics=!!(selectedGroup||currentGroup)?.statistics_mode||anonymous
   const rows=batches.data.map(b=>({...b,...workflow.data.batches?.find((v:Row)=>v.id===b.id)})).filter(b=>(!group||b.group_id===group)&&(!status||b.status===status))
   const label=(id:string)=>cardScopeLabel(groups.data.find(g=>g.id===id),subjects.data,projects.data)
   useEffect(()=>{if(!pages.loading)setSequence(Math.max(0,...pageRows.filter(p=>p.side===side).map(p=>p.sequence))+1)},[selectedId,side,pages.data,pages.loading])

@@ -1,4 +1,5 @@
 import type { Question, Region, Template } from './api'
+import { sheetBodyTop } from './sheetRegions'
 
 export const answerLetters = 'ABCDEFG'
 export function parseQuestionNumbers(input: string): number[] {
@@ -78,7 +79,7 @@ export function arrangeObjective(template: Template, ids: string[], { columns, s
   const blockHeight = (rowsPerBlock - 1) * compactChoice.pitch + compactChoice.rowHeight
   for (let page = startPage; page <= template.sides && slots.length < target.length; page++) {
     for(let panel=0;panel<panels&&slots.length<target.length;panel++) {
-      const top=page===1&&panel===0?100:35
+      const top=sheetBodyTop(template,page,panel)
       for(let block=0;top+block*blockPitch+blockHeight<=255&&slots.length<target.length;block++)
         for(let i=0;i<columns*rowsPerBlock&&slots.length<target.length;i++) {
             const row=i%rowsPerBlock

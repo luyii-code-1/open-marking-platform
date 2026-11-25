@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 from PIL import Image, ImageOps
 
-from . import compatible_omr as omr
+from . import compatible_omr as omr, statistics_sheet
 from .db import connect, put
 from .dependencies import admin, require
 from .lifecycle import writable
@@ -376,6 +376,8 @@ def rectify(group_id: str, file: UploadFile = File(), paper: str = Form(),
 
 def fingerprint(template):
     geometry = {k: template.get(k) for k in ('paper', 'sides', 'candidate_length', 'external_sheet', 'background_assets')}
+    if template.get('candidate_enabled') is False:
+        geometry['candidate_enabled'] = False
     geometry['questions'] = [{k: q.get(k) for k in ('id', 'number', 'type', 'options', 'regions', 'external_options')} for q in template['questions']]
     return hashlib.sha256(json.dumps(geometry, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
 
@@ -402,7 +404,7 @@ def trial(identifier: str, file: UploadFile = File(), side: str = Form(), curren
             raise ValueError('试扫时请逐面上传样张')
         normalized, candidate, selections = recognize(images[0], template, side)
         missing = absent_mark(normalized, side, template)
-        if side == 'front' and not template.get('statistics_sheet') and omr.profile(template)['mode'] == 'completed' and (not candidate or '?' in candidate):
+        if side == 'front' and statistics_sheet.uses_candidate_number(template) and omr.profile(template)['mode'] == 'completed' and (not candidate or '?' in candidate):
             raise ValueError('试扫件存在无法识读的考号，请核对考号格或使用填涂清晰的试扫件')
     except (ValueError, OSError, cv2.error, subprocess.SubprocessError) as error:
         raise HTTPException(422, str(error)) from error

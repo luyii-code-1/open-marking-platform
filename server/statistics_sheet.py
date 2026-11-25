@@ -13,6 +13,14 @@ def enabled(template):
     return bool(template.get('statistics_sheet'))
 
 
+def uses_candidate_number(template):
+    return not enabled(template) and not (template.get('statistics_mode') and template.get('candidate_enabled') is False)
+
+
+def uses_absence_mark(template):
+    return not (enabled(template) or template.get('statistics_mode'))
+
+
 def bubbles(question, region):
     return [(letter, region['x'] + 9 + i % PER_LINE * STEP_X, region['y'] + 10 + i // PER_LINE * STEP_Y)
             for i, letter in enumerate(ascii_uppercase[:question['options']])]

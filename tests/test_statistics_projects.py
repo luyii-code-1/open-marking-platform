@@ -196,12 +196,13 @@ def test_external_statistics_template_trials_and_counts(monkeypatch, tmp_path, m
 
 
 @pytest.mark.parametrize('mode', ['native', 'blank', 'completed'])
-def test_statistics_reuses_exam_roster_and_scanner(monkeypatch, tmp_path, mode):
+@pytest.mark.parametrize('candidate_enabled', [True, False])
+def test_statistics_reuses_exam_roster_and_scanner(monkeypatch, tmp_path, mode, candidate_enabled):
     from fastapi.testclient import TestClient
     from scanner_engine.main import digest, process
     from server import db, jobs
     from server.main import app
-    from server.omr import bubbles
+    from server.omr import absent_position, bubbles
     from test_compatible_sheet import box, fill, sheet
 
     monkeypatch.setattr(db, 'ROOT', tmp_path)
@@ -219,9 +220,11 @@ def test_statistics_reuses_exam_roster_and_scanner(monkeypatch, tmp_path, mode):
             classroom = db.put(connection, 'classes', {'name': '一班'})
             student = db.put(connection, 'students', {'class_id': classroom['id'], 'name': '考生',
                                                      'candidate_number': '012'})
+        candidate = '012' if candidate_enabled else None
+        assert client.post(f"/api/v1/projects/{project['id']}/room-tags", json={'name': '旧考场'}).status_code == 422
         if mode == 'native':
             q = {'id': str(uuid4()), 'number': 1, 'type': 'multiple', 'options': 26, 'choice_style': 'compact',
-                 'regions': [dict(box(12, 100, 186, 4.6), page=1)]}
+                 'regions': [dict(box(12, 100 if candidate_enabled else 44, 186, 4.6), page=1)]}
             template = {'id': str(uuid4()), 'name': '调查题卡', 'paper': 'A4', 'sides': 2, 'candidate_length': 3,
                         'layout_version': 3, 'print_style': 'standard-v2', 'notice_template': 'none',
                         'notice_layout': 2, 'questions': [q]}
@@ -239,20 +242,26 @@ def test_statistics_reuses_exam_roster_and_scanner(monkeypatch, tmp_path, mode):
                 original_png = cv2.imencode('.png', original)[1].tobytes()
                 asset = client.post('/api/v1/assets', files={'file': ('original.png', original_png)}).raise_for_status().json()
                 template['background_assets'] = {'1': asset['id']}
+            fill(image, template['external_sheet']['pages']['1']['absent'])
             fill(image, cells[0])
             fill(image, cells[-1])
         template['group_id'] = group['id']
+        if not candidate_enabled:
+            template['candidate_enabled'] = False
         draft = client.put(f"/api/v1/groups/{group['id']}/drafts/{template['id']}",
                            json={'value': template, 'base_version': 0, 'request_id': str(uuid4())})
         assert draft.is_success, draft.text
         template = draft.json()
+        assert template['statistics_layout'] == 1
+        assert template['candidate_enabled'] is candidate_enabled
         assert template['statistics_mode'] and not template.get('statistics_sheet')
         base = f"/api/v1/templates/{template['id']}"
         if mode != 'native':
             marked = cv2.imencode('.png', image)[1].tobytes()
             trial = client.post(base+'/compatible/trial', data={'side': 'front'}, files={'file': ('trial.png', marked)})
             assert trial.is_success, trial.text
-            assert trial.json()['candidate'] == '012'
+            assert trial.json()['candidate'] == candidate
+            assert trial.json()['absent'] is False
             assert trial.json()['selections'][q['id']] == ['A', 'Z']
         published = client.post(base+'/publish')
         assert published.is_success, published.text
@@ -265,20 +274,30 @@ def test_statistics_reuses_exam_roster_and_scanner(monkeypatch, tmp_path, mode):
                 assert preview.is_success and preview.headers['content-type'].startswith('image/'), preview.text[:200]
             filename = tmp_path / 'card.pdf'
             filename.write_bytes(client.get(base+'/pdf').raise_for_status().content)
+            if text_reader := shutil.which('pdftotext'):
+                text = subprocess.check_output([text_reader, '-enc', 'UTF-8', str(filename), '-']).decode()
+                assert '姓名' in text and '班级' in text
+                assert '考场' not in text and '缺考' not in text
+                assert ('准考证号' in text) == candidate_enabled
             subprocess.run([renderer, '-scale-to-x', '840', '-scale-to-y', '1188', '-gray', '-png',
                             str(filename), str(tmp_path / 'card')], check=True)
             image = cv2.imread(str(tmp_path / 'card-1.png'), cv2.IMREAD_GRAYSCALE)
-            for index, digit in enumerate((0, 1, 2)):
-                cv2.circle(image, ((18+index*6)*4, round((57+digit*3.5)*4)), 6, 0, -1)
+            if candidate_enabled:
+                for index, digit in enumerate((0, 1, 2)):
+                    cv2.circle(image, ((18+index*6)*4, round((57+digit*3.5)*4)), 6, 0, -1)
+                x, y = absent_position(template)
+                cv2.circle(image, (round(x*4), round(y*4)), 6, 0, -1)
             for letter, x, y in bubbles(q, q['regions'][0]):
                 if letter in 'AZ':
                     cv2.rectangle(image, (round(x*4)-6, round(y*4)-4), (round(x*4)+6, round(y*4)+4), 0, -1)
 
-        package = client.get(f"/api/v1/scanner/projects/{project['id']}/package", params={'capability': 'external-sheet-1'}).json()
+        package = client.get(f"/api/v1/scanner/projects/{project['id']}/package", params={'capability': 'external-sheet-1,statistics-sheet-1,statistics-external-1'}).json()
         configured = package['groups'][0]
-        assert configured['template']['candidate_length'] == 3
-        assert configured['roster'][0]['candidate_number'] == '012'
-        batch = client.post('/api/v1/scan-batches', json={'group_id': group['id']}).raise_for_status().json()
+        assert configured['template']['candidate_length'] == (3 if candidate_enabled else 0)
+        assert configured['roster'] == ([{'id': student['id'], 'candidate_number': '012', 'name': '考生'}] if candidate_enabled else [])
+        assert package['room_tags'] == [] and configured['statistics_mode']
+        batch = client.post('/api/v1/scan-batches', json={'group_id': group['id'], 'room': '旧备注'}).raise_for_status().json()
+        assert batch['room'] == '' and batch['room_tags'] == []
         folder = tmp_path / 'pages' / batch['id']
         folder.mkdir(exist_ok=True, parents=True)
         pages = []
@@ -294,7 +313,7 @@ def test_statistics_reuses_exam_roster_and_scanner(monkeypatch, tmp_path, mode):
                                          'template': configured['template'], 'config_sha256': configured['config_sha256'],
                                          'source_extension': '.png', 'source_sha256': digest(content)})
             if side == 'front':
-                assert manifest['candidate_number'] == '012'
+                assert manifest['candidate_number'] == candidate
                 assert manifest['selections'][q['id']] == ['A', 'Z']
             processed = tmp_path / 'processed' / capture
             uploaded = client.post(f"/api/v1/scanner/batches/{batch['id']}/pages", data={
@@ -302,8 +321,9 @@ def test_statistics_reuses_exam_roster_and_scanner(monkeypatch, tmp_path, mode):
             }, files={'file': ('source.png', content), 'normalized': ('normalized.png', (processed/'normalized.png').read_bytes()),
                       'cuts': ('cuts.zip', (processed/'cuts.zip').read_bytes())})
             assert uploaded.is_success, uploaded.text
+            assert uploaded.json()['absent_mark'] is False
         paired = client.post(f"/api/v1/scan-batches/{batch['id']}/pair",
-                             json={'local_pairs': [{'candidate_number': '012', 'pages': pages}]})
+                             json={'local_pairs': [{'candidate_number': candidate, 'pages': pages}]})
         assert paired.is_success, paired.text
         scope = {'group_id': group['id']}
         stats = f"/api/v1/projects/{project['id']}/statistics"
@@ -311,12 +331,18 @@ def test_statistics_reuses_exam_roster_and_scanner(monkeypatch, tmp_path, mode):
         assert detail['total'] == 1
         assert detail['rows'][0]['counts']['A'] == detail['rows'][0]['counts']['Z'] == 1
         rows = client.get('/api/v1/submissions', params=scope).raise_for_status().json()
-        assert rows[0]['student_id'] == student['id']
-        changed = client.put(f"/api/v1/submissions/{rows[0]['id']}/objective",
-                             json={'reason': '检查原卷', 'selections': {q['id']: ['Z']}})
-        assert changed.is_success, changed.text
-        detail = client.get(stats+'/results', params=scope).raise_for_status().json()
-        assert detail['rows'][0]['counts']['A'] == 0 and detail['rows'][0]['counts']['Z'] == 1
+        if candidate_enabled:
+            assert rows[0]['student_id'] == student['id'] and rows[0]['status'] == 'ready'
+            changed = client.put(f"/api/v1/submissions/{rows[0]['id']}/objective",
+                                 json={'reason': '检查原卷', 'selections': {q['id']: ['Z']}})
+            assert changed.is_success, changed.text
+            detail = client.get(stats+'/results', params=scope).raise_for_status().json()
+            assert detail['rows'][0]['counts']['A'] == 0 and detail['rows'][0]['counts']['Z'] == 1
+        else:
+            assert rows == []
+            workflow = client.get(f"/api/v1/groups/{group['id']}/workflow").raise_for_status().json()
+            assert workflow['scan']['received'] == 1
+            assert workflow['batches'][0]['linked_pages'] == len(pages)
         assert client.get(stats+'/export', params=scope).raise_for_status().content.startswith(b'PK')
         assert client.put(stats+'/collection', params=scope, json={'closed': True}).raise_for_status().json() == {'closed': True}
         assert client.post('/api/v1/results/publish', json={'group_id': group['id']}).status_code == 404

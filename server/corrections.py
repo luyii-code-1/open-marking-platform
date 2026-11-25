@@ -8,6 +8,7 @@ from fastapi import APIRouter,Depends,HTTPException,File,UploadFile
 from fastapi.responses import FileResponse
 from PIL import Image
 from .lifecycle import RESULTS_REVIEW_GUIDE
+from .statistics_sheet import uses_absence_mark, uses_candidate_number
 from . import db as database
 from .db import connect,objects,put,find
 from .dependencies import admin,user,require
@@ -80,8 +81,9 @@ def correct_page(identifier:str,body:dict,current=Depends(admin)):
         db.execute('BEGIN IMMEDIATE')
         page=require(db,identifier,'pages'); batch=require(db,page['batch_id'],'scan-batches')
         template=require(db,batch['template_id'],'templates')
-        anonymous=bool(template.get('statistics_sheet'))
-        if anonymous and ('candidate_number' in body or 'absent_mark' in body):
+        anonymous=not uses_candidate_number(template)
+        attendance=uses_absence_mark(template)
+        if anonymous and 'candidate_number' in body:
             raise HTTPException(422,'请核对统计答卷的选项或页面顺序')
         from .lifecycle import writable
         writable(db,'pages',page)
@@ -115,12 +117,14 @@ def correct_page(identifier:str,body:dict,current=Depends(admin)):
                 if qid not in by_id or not isinstance(answers,list) or any(not isinstance(value,str) or len(value)!=1 or value not in letters for value in answers): raise HTTPException(422,'选项超出题目范围')
                 selections[qid]=sorted(set(answers))
             page['selections']={**page.get('selections',{}),**selections}
-        if 'absent_mark' in body:
+        if not attendance and body.get('absent_mark') is True:
+            raise HTTPException(422,'统计题卡按实扫答卷入库')
+        if attendance and 'absent_mark' in body:
             if page['side']!='front' or type(body['absent_mark']) is not bool:raise HTTPException(422,'缺考标记只用于正面，值需为布尔值')
             page['absent_mark']=body['absent_mark'];page['absent_mark_corrected']=True
         pending=page.get('external_mark_review')
         if pending and not page.get('excluded'):
-            if not set(pending['questions']) <= set(body.get('selections',{})) or pending['absent'] and 'absent_mark' not in body:
+            if not set(pending['questions']) <= set(body.get('selections',{})) or attendance and pending['absent'] and 'absent_mark' not in body:
                 raise HTTPException(422,'请确认所有待核对的填涂结果')
             page.pop('external_mark_review')
             page['status']='recognized'
@@ -197,6 +201,9 @@ def mark_absent(identifier:str,body:dict,current=Depends(admin)):
     with connect() as db:
         group=require(db,identifier,'groups')
         if group.get('frozen'): raise HTTPException(409,RESULTS_REVIEW_GUIDE)
+        template=require(db,group.get('template_id'),'templates')
+        if not uses_absence_mark(template):
+            raise HTTPException(422,'统计题卡按实扫答卷入库')
         student=require(db,body.get('student_id'),'students')
         from .school import group_students
         members=group_students(db,group)
@@ -204,7 +211,6 @@ def mark_absent(identifier:str,body:dict,current=Depends(admin)):
         if not group.get('grade_id') and members is not None:student=next((s for s in members if s['id']==student['id']),student)
         from .student_history import snapshot
         student=snapshot(db,student)
-        template=require(db,group.get('template_id'),'templates')
         if any(s['group_id']==identifier and s['student_id']==student['id'] for s in objects(db,'submissions')): raise HTTPException(409,'该考生已有答卷记录')
         raise HTTPException(409,'未扫描学生保留未扫描状态，请扫描已填涂缺考标记的题卡')
 
@@ -243,6 +249,8 @@ def correct_attendance(identifier:str,body:dict,current=Depends(admin)):
         submission=require(db,identifier,'submissions');group=require(db,submission['group_id'],'groups')
         if group.get('frozen'):raise HTTPException(409,RESULTS_REVIEW_GUIDE)
         template=require(db,submission['template_id'],'templates')
+        if body['absent'] and not uses_absence_mark(template):
+            raise HTTPException(422,'统计题卡按实扫答卷入库')
         status='absent' if body['absent'] else 'ready'
         if body['absent'] and not submission.get('pages'):raise HTTPException(409,'请先扫描题卡后核对缺考标记')
         if not body['absent']:

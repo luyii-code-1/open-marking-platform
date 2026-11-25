@@ -20,7 +20,7 @@ from .lifecycle import RESULTS_REVIEW_GUIDE
 from .db import connect, find, get, initialize, objects, put
 from .scoring import cents, final_score
 from . import db as database
-from . import paper
+from . import paper, statistics_sheet
 
 
 @asynccontextmanager
@@ -183,7 +183,10 @@ def list_route(kind):
             if kind=='groups':
                 grades={g['id']:g['name'] for g in objects(db,'grades')}
                 scanned={r[0] for r in db.execute('SELECT group_id FROM scanned_groups')}
-                values=[{**v,'grade_name':grades.get(v.get('grade_id'),''),'template_locked':v['id'] in scanned} for v in values]
+                statistics_projects={p['id'] for p in find(db,'projects',category='statistics')}
+                statistics_subjects={s['id'] for s in objects(db,'subjects') if s.get('project_id') in statistics_projects}
+                values=[{**v,'grade_name':grades.get(v.get('grade_id'),''),'template_locked':v['id'] in scanned,
+                         'statistics_mode':v.get('subject_id') in statistics_subjects} for v in values]
             if kind=='scan-batches':
                 from .room_tags import view as room_view
                 from .workflow import batch_progress
@@ -322,6 +325,8 @@ def create_route(kind):
                 if not group.get('template_id'):
                     raise HTTPException(422,'请先发布题卡')
                 template=require(db,group['template_id'],'templates')
+                if template.get('statistics_mode') or statistics_sheet.enabled(template):
+                    value['room']=''
                 value.update(status='front',template_id=template['id'],template_revision=template['revision'])
             if kind=='subjects':
                 from .electives import subject_tag
@@ -403,7 +408,7 @@ def publish(identifier:str,body:dict|None=None,current=Depends(admin)):
             from .templates import require_replaceable
             require_replaceable(db,group['id'])
         from .template_checks import issues,asset_ids
-        if not group.get('statistics_group'):
+        if template['status']=='draft' and not group.get('statistics_group'):
             from .statistics_projects import set_template_mode
             set_template_mode(db,group,template)
         errors=issues(template,complete=True,require_answers=False)
@@ -555,7 +560,7 @@ def pair(identifier:str,body:dict|None=Body(default=None),current=Depends(scan_a
         if not fronts or (template['sides']==2 and len(fronts)!=len(backs)): raise HTTPException(409,'正反面数量不符')
         if any(p['status']=='received' for p in page_list):raise HTTPException(425,'页面正在后台识别，请稍后重试')
         if any(p['status']!='recognized' for p in page_list): raise HTTPException(409,'存在待处理识别异常')
-        if template.get('statistics_sheet'):
+        if not statistics_sheet.uses_candidate_number(template):
             from .statistics_projects import confirm
             page_sets=[[front]+([backs[i]] if template['sides']==2 else []) for i,front in enumerate(fronts)]
             local=[{'candidate_number':None,'pages':[p['id'] for p in pages]} for pages in page_sets]
@@ -595,7 +600,8 @@ def pair(identifier:str,body:dict|None=Body(default=None),current=Depends(scan_a
                 sibling_ids={item['id'] for item in find(db,'groups',subject_id=group['subject_id'])}
                 if any(s['group_id'] in sibling_ids and s.get('pages') for s in existing):
                     raise HTTPException(409,'同一学生在本科目已有答卷，请核查题卡或执行补扫替换')
-            submission=put(db,'submissions',{'group_id':batch['group_id'],'template_id':template['id'],'student_id':student['id'],'student_snapshot':student,'room_tags':batch.get('room_tags',[]),'grade_id':batch.get('grade_id'),'candidate_number':front['candidate_number'],'pages':[front['id']]+([backs[index]['id']] if template['sides']==2 else []),'status':'absent' if front.get('absent_mark') else 'ready','attendance_source':'scan_mark' if front.get('absent_mark') else 'scan'},current['id'])
+            absent=statistics_sheet.uses_absence_mark(template) and front.get('absent_mark')
+            submission=put(db,'submissions',{'group_id':batch['group_id'],'template_id':template['id'],'student_id':student['id'],'student_snapshot':student,'room_tags':batch.get('room_tags',[]),'grade_id':batch.get('grade_id'),'candidate_number':front['candidate_number'],'pages':[front['id']]+([backs[index]['id']] if template['sides']==2 else []),'status':'absent' if absent else 'ready','attendance_source':'scan_mark' if absent else 'scan'},current['id'])
             from .answer_slices import sync
             submission=sync(db,submission,template,current['id'])
             from .anomalies import check_submission

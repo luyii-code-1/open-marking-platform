@@ -22,7 +22,7 @@ _render_slots=threading.BoundedSemaphore(4)
 _preview_cache_lock=threading.Lock()
 _preview_cache:OrderedDict[tuple[str,int],tuple[bytes,str]]=OrderedDict()
 _PREVIEW_CACHE_MAX=64
-DEFINITION_FIELDS=('name','subtitle','font_size','leading','paper','sides','candidate_length','layout_version','sheet_columns','notice_template','notice_layout','print_style','column_frame','uniform_subjective','auto_subjective_layout','print_notes','forbidden_regions','background_assets','background_boxes','background_asset_id','external_sheet','questions')
+DEFINITION_FIELDS=('name','subtitle','font_size','leading','paper','sides','candidate_length','layout_version','sheet_columns','notice_template','notice_layout','print_style','column_frame','uniform_subjective','auto_subjective_layout','print_notes','forbidden_regions','background_assets','background_boxes','background_asset_id','external_sheet','candidate_enabled','statistics_layout','questions')
 
 
 @router.put('/groups/{group_id}/drafts/{identifier}')

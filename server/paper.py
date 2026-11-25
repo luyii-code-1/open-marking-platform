@@ -51,8 +51,10 @@ def validate(template):
                 raise ValueError('答题区页码超出题卡范围')
             if min(region['x'],region['y'])<0 or min(region['width'],region['height'])<=0 or region['x']+region['width']>w-8 or region['y']+region['height']>(270 if sheet_style.enabled(template) else h-8):
                 raise ValueError('答题区超出纸张有效范围')
-            reserved=100 if not manual_binding(template) or (region['page']==1 and region['x']<12+panel_width) else 35
-            if region['y']<reserved:raise ValueError(f'本栏答题区需从{reserved}毫米开始，保留标题及考号区域')
+            panel = 0 if region['x'] < 12 + panel_width else 1
+            reserved = sheet_style.body_top(template, region['page'], panel)
+            if region['y'] < reserved:
+                raise ValueError(f'本栏答题区需从 {reserved} 毫米开始，保留页首区域')
             if manual_binding(template):
                 panel=min(columns-1,max(0,int((region['x']-12+.01)/(panel_width+8))))
                 left=12+panel*(panel_width+8)
@@ -90,7 +92,7 @@ def validate(template):
         if type(area.get('page')) is not int or not 1<=area['page']<=template['sides']:raise ValueError('禁答区页码超出题卡范围')
         if area['width']<10 or area['height']<8 or area['x']<12 or area['x']+area['width']>w-12 or area['y']+area['height']>270:raise ValueError('禁答区超出有效范围或尺寸过小')
         panel=max(0,min(columns-1,int((area['x']-12+.01)/(panel_width+8))))
-        left=12+panel*(panel_width+8);top=100 if area['page']==1 and panel==0 else 35
+        left=12+panel*(panel_width+8);top=sheet_style.body_top(template,area['page'],panel)
         if area['y']<top or area['x']<left-.01 or area['x']+area['width']>left+panel_width+.01:raise ValueError('禁答区不能覆盖页首或跨越题卡分栏')
         for other in occupied:
             if other['page']==area['page'] and area['x']<other['x']+other['width'] and other['x']<area['x']+area['width'] and area['y']<other['y']+other['height'] and other['y']<area['y']+area['height']:raise ValueError('禁答区与已有区域重叠')
@@ -111,7 +113,7 @@ def validate(template):
         x,y,width,height=(note[k] for k in ('x','y','width','height'))
         panel=max(0,min(columns-1,int((x-12+.01)/(panel_width+8))))
         left=12+panel*(panel_width+8)
-        top=100 if not manual_binding(template) or (note['page']==1 and panel==0) else 35
+        top=sheet_style.body_top(template,note['page'],panel)
         if x<left-.01 or x+width>left+panel_width+.01 or y<top or y+height>270 or min(width,height)<=0:
             raise ValueError('版面文字超出本栏可用范围')
         if any(r['page']==note['page'] and x<r['x']+r['width'] and r['x']<x+width and y<r['y']+r['height'] and r['y']<y+height for r in protected):
@@ -127,7 +129,7 @@ def forbidden_regions(template,page):
     occupied=[r for q in template.get('questions',[]) for r in q.get('regions',[]) if r['page']==page]
     result=[]
     for panel in range(count):
-        left=12+panel*(pw+8);right=left+pw;top=100 if page==1 and panel==0 else 35;bottom=255
+        left=12+panel*(pw+8);right=left+pw;top=sheet_style.body_top(template,page,panel);bottom=255
         obstacles=[(max(left,r['x']-2),max(top,r['y']-5),min(right,r['x']+r['width']+2),min(bottom,r['y']+r['height']+2)) for r in occupied if r['x']<right and r['x']+r['width']>left]
         edges=sorted({top,bottom}|{v for x,y,ex,ey in obstacles for v in (y,ey) if top<=v<=bottom})
         active={}
@@ -185,7 +187,8 @@ def pdf(template, only_page=None):
                 c.drawImage(str(background),bx*mm,(h-by-bh)*mm,width=bw*mm,height=bh*mm,preserveAspectRatio=True,anchor='c',mask='auto')
             else:
                 c.drawImage(str(background),0,0,width=w*mm,height=h*mm)
-                c.setFillColorRGB(1,1,1);c.rect(0,(h-100)*mm,w*mm,100*mm,fill=1,stroke=0);c.setFillColorRGB(0,0,0)
+                header_height = sheet_style.body_top(template, 1, 0)
+                c.setFillColorRGB(1,1,1);c.rect(0,(h-header_height)*mm,w*mm,header_height*mm,fill=1,stroke=0);c.setFillColorRGB(0,0,0)
         title_width=(w-24-(panels(template)-1)*8)/panels(template) if manual_binding(template) else w-65
         title_size=min(16,16*(title_width-6)/max(1,pdfmetrics.stringWidth(template['name'],FONT,16)/mm))
         if page==1 or not manual_binding(template):
@@ -214,14 +217,22 @@ def pdf(template, only_page=None):
             standard_notices=sheet_notices.enabled(template)
             c.setFont(FONT,8 if standard_notices else 9)
             baseline=(h-(33 if standard_notices else 39))*mm
-            if template.get('column_frame'):
+            if template.get('statistics_layout') == 1:
+                baseline = (h-32)*mm
+                pitch = min(54, (title_width-6)/2)
+                for index, label in enumerate(('姓名', '班级')):
+                    x = 15 + index*pitch
+                    c.drawString(x*mm, baseline, label)
+                    c.line((x+9)*mm, baseline-1, (x+pitch-3)*mm, baseline-1)
+            elif template.get('column_frame'):
                 field_width=min(40,(title_width-6)/3)*mm
                 for index,label in enumerate(('姓名','班级','考场')):
                     x=15*mm+index*field_width
                     c.drawString(x,baseline,label)
                     c.line(x+7*mm,baseline-1,x+field_width-2*mm,baseline-1)
             else:c.drawString(15*mm,baseline,'姓名：____________  班级：____________  考场：____________')
-            if template.get('layout_version',1)>=2:
+            candidate = statistics_sheet.uses_candidate_number(template)
+            if candidate and template.get('layout_version',1)>=2:
                 if sheet_style.enabled(template):
                     header=sheet_style.header_geometry(template)
                     c.saveState();c.setLineWidth(.18*mm)
@@ -230,12 +241,13 @@ def pdf(template, only_page=None):
                     c.restoreState()
                 else:c.drawString(15*mm,(h-46)*mm,'准考证号：')
                 ax,ay=absent_position(template)
-                if not standard_notices:
+                if not standard_notices and template.get('statistics_layout') != 1:
                     c.drawString((ax-23)*mm,(h-46)*mm,'缺考标记：')
                     c.rect((ax-2)*mm,(h-ay-1.5)*mm,4*mm,3*mm)
                     c.setFont(FONT,7);c.drawString((ax-24)*mm,(h-51)*mm,'由监考教师填涂')
-            else:c.drawString(15*mm,(h-46)*mm,'准考证号：                       缺考标记：□（由监考教师填写）')
-            for column in range(int(template.get('candidate_length',8))):
+            elif candidate:
+                c.drawString(15*mm,(h-46)*mm,'准考证号：                       缺考标记：□（由监考教师填写）')
+            for column in range(int(template.get('candidate_length',8)) if candidate else 0):
                 x=18+column*6
                 c.rect((x-2)*mm,(h-54)*mm,4*mm,(4 if sheet_style.enabled(template) else 5)*mm)
                 for digit in range(10):
@@ -320,7 +332,7 @@ def pdf(template, only_page=None):
                 c.setStrokeColorRGB(.73,.36,.32)
                 for panel in range(count):
                     left=12+panel*(pw+8)
-                    top=97 if page==1 and panel==0 else 31
+                    top=sheet_style.body_top(template,page,panel)-(3 if page==1 and panel==0 else 4)
                     c.roundRect((left-1.5)*mm,17*mm,(pw+3)*mm,(h-top-17)*mm,2.5*mm)
             else:
                 for q in template.get('questions',[]):

@@ -4,6 +4,7 @@ import hashlib
 import json
 from fastapi import APIRouter, Depends, HTTPException, Query
 from .lifecycle import RESULTS_REVIEW_GUIDE
+from .statistics_sheet import uses_candidate_number
 from .db import connect, find, get, objects, put
 from .dependencies import admin, require
 from .school import group_students, student_view
@@ -24,7 +25,9 @@ def membership(db,group):
             'removed':removed,'retained':retained,'needs_review':False}
 
 
-def batch_progress(db,batch,*,anonymous=False):
+def batch_progress(db,batch,*,anonymous=None):
+    if anonymous is None:
+        anonymous = not uses_candidate_number(get(db,batch.get('template_id'),'templates') or {})
     pages=[p for p in find(db,'pages',batch_id=batch['id']) if not p.get('excluded')]
     submissions=(find(db,'statistics-responses',batch_id=batch['id']) if anonymous else find(db,'submissions',group_id=batch['group_id']))
     linked={pid for s in submissions for pid in s.get('pages',[])}
@@ -41,9 +44,9 @@ def overview(db,group,current):
     batches=find(db,'scan-batches',group_id=group['id'])
     from .room_tags import exception_source,progress
     exceptions=[e for e in objects(db,'exceptions') if e.get('status')=='open' and e.get('kind')!='excellent' and (e.get('group_id')==group['id'] or exception_source(db,e).get('group_id')==group['id'])]
-    rooms=[{**r,**progress(db,r)} for r in find(db,'room-tags',group_id=group['id']) if not r.get('archived')]
     from .statistics_projects import is_statistics_group
     statistics=is_statistics_group(db,group)
+    rooms=[] if statistics else [{**r,**progress(db,r)} for r in find(db,'room-tags',group_id=group['id']) if not r.get('archived')]
     from .review import results_for
     rows=results_for(db,group['id'],current) if group.get('template_id') and not statistics else []
     counts={status:sum(r['status']==status for r in rows) for status in ('unscanned','absent','pending','completed')}
@@ -69,15 +72,18 @@ def overview(db,group,current):
     if statistics:
         subject=require(db,group['subject_id'],'subjects')
         project=require(db,subject['project_id'],'projects')
-        expected=len(roster['students']) if roster['configured'] else state['room_expected'] or len(submissions)
+        template=get(db,group.get('template_id'),'templates') or {}
+        anonymous=not uses_candidate_number(template)
+        response_count=len(find(db,'statistics-responses',group_id=group['id'],template_id=template['id'])) if anonymous else 0
+        expected=response_count if anonymous else len(roster['students']) if roster['configured'] else len(submissions)
         present_ids={s['student_id'] for s in submissions if s.get('pages') and s['status']!='absent'}
         absent_ids={s['student_id'] for s in submissions if s['status']=='absent'}
-        pending=max(0,expected-len(present_ids | absent_ids))
-        state['scan']={'received':len(present_ids),'expected':expected,'pending':pending,'exceptions':len(exceptions),'absent':len(absent_ids)}
+        pending=max(0,expected-(response_count if anonymous else len(present_ids | absent_ids)))
+        state['scanned']=response_count if anonymous else len(present_ids)
+        state['scan']={'received':state['scanned'],'expected':expected,'pending':pending,'exceptions':len(exceptions),'absent':len(absent_ids)}
         state['results']={'unscanned':pending,'absent':len(absent_ids)}
         state['scans_purged']=bool(project.get('scans_purged'))
         state['project_id']=project['id']
-        template=get(db,group.get('template_id'),'templates') or {}
         state['objective_reprocess_allowed']=bool(not group.get('frozen') and not state['scans_purged'] and template.get('questions') and any(b['recognized_pages'] for b in details))
         return state
     # Count scores against the version actually used by each submitted sheet.

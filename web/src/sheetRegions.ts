@@ -1,5 +1,10 @@
 import type { Region, Template } from './api'
 
+export function sheetBodyTop(template: Template, page: number, panel: number) {
+  if ((template.layout_version || 2) >= 3 && (page !== 1 || panel !== 0)) return 35
+  return template.statistics_layout === 1 && template.candidate_enabled === false ? 44 : 100
+}
+
 export function columnBounds(template:Template,page:number,x:number) {
   const width=template.paper==='A3'?420:210
   const columns=template.paper==='A3'?(template.sheet_columns||2):1
@@ -7,7 +12,7 @@ export function columnBounds(template:Template,page:number,x:number) {
   const index=Math.max(0,Math.min(columns-1,Math.floor((x-12+4)/(size+8))))
   const edge=12+index*(size+8)
   const left=Math.ceil((edge-1e-8)*1000)/1000
-  return {left,right:left+Math.floor((size+1e-8)*10)/10,top:(template.layout_version||2)<3||page===1&&index===0?100:35,bottom:270}
+  return {left,right:left+Math.floor((size+1e-8)*10)/10,top:sheetBodyTop(template,page,index),bottom:270}
 }
 const clamp=(n:number,min:number,max:number)=>Math.max(min,Math.min(max,n))
 type Point={x:number;y:number}
@@ -41,7 +46,7 @@ export function intersects(a:Region,b:Region) {
 
 export function forbiddenRegion(template:Template,page:number,start:{x:number;y:number},end:{x:number;y:number},existing?:Region,resize=false):Region {
   const width=template.paper==='A3'?420:210,count=template.paper==='A3'?(template.sheet_columns||2):1,pw=(width-24-(count-1)*8)/count
-  const anchor=existing?.x??start.x,panel=Math.max(0,Math.min(count-1,Math.floor((anchor-12)/(pw+8)))),edge=12+panel*(pw+8),left=Math.ceil(edge*10)/10,right=Math.floor((edge+pw)*10)/10,top=page===1&&panel===0?100:35
+  const anchor=existing?.x??start.x,panel=Math.max(0,Math.min(count-1,Math.floor((anchor-12)/(pw+8)))),edge=12+panel*(pw+8),left=Math.ceil(edge*10)/10,right=Math.floor((edge+pw)*10)/10,top=sheetBodyTop(template,page,panel)
   const clamp=(n:number,a:number,b:number)=>Math.max(a,Math.min(b,n))
   let region:Region
   if(existing&&!resize)region={...existing,x:clamp(existing.x+end.x-start.x,left,right-existing.width),y:clamp(existing.y+end.y-start.y,top,270-existing.height)}

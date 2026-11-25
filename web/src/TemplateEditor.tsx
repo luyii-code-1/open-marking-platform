@@ -18,18 +18,20 @@ import type { ExternalMode } from './api'
 import { TagPicker } from './TagPicker'
 
 import { mergeQuestions, splitQuestions, questionNumbers, questionLabel } from './mergeQuestions'
-import { initialSubjectiveRegion, uniformSubjectiveWidths } from './sheetRegions'
+import { columnBounds, initialSubjectiveRegion, sheetBodyTop, uniformSubjectiveWidths } from './sheetRegions'
 import {subjectiveLayoutKey} from './subjectiveLayout'
 
 const { Text } = Typography
-const emptyTemplate = (groupId = '', statistics = false): Template => ({ statistics_mode: statistics, id: crypto.randomUUID(), name: '新答题卡', font_size:13, leading:20, group_id: groupId, paper: 'A4', sides: 2, layout_version: 3, sheet_columns: 1, notice_template:statistics?'none':'standard-v1', notice_layout:2, column_frame:true, uniform_subjective:!statistics, auto_subjective_layout:!statistics, print_style:'standard-v2', forbidden_regions:[], candidate_length: 9, revision: 0, questions: [] })
+const emptyTemplate = (groupId = '', statistics = false): Template => ({ ...(statistics ? { statistics_mode: true, statistics_layout: 1, candidate_enabled: true } : {}), id: crypto.randomUUID(), name: '新答题卡', font_size:13, leading:20, group_id: groupId, paper: 'A4', sides: 2, layout_version: 3, sheet_columns: 1, notice_template:statistics?'none':'standard-v1', notice_layout:2, column_frame:true, uniform_subjective:!statistics, auto_subjective_layout:!statistics, print_style:'standard-v2', forbidden_regions:[], candidate_length: 9, revision: 0, questions: [] })
 const externalTemplate = (groupId: string, mode: ExternalMode, name?: string, statistics = false): Template => ({
   ...emptyTemplate(groupId, statistics), name: name || '新兼容题卡', sides: 1, notice_template: 'none',
   auto_subjective_layout: false, uniform_subjective: false, external_sheet: { version: 1, mode, pages: {} },
 })
 const lockedVersion=(t:Template)=>t.status==='published'||t.status==='superseded'
 const versionLabel=(t:Template)=>t.status==='superseded'?'历史版本':t.status==='published'?'已发布':'草稿'
-const editableCopy=(t:Template):Template=>lockedVersion(t)||t.external_sheet||t.statistics_mode?structuredClone(t):uniformSubjectiveWidths({
+const editableCopy=(t:Template):Template=>lockedVersion(t)?structuredClone(t):t.statistics_mode
+  ? {...structuredClone(t),statistics_layout:1,candidate_enabled:t.candidate_enabled??true}
+  : t.external_sheet?structuredClone(t):uniformSubjectiveWidths({
   ...structuredClone(t),layout_version:3,uniform_subjective:true,auto_subjective_layout:t.auto_subjective_layout??false,column_frame:t.column_frame??true,notice_layout:2,notice_template:t.notice_template||'standard-v1',
   print_style:'standard-v2',forbidden_regions:t.forbidden_regions||[],
 })
@@ -120,6 +122,26 @@ export function TemplateEditor({ groupId, statistics = false }: { groupId?: stri
     const next = { ...saver.value, ...update }
     saver.edit(next.external_sheet || statistics ? next : uniformSubjectiveWidths(next))
   }
+  function setCandidateEnabled(candidate_enabled: boolean) {
+    const current = saver.value
+    const next: Template = {...current, statistics_layout:1, candidate_enabled}
+    const oldTop = sheetBodyTop(current,1,0), newTop = sheetBodyTop(next,1,0)
+    const right = columnBounds(current,1,12).right
+    const firstColumn = (r: {page:number; x:number}) => r.page === 1 && r.x < right
+    const regions = [...current.questions.flatMap(q=>q.regions), ...(current.print_notes||[]), ...(current.forbidden_regions||[])]
+      .filter(firstColumn)
+    const earliest = regions.reduce((y,r)=>Math.min(y,r.y),Infinity)
+    const offset = candidate_enabled ? Math.max(0,newTop-earliest) : newTop-oldTop
+    if (regions.some(r=>r.y+offset+r.height>270)) {
+      message.warning('正面空间不足，请先将部分内容移到其他栏或背面')
+      return
+    }
+    const move = <T extends {page:number; x:number; y:number}>(r:T):T =>
+      firstColumn(r) ? {...r,y:r.y+offset} : r
+    change({statistics_layout:1,candidate_enabled,
+      questions:current.questions.map(q=>({...q,regions:q.regions.map(move)})),
+      print_notes:current.print_notes?.map(move),forbidden_regions:current.forbidden_regions?.map(move)})
+  }
   function select(id: string, edit = false) {
     setEditing(null);setQuestionId(id);setForbiddenMode(false)
     const q = value.questions.find(q => q.id === id)
@@ -201,7 +223,13 @@ export function TemplateEditor({ groupId, statistics = false }: { groupId?: stri
       <Form.Item label="文字行距（磅）"><InputNumber min={value.font_size??9} max={72} value={value.leading??13} onChange={leading=>{if(leading!=null)change({leading})}}/></Form.Item>
     </div>
     <Form.Item label="分栏底版"><Select value={value.column_frame?'framed':'classic'} options={[{label:'整栏圆角框与边缘提示',value:'framed'},{label:'逐题圆角框',value:'classic'}]} onChange={v=>change({column_frame:v==='framed'})}/></Form.Item>
-    <Form.Item label="准考证号位数"><InputNumber min={1} max={readOnly&&value.print_style!=='standard-v2'?20:11} value={value.candidate_length} onChange={length => change({ candidate_length: length || 9 })} /></Form.Item>
+    {statistics && <Form.Item label="准考证号">
+      <Space><Switch checked={value.candidate_enabled!==false} onChange={setCandidateEnabled} aria-label="启用准考证号" />
+        <Text type="secondary">{value.candidate_enabled===false?'每张入库题卡计一份':'扫描时按考号匹配应考名单'}</Text></Space>
+    </Form.Item>}
+    {(!statistics || value.candidate_enabled!==false) && <Form.Item label="准考证号位数">
+      <InputNumber min={1} max={readOnly&&value.print_style!=='standard-v2'?20:11} value={value.candidate_length} onChange={length => change({ candidate_length: length || 9 })} />
+    </Form.Item>}
     {!statistics && <Form.Item label="内置须知"><Select value={value.notice_template||'none'} options={[{label:'标准模板 · 考生禁填、注意事项与填涂样例',value:'standard-v1'},{label:'不添加',value:'none'}]} onChange={notice_template=>change({notice_template})}/><Text type="secondary">标准模板保留条形码核对及错区扣分说明；扣分文字用于印刷说明，不自动扣分。</Text></Form.Item>}
     <Space wrap>
       <Upload disabled={readOnly} accept="image/*" showUploadList={false} beforeUpload={async file => { const data = new FormData(); data.append('file', file); try { const asset = await request<Row>('/assets', { method: 'POST', body: data }); const pageW = value.paper === 'A3' ? 420 : 210; const defaultBox = { x: 12, y: page === 1 ? 100 : 34, width: pageW - 24, height: page === 1 ? 165 : 225 }; change({ background_assets: { ...value.background_assets, [String(page)]: asset.id }, background_boxes: { ...value.background_boxes, [String(page)]: defaultBox } }); setForbiddenMode(false); message.success('当前面底图已导入，可在画布上自由拖动和缩放') } catch (e) { message.error((e as Error).message) } return false }}><Button disabled={readOnly || saving}>导入当前面题卡底图</Button></Upload>

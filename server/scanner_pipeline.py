@@ -28,8 +28,10 @@ def configuration(template):
     fields = ('id', 'name', 'paper', 'sides', 'revision', 'layout_version', 'candidate_length', 'sheet_columns')
     result = {k: template[k] for k in fields if k in template}
     result['questions'] = [{k: q[k] for k in ('id', 'number', 'type', 'options', 'regions', 'choice_style') if k in q} for q in template['questions']]
-    if statistics_sheet.enabled(template):
+    if not statistics_sheet.uses_candidate_number(template):
         result['statistics_sheet'] = True
+        if template.get('statistics_mode'):
+            result['candidate_length'] = 0
     if compatible_omr.profile(template):
         result['external_sheet'] = template['external_sheet']
         for question, configured in zip(template['questions'], result['questions']):
@@ -64,7 +66,8 @@ def project_package(identifier: str, capability: str = '', current=Depends(scan_
     with connect() as db:
         db.execute('BEGIN'); project = require(db, identifier, 'projects'); writable(db, 'projects', project)
         project=project_views(db,[project])[0]
-        if project.get('category')=='statistics' and not project.get('statistics_group_id'):
+        statistics = project.get('category') == 'statistics'
+        if statistics and not project.get('statistics_group_id'):
             # Older scanner frontends reserve this category for the direct-entry workflow.
             project.pop('category')
         subjects = find(db, 'subjects', project_id=identifier); subject_ids = {s['id'] for s in subjects}
@@ -75,7 +78,7 @@ def project_package(identifier: str, capability: str = '', current=Depends(scan_
             if not template or template['status'] != 'published': continue
             capabilities = capability.split(',')
             if compatible_omr.profile(template) and compatible_omr.CAPABILITY not in capabilities: continue
-            if statistics_sheet.enabled(template):
+            if not statistics_sheet.uses_candidate_number(template):
                 if statistics_sheet.CAPABILITY not in capabilities: continue
                 if compatible_omr.profile(template) and statistics_sheet.EXTERNAL_CAPABILITY not in capabilities:
                     project['required_scanner_capability'] = statistics_sheet.EXTERNAL_CAPABILITY
@@ -83,6 +86,8 @@ def project_package(identifier: str, capability: str = '', current=Depends(scan_
                 confirmed = find(db, 'statistics-responses', group_id=group['id'])
                 packaged.append({'id': group['id'], 'name': group['name'], 'subject_id': group['subject_id'],
                                  'frozen': bool(group.get('frozen')), 'roster_mode': 'open', 'roster': [],
+                                 'statistics_mode': statistics, 'grade_id': group.get('grade_id'),
+                                 'grade_name': (get(db,group.get('grade_id'),'grades') or {}).get('name',''),
                                  'template': configuration(template), 'config_sha256': config_hash(template),
                                  'confirmed_candidates': [], 'confirmed_students': 0, 'confirmed_sheets': len(confirmed),
                                  'unassigned_sheets': sum(not response.get('room_tags') for response in confirmed)})
@@ -94,7 +99,7 @@ def project_package(identifier: str, capability: str = '', current=Depends(scan_
             confirmed=find(db,'submissions',group_id=group['id'])
             valid=[s for s in confirmed if s.get('pages') or s.get('status')=='absent']
             packaged.append({'id': group['id'], 'name': group['name'], 'subject_id': group['subject_id'], 'frozen': bool(group.get('frozen')), 'grade_id':group.get('grade_id'), 'grade_name':(get(db,group.get('grade_id'),'grades') or {}).get('name',''),
-                             'roster_mode': 'open' if is_open_roster else (group.get('roster_mode') or ('grade' if group.get('grade_id') else 'selected')),
+                             'statistics_mode': statistics, 'roster_mode': 'open' if is_open_roster else (group.get('roster_mode') or ('grade' if group.get('grade_id') else 'selected')),
                              'template': {**configuration(template), 'notice_layout':template.get('notice_layout',1), 'notice_template':template.get('notice_template')}, 'config_sha256': config_hash(template),
                              'confirmed_candidates':sorted({s['candidate_number'] for s in valid}),
                              'confirmed_students':len({s['student_id'] for s in valid}),
@@ -102,7 +107,7 @@ def project_package(identifier: str, capability: str = '', current=Depends(scan_
                              'unassigned_sheets':sum(bool(s.get('pages')) and not s.get('room_tags') for s in valid),
                              'roster': [{'id':s['id'],'candidate_number': s['candidate_number'], 'name': s['name']} for s in scanner_roster] if scanner_roster is not None else None})
         from .room_tags import view,progress
-        rooms=[{**view(db,[t])[0],**progress(db,t)} for t in find(db,'room-tags',project_id=identifier)]
+        rooms=[] if statistics else [{**view(db,[t])[0],**progress(db,t)} for t in find(db,'room-tags',project_id=identifier)]
         return {'protocol': 'omp-scanner-4', 'engine_version': ENGINE_VERSION,
                 'room_tags':rooms,
                 'project': {k: project[k] for k in ('id', 'name', 'status', 'category', 'required_scanner_capability', *STATUS_FIELDS) if k in project},
@@ -127,7 +132,8 @@ def register_batch(identifier: str, body: dict, current=Depends(scan_admin)):
         if existing:
             batch, _, template = batch_context(db, identifier, current)
             if any(body.get(k) != batch.get(k) for k in ('group_id', 'template_id', 'template_revision', 'config_sha256', 'back_order', 'capture_mode')): raise HTTPException(409, '本地批次与服务器记录不一致')
-            if sorted(body.get('room_tag_ids',[]))!=sorted(t['id'] for t in batch.get('room_tags',[])):raise HTTPException(409,'本地考场标签与批次记录不一致')
+            if statistics_sheet.uses_absence_mark(template) and sorted(body.get('room_tag_ids',[]))!=sorted(t['id'] for t in batch.get('room_tags',[])):
+                raise HTTPException(409,'本地考场标签与批次记录不一致')
             return batch
         group = require(db, body.get('group_id'), 'groups'); writable(db, 'groups', group)
         if group.get('frozen'): raise HTTPException(409, RESULTS_REVIEW_GUIDE)
@@ -138,7 +144,7 @@ def register_batch(identifier: str, body: dict, current=Depends(scan_admin)):
         mode = body.get('capture_mode', 'separate'); order = body.get('back_order', 'same'); room = body.get('room', '')
         if mode not in ('duplex', 'separate') or order not in ('same', 'reverse') or (mode == 'duplex' and (template['sides'] != 2 or order != 'same')) or not isinstance(room, str) or len(room) > 100: raise HTTPException(422, '采集方式、背面顺序或备注无效')
         return put(db, 'scan-batches', {'id': identifier, 'group_id': group['id'], 'template_id': template['id'], 'template_revision': template['revision'],
-                                      'config_sha256': body['config_sha256'], 'grade_id':group.get('grade_id'), 'room_tags':labels, 'room': room,
+                                      'config_sha256': body['config_sha256'], 'grade_id':group.get('grade_id'), 'room_tags':labels, 'room': room if statistics_sheet.uses_absence_mark(template) else '',
                                       'capture_mode': mode, 'back_order': order,
                                       'status': 'front', **({'scanner_device_id': current['id']} if current['role'] == 'scanner' else {})}, current['id'])
 
@@ -160,6 +166,7 @@ def image_bytes(file, expected_shape=None, image_format='PNG'):
 
 
 def verified_absence(template, side, result, normalized):
+    if not statistics_sheet.uses_absence_mark(template):return False
     # Recheck moved marks on the corrected image supplied by existing scanner engines.
     if side=='front' and 'operator_correction' in result:return result['absent_mark']
     if compatible_omr.profile(template):
@@ -179,7 +186,7 @@ def verify_result(template, side, result, original, normalized, cuts):
     supported={ENGINE_VERSION} if template.get('layout_version',2)>=3 or any(q.get('choice_style')=='compact' for q in template['questions']) else {ENGINE_VERSION,'omp-omr-2'} if any(q.get('choice_style')=='bracket' for q in template['questions']) else {ENGINE_VERSION,'omp-omr-2','omp-omr-1'}
     if compatible_omr.profile(template):
         supported = {compatible_omr.ENGINE_VERSION}
-    anonymous = statistics_sheet.enabled(template)
+    anonymous = not statistics_sheet.uses_candidate_number(template)
     if anonymous:
         supported = {statistics_sheet.ENGINE_VERSION}
     if result.get('engine_version') not in supported or result.get('template_id') != template['id'] or result.get('template_revision') != template['revision'] or result.get('config_sha256') != config_hash(template): raise HTTPException(409, '本地识读引擎或题卡版本不匹配，请更新扫描端并下载配置')
@@ -249,11 +256,11 @@ def upload_processed(identifier: str, normalized: UploadFile = File(), file: Upl
             existing = get(db, capture_id, 'pages')
             correction=result.get('operator_correction')
             if 'operator_correction' in result:
-                if statistics_sheet.enabled(template):raise HTTPException(422,'统计答卷使用匿名识读')
+                if not statistics_sheet.uses_candidate_number(template):raise HTTPException(422,'统计答卷按扫描页确认')
                 if side!='front' or not isinstance(correction,dict) or not isinstance(correction.get('original_number'),str) or len(correction['original_number'])>11 or type(correction.get('original_absent')) is not bool:
                     raise HTTPException(422,'人工更正记录无效')
                 correction={k:correction[k] for k in ('original_number','original_absent')}
-                if existing and (existing.get('candidate_number')!=result['candidate_number'] or existing.get('absent_mark')!=result['absent_mark'] or existing.get('operator_correction')!=correction):
+                if existing and (existing.get('candidate_number')!=result['candidate_number'] or existing.get('absent_mark')!=verified_absence(template,side,result,corrected) or existing.get('operator_correction')!=correction):
                     raise HTTPException(409,'页面已上传，请在管理后台核查')
                 if not existing:
                     from .school import group_students

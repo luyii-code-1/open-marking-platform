@@ -367,7 +367,7 @@ export function ScopedWorkspace({
   )
 }
 
-function GroupOverview({ group, projectId, onSection, statistics }: { group: Row; projectId: string; onSection: (section: string) => void; statistics: boolean }) {
+function GroupOverview({ group, projectId, onSection, statistics, anonymous }: { group: Row; projectId: string; onSection: (section: string) => void; statistics: boolean; anonymous: boolean }) {
   const workflow = useResource<Row>(`/groups/${group.id}/workflow`, {} as Row)
   const templates = useResource<Template[]>('/templates', [])
   const roster = useResource<any>(`/groups/${group.id}/roster`, null)
@@ -481,13 +481,13 @@ function GroupOverview({ group, projectId, onSection, statistics }: { group: Row
                 扫描与入库 <span>份</span>
               </h4>
               <strong>
-                {w.scan.received} / {w.scan.expected ?? '待设置'}
+                {w.scan.received}{anonymous ? '' : ' / '+(w.scan.expected ?? '待设置')}
               </strong>
-              <Progress percent={percent(w.scan.received, w.scan.expected)} size="small" showInfo={false} />
+              {!anonymous && <Progress percent={percent(w.scan.received, w.scan.expected)} size="small" showInfo={false} />}
               <Space wrap>
-                <span>待扫描 {w.scan.pending}</span>
+                {!anonymous && <span>待扫描 {w.scan.pending}</span>}
                 <span>异常 {w.scan.exceptions}</span>
-                <span>缺考 {w.scan.absent}</span>
+                {!statistics && <span>缺考 {w.scan.absent}</span>}
               </Space>
               <Button type="link" onClick={() => onSection('scans')}>
                 查看扫描记录
@@ -570,7 +570,7 @@ function GroupOverview({ group, projectId, onSection, statistics }: { group: Row
         </Card>
       )}
       <div className="group-work-grid">
-        {entries.filter(item => !statistics || !['marking','conversions'].includes(item.key)).map(item => (
+        {entries.filter(item => (!statistics || !['marking','conversions'].includes(item.key)) && (!anonymous || item.key!=='roster')).map(item => (
           <button type="button" className="workspace-entry" key={item.key} onClick={() => onSection(item.key)}>
             <span className="workspace-entry-title">
               {item.label}
@@ -606,7 +606,11 @@ export function GroupWorkspace({
   const statistics = project.category === 'statistics'
   const groups = useResource<Row[]>(statistics ? '/groups' : null, [])
   const closed = groups.data.find(item => item.id === group.id)?.frozen ?? group.frozen
-  const visibleSections = sections.filter(([key]) => key !== 'template' && (!statistics || !['marking','conversions'].includes(key)))
+  const templates = useResource<Template[]>(statistics ? '/templates' : null, [])
+  const activeTemplate = templates.data.find(t => t.id === group.template_id)
+  const anonymous = statistics && activeTemplate?.candidate_enabled === false
+  const visibleSections = sections.filter(([key]) => key !== 'template' &&
+    (!statistics || !['marking','conversions'].includes(key)) && (!anonymous || !['roster','sheets'].includes(key)))
   return (
     <>
       {group.frozen && !statistics && section !== 'results' && (
@@ -631,7 +635,7 @@ export function GroupWorkspace({
               key === 'sheets' ? (
                 <SheetLookup key={group.id} projectId={project.id} groupId={group.id} />
               ) : key === 'overview' ? (
-                <GroupOverview group={group} projectId={project.id} onSection={onSection} statistics={statistics} />
+                <GroupOverview group={group} projectId={project.id} onSection={onSection} statistics={statistics} anonymous={anonymous} />
               ) : (key === 'scans' || key === 'marking') && !group.template_id ? (
                 <Card>
                   <Empty description={key === 'scans' ? '发布题卡后即可开始扫描与导入' : '发布题卡后即可分配教师与阅卷'}>

@@ -5,7 +5,7 @@ import { Button } from './Button'
 import { requestBlob, type ImageBox, type PrintNote, type Region, type Template } from './api'
 import { RichEditor } from './RichEditor'
 import { choiceCenters, compactChoice } from './objectiveLayout'
-import { forbiddenRegion, forbiddenConflict, subjectiveRegion, noteRegion, intersects } from './sheetRegions'
+import { forbiddenRegion, forbiddenConflict, subjectiveRegion, noteRegion, intersects, sheetBodyTop } from './sheetRegions'
 
 export type TextTarget={kind:'question'|'note';id:string;index:number}
 export type RegionUpdate={id:string;index:number;region:Region}
@@ -112,7 +112,7 @@ export function Paper({value,page,selected,draw,answerMode=false,forbiddenMode=f
     else if(['Enter','8','ArrowRight','ArrowLeft'].includes(event.key)||(event.key==='6'&&q.options<=5)){event.preventDefault();const next=objective[Math.max(0,Math.min(objective.length-1,index+(event.key==='ArrowLeft'?-1:1)))];onSelect(next.id,next.regions[0]?.page)}
   }
   const visible=preview?.paper===value.paper&&preview.page===page?preview:null,pending=preview?.key!==key
-  function minimumY(x:number){const panels=value.paper==='A3'?(value.sheet_columns||2):1,panelWidth=(width-24-(panels-1)*8)/panels;return (value.layout_version||2)>=3&&(page!==1||x>=12+panelWidth)?35:100}
+  function minimumY(x:number){const panels=value.paper==='A3'?(value.sheet_columns||2):1,panelWidth=(width-24-(panels-1)*8)/panels;return sheetBodyTop(value,page,x<12+panelWidth?0:1)}
   function point(event:React.PointerEvent){const rect=svg.current!.getBoundingClientRect(),x=Math.max(0,Math.min(width,(event.clientX-rect.left)/rect.width*width));return{x,y:Math.max(0,Math.min(height,(event.clientY-rect.top)/rect.height*height))}}
   function computeImageBox(p:{x:number;y:number},s:Drag,maxW:number,maxH:number,base:ImageBox):ImageBox{
     if(s.resize){

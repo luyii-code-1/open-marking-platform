@@ -261,7 +261,7 @@ export function Roster({ groupId, statistics = false }: { groupId?: string; stat
                   options: [
                     { value: 'unscanned', label: '未扫描' },
                     { value: 'scanned', label: '已扫描' },
-                    { value: 'absent', label: '已确认缺考' },
+                    ...(statistics ? [] : [{ value: 'absent', label: '已确认缺考' }]),
                   ],
                   values: s => [s.status],
                 },
@@ -291,7 +291,7 @@ export function Roster({ groupId, statistics = false }: { groupId?: string; stat
                         })
                       }}
                     >
-                      {value === 'unscanned' ? '未扫描' : value === 'absent' ? '已确认缺考' : '已扫描'}
+                      {value === 'unscanned' ? '未扫描' : value === 'absent' ? (statistics ? '待核查' : '已确认缺考') : '已扫描'}
                     </Tag>
                   ),
                 },

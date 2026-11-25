@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type PointerEvent } from 'react'
 import { ZoomInOutlined, ZoomOutOutlined } from '@ant-design/icons'
-import { Alert, Card, Checkbox, Empty, Form, Input, InputNumber, Segmented, Select, Space, Steps, Tag, Typography, Upload } from 'antd'
+import { Alert, Card, Checkbox, Empty, Form, Input, InputNumber, Segmented, Select, Space, Steps, Switch, Tag, Typography, Upload } from 'antd'
 import { Button } from './Button'
 import { newQuestion, request, requestBlob, type ExternalAnchor, type ExternalPage, type ImageBox, type Question, type Row, type Template } from './api'
 import './compatible-template.css'
@@ -121,8 +121,9 @@ type Props = {
 
 export function CompatibleTemplateEditor({ value, disabled, readOnly, change, flush, settings }: Props) {
   const profile = value.external_sheet!
-  const anonymous = value.statistics_sheet === true
-  const statistics = anonymous || value.statistics_mode === true
+  const legacyStatistics = value.statistics_sheet === true
+  const statistics = legacyStatistics || value.statistics_mode === true
+  const anonymous = legacyStatistics || (statistics && value.candidate_enabled === false)
   const [page, setPage] = useState(1)
   const [step, setStep] = useState(() => {
     if (readOnly || (profile.pages['1']?.anchors.length ?? 0) >= 4) return 2
@@ -170,7 +171,10 @@ export function CompatibleTemplateEditor({ value, disabled, readOnly, change, fl
   const asset = value.background_assets?.[String(page)]
   const blocked = disabled || readOnly || busy
   const endpoint = `/groups/${value.group_id}/compatible`
-  const activeDrawTool: DrawTool = step === 1 ? 'anchor' : (page === 2 && (regionTool === 'candidate' || regionTool === 'absent') ? 'choice' : regionTool)
+  const activeDrawTool: DrawTool = step === 1 ? 'anchor'
+    : (regionTool === 'candidate' && (anonymous || page !== 1)) ||
+      (regionTool === 'absent' && (statistics || page !== 1)) ||
+      (regionTool === 'subjective' && statistics) ? 'choice' : regionTool
   const canDrawOnCanvas = !blocked && !trial && !correcting && mode === 'draw' && (step === 1 || step === 2)
   const canEditOnCanvas = !blocked && !trial && !correcting && mode === 'edit' && (step === 1 || step === 2)
 
@@ -644,7 +648,7 @@ export function CompatibleTemplateEditor({ value, disabled, readOnly, change, fl
   }
 
   const pageQuestions = value.questions.filter(q => q.regions.some(r => r.page === page))
-  const candidateEnvelope = face.candidate?.length ? enclosing(face.candidate.flat()) : undefined
+  const candidateEnvelope = !anonymous && face.candidate?.length ? enclosing(face.candidate.flat()) : undefined
   const activeBox = editDrag ? editDrag.currentBox : (activeMark ? getMarkBox(activeMark) : undefined)
   const canAutoCorrect = !!(reference?.source || savedArt)
   const hasRectifiedPage = !!(reference?.image || savedArt)
@@ -669,7 +673,7 @@ export function CompatibleTemplateEditor({ value, disabled, readOnly, change, fl
       label: '考号',
       mark: { kind: 'candidate' } as ActiveMark,
     }] : []),
-    ...(face.candidate ?? []).flatMap((col, cIndex) => col.map((box, dIndex) => {
+    ...(!anonymous ? face.candidate ?? [] : []).flatMap((col, cIndex) => col.map((box, dIndex) => {
       const cellMark: ActiveMark = { kind: 'candidate-cell', col: cIndex, digit: dIndex }
       let b = box
       if (editDrag && sameMark(editDrag.mark, { kind: 'candidate' }) && candidateEnvelope) {
@@ -685,7 +689,7 @@ export function CompatibleTemplateEditor({ value, disabled, readOnly, change, fl
         mark: editGranularCell ? cellMark : ({ kind: 'candidate' } as ActiveMark),
       }
     })),
-    ...(face.absent ? [{
+    ...(!statistics && face.absent ? [{
       key: 'absent',
       box: editDrag && sameMark(editDrag.mark, { kind: 'absent' }) ? editDrag.currentBox : face.absent,
       kind: sameMark(activeMark, { kind: 'absent' }) ? 'selected' : 'absent',
@@ -744,6 +748,11 @@ export function CompatibleTemplateEditor({ value, disabled, readOnly, change, fl
         {step === 0 && <>
           <Form layout="vertical">
             <Form.Item label="题卡名称"><Input disabled={blocked} value={value.name} onChange={e => change({ name: e.target.value })} /></Form.Item>
+            {statistics && !legacyStatistics && <Form.Item label="准考证号">
+              <Space><Switch checked={!anonymous} disabled={blocked} aria-label="启用准考证号"
+                onChange={candidate_enabled => { change({candidate_enabled}); setActiveMark(undefined); setAdjustCell(false); setTrial(undefined) }} />
+                <Typography.Text type="secondary">{anonymous?'每张入库题卡计一份':'扫描时按考号匹配应考名单'}</Typography.Text></Space>
+            </Form.Item>}
             <Space wrap>
               <Select aria-label="纸型" disabled={blocked || !!value.questions.length || !!Object.keys(refs).length || !!Object.keys(profile.pages).length}
                 value={value.paper} onChange={paper => change({ paper })} options={[{ value: 'A4', label: 'A4 纵向' }, { value: 'A3', label: 'A3 横向' }]} />
@@ -841,7 +850,7 @@ export function CompatibleTemplateEditor({ value, disabled, readOnly, change, fl
             </div>
             {mode === 'draw' ? <Space wrap className="compatible-tools">
               <Select aria-label="框选区域类型" value={activeDrawTool === 'anchor' ? 'choice' : activeDrawTool} disabled={blocked}
-                options={regionTools.filter(item => (!statistics || item.value !== 'subjective') &&
+                options={regionTools.filter(item => (!statistics || !['subjective','absent'].includes(item.value)) &&
                   ((!anonymous && page === 1) || !['candidate', 'absent'].includes(item.value)))}
                 onChange={next => { setRegionTool(next); setAdjustCell(false) }} style={{ minWidth: 132 }} />
               {selected && <Button size="small" disabled={blocked} onClick={() => { setSelected(''); setAdjustCell(false) }}>取消选中（新建下一题）</Button>}
@@ -984,7 +993,7 @@ export function CompatibleTemplateEditor({ value, disabled, readOnly, change, fl
           </Space>
         </div>}
         {trial && <Alert className="compatible-tools" showIcon type="success" message="请核对本面试扫结果（当前显示自动校正图）"
-          description={<div>{!anonymous && page === 1 && <div>考号 {trial.candidate || '未识读'}{trial.absent ? ' · 缺考' : ''}</div>}
+          description={<div>{!anonymous && page === 1 && <div>考号 {trial.candidate || '未识读'}{!statistics && trial.absent ? ' · 缺考' : ''}</div>}
             {Object.entries(trial.selections).map(([id, choices]) => <Tag key={id}>第 {value.questions.find(q => q.id === id)?.number} 题 {choices.join('') || '空白'}</Tag>)}</div>}
           action={<Space direction="vertical" size={6}>
             {!readOnly && !(statistics && profile.mode === 'blank') && <Button type="primary" size="small" disabled={blocked} onClick={() => void run(() => adoptCorrectedImage(trial.image, '已引用自动校正图作为当前底图，可继续框选或微调区域'))}>引用此校正图继续框选</Button>}

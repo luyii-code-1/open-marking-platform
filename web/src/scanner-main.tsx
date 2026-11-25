@@ -83,6 +83,7 @@ function Scanner() {
   const prefs = state?.device_preferences, driver = prefs?.driver || "Twain", device = prefs?.device?.id || ""
   const pack = state?.package, subject = pack?.subjects.find((s: Row) => s.id === subjectId), group = pack?.groups.find((g: Row) => g.id === groupId), batch = state?.batches.find((b: Row) => b.id === batchId)
   const anonymous=group?.template?.statistics_sheet===true
+  const attendance=!anonymous&&group?.statistics_mode!==true
   const sessionOpen=state?.session_open===true
   const deviceReady=!!device&&(driver!=='external'||prefs?.plugins?.some((p:Row)=>p.id===prefs.plugin_id&&p.available))
   useEffect(()=>{
@@ -124,8 +125,8 @@ function Scanner() {
     }catch(e){if(request===imageRequest.current)setOriginalError((e as Error).message)}
   }
   async function saveAnswer(){
-    if(!answer||!matchedName||absent===null)return
-    const rows=await action('correctAnswer',{batch_id:answer.batch_id,page_id:answer.id,candidate_number:number,absent})
+    if(!answer||!matchedName||attendance&&absent===null)return
+    const rows=await action('correctAnswer',{batch_id:answer.batch_id,page_id:answer.id,candidate_number:number,absent:attendance?absent:false})
     if(!rows)return
     const names=new Map((group?.roster||[]).map((r:Row)=>[r.candidate_number,r.name]))
     if(review!==null)setReview(rows.map((r:Row)=>({...r,name:names.get(r.candidate)||'未匹配'})))
@@ -137,7 +138,7 @@ function Scanner() {
   }
   const locked = busy || !!state?.capturing || !!state?.syncing
   function enterProject(result: Row) {
-    const statistics = result.package?.groups?.find((item: Row) => item.template?.statistics_sheet)
+    const statistics = result.package?.project?.category==='statistics' && result.package?.groups?.find((item: Row) => item.template?.statistics_sheet)
     setInProject(true)
     setSubject(statistics?.subject_id || '')
     setGrade(statistics ? statistics.grade_id || unassignedGrade : '')
@@ -226,7 +227,7 @@ function Scanner() {
     }
     let id=batchId
     if(batch.status!=='open'||batch.total>0&&(batch.sides===1||batch.capture_mode==='duplex')){
-      const next=await action('createBatch',{group_id:group.id,name:batch.name,local_batch:!!batch.local_group_id,local_group_id:batch.local_group_id||'',expected_count:expectedForBatch(batch)||0,room_tag_ids:batch.local_group_id?[]:batch.room_tags.map((t:Row)=>t.id),capture_mode:batch.capture_mode,first_side:firstSide})
+      const next=await action('createBatch',{group_id:group.id,name:batch.name,local_batch:!!batch.local_group_id,local_group_id:batch.local_group_id||'',expected_count:expectedForBatch(batch)||0,room_tag_ids:batch.local_group_id||group.statistics_mode?[]:batch.room_tags.map((t:Row)=>t.id),capture_mode:batch.capture_mode,first_side:firstSide})
       if(!next)return
       id=next.id;setBatch(id)
     }
@@ -292,7 +293,7 @@ function Scanner() {
         </Space></Card>
         : !subject ? <ScanChoices title={pack.project.name} description="选择扫描科目" items={pack.subjects.map((row:Row)=>({id:row.id,name:row.name,disabled:locked,facts:[{label:'可扫描年级',value:subjectGrades(row,pack.groups).filter(g=>g.count).length},{label:'题卡',value:pack.groups.filter((g:Row)=>g.subject_id===row.id).length}]}))} onOpen={openSubject} extra={<Button disabled={!state.online||locked} onClick={()=>action('downloadProject',{project_id:pack.project.id})}>更新考试资料</Button>}/>
         : !grade ? <ScanChoices title={subject.name} description="选择年级" items={subjectGrades(subject,pack.groups).filter(g=>g.count).map(row=>({id:row.id,name:row.name,disabled:locked,facts:[{label:'题卡',value:row.count}]}))} onOpen={id=>{setGrade(id);setGroup('');setBatch('')}}/>
-        : !group ? <ScanChoices title={grade.name} description="选择本次使用的题卡" items={pack.groups.filter((g:Row)=>g.subject_id===subject.id&&(g.grade_id||unassignedGrade)===gradeId).map((row:Row)=>({id:row.id,name:cardName(row,subject),description:row.template.paper+' · '+(row.template.sides===2?'双面':'单面'),status:<Tag>{row.frozen?'成绩已发布':'可扫描'}</Tag>,disabled:locked||row.frozen}))} onOpen={id=>{setGroup(id);setBatch('')}}/>
+        : !group ? <ScanChoices title={grade.name} description="选择本次使用的题卡" items={pack.groups.filter((g:Row)=>g.subject_id===subject.id&&(g.grade_id||unassignedGrade)===gradeId).map((row:Row)=>({id:row.id,name:cardName(row,subject),description:row.template.paper+' · '+(row.template.sides===2?'双面':'单面'),status:<Tag>{row.frozen?(row.statistics_mode?'收集已结束':'成绩已发布'):'可扫描'}</Tag>,disabled:locked||row.frozen}))} onOpen={id=>{setGroup(id);setBatch('')}}/>
           : !batch ? <section className="scanner-section"><div className="scanner-title"><div><Typography.Title level={2}>{cardName(group,subject)}</Typography.Title><Typography.Text type="secondary">{group.grade_name&&`${group.grade_name} · `}{group.template.name} · {group.template.paper} · {group.template.sides === 2 ? '双面' : '单面'}</Typography.Text></div><Space wrap><Button type="primary" disabled={locked||group.frozen} onClick={()=>{setNewBatchName(`第 ${localGroups.length+1} 批`);setNewBatchCount(null);setNewBatchOpen(true)}}>新建本地批次</Button><Button disabled={!state.online||locked} onClick={()=>action('downloadProject',{project_id:pack.project.id})}>刷新进度</Button></Space></div>
           <Card size="small" style={{marginBottom:16}}><Space direction="vertical" size={8} style={{width:'100%'}}><Space wrap align="center">
             <Typography.Text strong>快速新建本地批次：</Typography.Text>
@@ -346,7 +347,7 @@ function Scanner() {
                 upload={<><Typography.Paragraph>本批待上传 <strong>{currentCounts.pending??pendingSheets.length}</strong> 份</Typography.Paragraph><Typography.Text type="secondary">{needsReview?'请先处理待核对答卷，或重传同步失败的答卷':'答卷先保存在本机分组中，核对后按批上传或重传'}</Typography.Text><Space direction="vertical" style={{width:'100%'}}><Button type="primary" block disabled={locked||!roomSheets.some(r=>r.total>0)} onClick={reviewRoom}>{anonymous?'核对答卷并上传':'查看本批名单并上传'}</Button>{(pendingSheets.length>0||retryableUploadSheets.length>0)&&<Button block disabled={locked||!state.online||state.processing} onClick={()=>void action('upload',{batch_id:batchId,retry_failed:retryableUploadSheets.length>0})}>{retryableUploadSheets.length>0?'重传本批失败/未上传答卷':'直接上传本批待传答卷'}</Button>}</Space>{state.syncing&&<Typography.Paragraph role="status">正在上传 · 已上传 {roomSheets.reduce((n,r)=>n+r.uploaded,0)} 面</Typography.Paragraph>}{!state.syncing&&roomSheets.some(r=>r.total>0)&&roomSheets.every(r=>r.status==='paired'||!r.total)&&<Alert type="success" message="本批已扫答卷均已上传确认"/>}</>}
                 imageTools={answer?<Space wrap>{answer.sides.map((r:Row,index:number)=><Button key={r.id} type={index===sideIndex?'primary':'default'} onClick={()=>{setDeskPage(state.pages.find((p:Row)=>p.id===r.id)||{...deskPage,...r});void openOriginal(answer,index)}}>{r.side==='front'?'正面':'背面'}</Button>)}<Button onClick={()=>openOriginal(answer,sideIndex,corrected?'original':'corrected')}>{corrected?'查看扫描原图':'查看校正图'}</Button></Space>:null}
                 image={originalError?<Alert type="error" message={originalError}/>:original?<img src={original} alt={corrected?'自动校正图':'扫描原图'}/>:<Card loading/>}
-                editor={answer&&!anonymous?<div className="scan-identity-editor"><label>准考证号<Input value={number} inputMode="numeric" disabled={!answer.editable||locked||state.processing||state.batches.find((r:Row)=>r.id===answer.batch_id)?.status==='paired'} onChange={e=>setNumber(e.target.value.trim())}/></label><div><span>姓名</span><strong>{matchedName||'未匹配'}</strong></div><label>缺考标记<Select aria-label="核对缺考标记" disabled={!answer.editable||locked||state.processing} value={absent===null?undefined:String(absent)} placeholder="待核对" options={[{value:'false',label:'未标缺考'},{value:'true',label:'缺考'}]} onChange={v=>setAbsent(v==='true')}/></label>{answer.editable&&<Button type="primary" disabled={locked||state.processing||!matchedName||absent===null||state.batches.find((r:Row)=>r.id===answer.batch_id)?.status==='paired'} onClick={saveAnswer}>保存更正</Button>}</div>:null}
+                editor={answer&&!anonymous?<div className="scan-identity-editor"><label>准考证号<Input value={number} inputMode="numeric" disabled={!answer.editable||locked||state.processing||state.batches.find((r:Row)=>r.id===answer.batch_id)?.status==='paired'} onChange={e=>setNumber(e.target.value.trim())}/></label><div><span>姓名</span><strong>{matchedName||'未匹配'}</strong></div>{attendance&&<label>缺考标记<Select aria-label="核对缺考标记" disabled={!answer.editable||locked||state.processing} value={absent===null?undefined:String(absent)} placeholder="待核对" options={[{value:'false',label:'未标缺考'},{value:'true',label:'缺考'}]} onChange={v=>setAbsent(v==='true')}/></label>}{answer.editable&&<Button type="primary" disabled={locked||state.processing||!matchedName||attendance&&absent===null||state.batches.find((r:Row)=>r.id===answer.batch_id)?.status==='paired'} onClick={saveAnswer}>保存更正</Button>}</div>:null}
                 pageActions={deskPage?<div className="scan-operation-buttons">{deskPage.error&&<Alert type="warning" message={deskPage.error}/>}<Status value={deskPage.status}/>{deskPage.local_cut_available&&<Button onClick={()=>showPreview(deskPage)}>查看切题</Button>}<Button disabled={locked||state.processing||deskPage.status==='uploaded'||deskPage.status==='excluded'} onClick={()=>action('retryPage',{batch_id:deskPage.batch_id||batchId,page_id:deskPage.id})}>重新识别</Button><Button danger disabled={locked||state.processing||deskPage.status==='uploaded'||deskPage.status==='excluded'} onClick={()=>exclude(deskPage)}>排除并重扫</Button>{deskPage.status==='blocked'&&<Button disabled={locked||!state.online} onClick={()=>modal.confirm({title:'上传这张原图供核查？',onOk:()=>action('sendForReview',{batch_id:deskPage.batch_id||batchId,page_id:deskPage.id})})}>上传原图供核查</Button>}</div>:null}
               />}
     </main>
@@ -369,18 +370,18 @@ function Scanner() {
         ...(anonymous?[{title:'采集序号',render:(_:unknown,row:Row)=>row.sides[0]?.sequence}]:[
           {title:'准考证号',dataIndex:'candidate',render:(v:string)=>v||'未识别'},
           {title:'姓名',dataIndex:'name'},
-          {title:'缺考标记',dataIndex:'absent',render:(v:boolean|null)=>v==null?'请核对原图':v?'已填涂':'未填涂'},
+          ...(attendance?[{title:'缺考标记',dataIndex:'absent',render:(v:boolean|null)=>v==null?'请核对原图':v?'已填涂':'未填涂'}]:[]),
         ]),
         {title:'状态',dataIndex:'status',render:v=><Status value={v}/>}
       ]}/>
     </Drawer>
     <Drawer title={`${anonymous?'统计答卷':([answer?.name,answer?.candidate].filter(Boolean).join(' ')||'答卷')}核对`} open={!!answer&&!deskPage} onClose={()=>{imageRequest.current++;setAnswer(null);setOriginal('')}} width="min(1000px,96vw)">
       {answer&&<Space direction="vertical" style={{width:'100%'}}><Space>{answer.sides.map((s:Row,i:number)=><Button key={s.id} type={i===sideIndex?'primary':'default'} onClick={()=>openOriginal(answer,i)}>{s.side==='front'?'正面':'背面'}</Button>)}</Space>
-      {answer.editable&&<Space wrap align="end">
+      {answer.editable&&!anonymous&&<Space wrap align="end">
         <label>准考证号<Input value={number} inputMode="numeric" onChange={e=>setNumber(e.target.value.trim())}/></label>
         <div>姓名<div>{matchedName||'未匹配'}</div></div>
-        <label>缺考标记<Select aria-label="缺考标记" value={absent===null?undefined:String(absent)} placeholder="请核对" options={[{value:'true',label:'缺考'},{value:'false',label:'未标缺考'}]} onChange={v=>setAbsent(v==='true')}/></label>
-        <Button type="primary" disabled={locked||state.processing||!matchedName||absent===null} onClick={saveAnswer}>确认更正</Button>
+        {attendance&&<label>缺考标记<Select aria-label="缺考标记" value={absent===null?undefined:String(absent)} placeholder="请核对" options={[{value:'true',label:'缺考'},{value:'false',label:'未标缺考'}]} onChange={v=>setAbsent(v==='true')}/></label>}
+        <Button type="primary" disabled={locked||state.processing||!matchedName||attendance&&absent===null} onClick={saveAnswer}>确认更正</Button>
       </Space>}
       {original&&<Space><Tag>{corrected?'自动校正图':'扫描原图'}</Tag><Button onClick={()=>openOriginal(answer,sideIndex,corrected?'original':'corrected')}>{corrected?'查看扫描原图':'查看校正图'}</Button></Space>}
       {originalError?<Alert type="error" message={originalError}/>:original?<img className="scanner-preview" src={original} alt={corrected?"自动校正图":"扫描原图"}/>:<Card loading/>}</Space>}

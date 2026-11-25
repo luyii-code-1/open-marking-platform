@@ -44,6 +44,7 @@ def progress(db,tag):
 
 def snapshot(db,project_id,identifiers,group=None):
     if not isinstance(identifiers,list) or any(not isinstance(i,str) for i in identifiers) or len(set(identifiers))!=len(identifiers):raise HTTPException(422,'考场标签编号无效')
+    if (get(db,project_id,'projects') or {}).get('category')=='statistics':return []
     if group and group.get('grade_id') and len(identifiers)>1:raise HTTPException(422,'每份答卷最多归属一个考场')
     result=[]
     for identifier in identifiers:
@@ -83,6 +84,8 @@ def exception_tags(db,value):return view(db,exception_source(db,value).get('room
 def listing(project_id:str|None=None,group_id:str|None=None,grade_id:str|None=None,current=Depends(scan_user)):
     with connect() as db:
         values=find(db,'room-tags',project_id=project_id) if project_id else objects(db,'room-tags')
+        statistics={p['id'] for p in find(db,'projects',category='statistics')}
+        values=[v for v in values if v['project_id'] not in statistics]
         values=[v for v in values if (not group_id or v.get('group_id')==group_id) and (not grade_id or v.get('grade_id')==grade_id)]
         if not (is_manager(current) or current['role']=='scanner'):
             from .visibility import result_groups
@@ -94,6 +97,8 @@ def listing(project_id:str|None=None,group_id:str|None=None,grade_id:str|None=No
 
 
 def validate_room(db,project_id,body,old=None):
+    if require(db,project_id,'projects').get('category')=='statistics':
+        raise HTTPException(422,'请在考试项目设置考场')
     value={**(old or {}),**{k:v for k,v in body.items() if k in ('name','group_id','expected_students','archived')}}
     value['name']=str(value.get('name','')).strip();value.setdefault('archived',False)
     if not 1<=len(value['name'])<=60 or type(value['archived']) is not bool:raise HTTPException(422,'考场名称或状态无效')
@@ -134,6 +139,11 @@ def export_csv(headers,rows,filename):
 def export_scans(project_id:str|None=None,room_tag_id:str|None=None,group_id:str|None=None,current=Depends(admin)):
     with connect() as db:
         batches=[b for b in objects(db,'scan-batches') if includes(b,room_tag_id) and (not group_id or b['group_id']==group_id) and (not project_id or project_for_group(db,b['group_id'])==project_id)]
+        scoped_project=project_id or (project_for_group(db,group_id) if group_id else None)
+        if (get(db,scoped_project,'projects') or {}).get('category')=='statistics':
+            return export_csv(['批次编号','题卡组','年级','状态'],
+                              [[b['id'],b['group_id'],(get(db,b.get('grade_id'),'grades') or {}).get('name',''),b.get('status','')]
+                               for b in batches],'scan-batches.csv')
         return export_csv(['批次编号','题卡组','年级','考场','考场备注','状态'],[[b['id'],b['group_id'],(get(db,b.get('grade_id'),'grades') or {}).get('name',''),'、'.join(t.get('label',t['name']) for t in view(db,b.get('room_tags',[]))),b.get('room',''),b.get('status','')] for b in batches],'scan-batches.csv')
 
 
@@ -145,6 +155,9 @@ def export_exceptions(group_id:str|None=None,room_tag_id:str|None=None,status:st
             source=exception_source(db,v)
             values.append({**v,'room_tags':view(db,source.get('room_tags',[])),'group_id':v.get('group_id') or source.get('group_id')})
         values=[v for v in values if includes(v,room_tag_id) and (not group_id or v.get('group_id')==group_id) and (not status or v['status']==status)]
+        if group_id and (get(db,project_for_group(db,group_id),'projects') or {}).get('category')=='statistics':
+            return export_csv(['记录编号','类型','说明','状态','核查结论'],
+                              [[v['id'],v['kind'],v.get('reason',''),v['status'],v.get('resolution','')] for v in values],'exceptions.csv')
         return export_csv(['记录编号','类型','考场标签','说明','状态','核查结论'],[[v['id'],v['kind'],'、'.join(t.get('label',t['name']) for t in v['room_tags']),v.get('reason',''),v['status'],v.get('resolution','')] for v in values],'exceptions.csv')
 
 @router.post('/projects/{identifier}/room-tags/batch')
