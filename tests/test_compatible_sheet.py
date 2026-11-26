@@ -270,6 +270,16 @@ def test_external_tight_anchor_excludes_dashed_line_and_rectifies_by_anchors():
     assert tight_anchor['width'] <= 5.5 and tight_anchor['height'] <= 5.5, tight_anchor
     assert tight_anchor['x'] * external.SCALE > dashed_x + 1, tight_anchor
 
+    # Tight box sitting 100% on solid black ink should auto-pad for contrast instead of raising ValueError.
+    exact_black = box(40 / 4, 40 / 4, 12 / 4, 12 / 4)
+    padded_anchor = external.make_anchor(external.grayscale(page), exact_black, tighten=False)
+    assert padded_anchor['width'] > 3.0 and .025 < external.patch_data(padded_anchor).mean() < .92
+
+    # Slightly drifted external AI anchor box in nearby white margin should snap onto the real black corner square.
+    drifted_ai = box(20 / 4, 20 / 4, 14 / 4, 14 / 4)
+    snapped_anchor = external.make_anchor(external.grayscale(page), drifted_ai, tighten=True, snap_nearby=True)
+    assert abs((snapped_anchor['x'] + snapped_anchor['width'] / 2) * 4 - 46) < 4, snapped_anchor
+
     # Warp the page with trapezoid perspective distortion + uneven shading, then rectify via the 4 skewed anchors.
     src_q = np.float32([[0, 0], [width - 1, 0], [width - 1, height - 1], [0, height - 1]])
     dst_q = np.float32([[14, 18], [width - 26, 8], [width - 8, height - 20], [22, height - 10]])

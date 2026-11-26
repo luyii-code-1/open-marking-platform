@@ -235,22 +235,19 @@ def rectangular_page(image, width, height):
     return cv2.resize(deskewed, (width, height), interpolation=cv2.INTER_AREA if iw > width else cv2.INTER_CUBIC)
 
 
-def tighten_anchor_box(image, box):
-    """Snap a loose anchor box tightly around a compact solid fiducial block, avoiding nearby lines."""
+def _find_solid_anchor_in_roi(image, x, y, r, b, target_cx, target_cy):
     ih, iw = image.shape
-    x, y, r, b = bounds(box)
     x, y = max(0, x), max(0, y)
     r, b = min(iw, r), min(ih, b)
     roi = image[y:b, x:r]
     if roi.size == 0 or roi.shape[0] < 10 or roi.shape[1] < 10:
-        return box
+        return None
     otsu_thresh, _ = cv2.threshold(roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     threshold = float(np.clip(otsu_thresh, 145, 195)) if roi.max() - roi.min() >= 35 else 160.0
     dark = (roi < threshold).astype(np.uint8)
     count, labels, stats, centroids = cv2.connectedComponentsWithStats(dark)
     if count <= 1:
-        return box
-    rcx, rcy = roi.shape[1] / 2.0, roi.shape[0] / 2.0
+        return None
     solid = []
     other_substantial = 0
     for idx in range(1, count):
@@ -260,23 +257,42 @@ def tighten_anchor_box(image, box):
         fill = area / max(1, cw * ch)
         ratio = cw / max(1, ch)
         touches_edge = cx_i == 0 or cy_i == 0 or cx_i + cw >= roi.shape[1] or cy_i + ch >= roi.shape[0]
-        if 6 <= cw <= 38 and 6 <= ch <= 38 and 0.50 <= ratio <= 2.0 and fill >= 0.62:
-            dist = math.hypot(centroids[idx][0] - rcx, centroids[idx][1] - rcy)
+        if 6 <= cw <= 40 and 6 <= ch <= 40 and 0.45 <= ratio <= 2.2 and fill >= 0.58:
+            dist = math.hypot((x + centroids[idx][0]) - target_cx, (y + centroids[idx][1]) - target_cy)
             solid.append((idx, int(cx_i), int(cy_i), int(cw), int(ch), int(area), dist, touches_edge))
         elif not touches_edge:
             other_substantial += int(area)
     if not solid:
-        return box
-    # Prefer interior solid blocks closest to the ROI center; ignore multi-element text/logo anchors.
+        return None
     solid.sort(key=lambda item: (item[7], item[6], -item[5]))
     best_idx, bx, by, bw, bh, b_area, _, _ = solid[0]
-    other_solid = sum(item[5] for item in solid[1:] if not item[7])
-    if other_solid + other_substantial > b_area * 0.45:
+    return roi, dark, labels, best_idx, bx, by, bw, bh, b_area, solid, other_substantial, x, y
+
+
+def tighten_anchor_box(image, box, snap_nearby=False):
+    """Snap a loose or slightly drifted anchor box tightly around a solid fiducial block, avoiding nearby lines."""
+    ih, iw = image.shape
+    x, y, r, b = bounds(box)
+    target_cx, target_cy = (x + r) / 2.0, (y + b) / 2.0
+    found = _find_solid_anchor_in_roi(image, x, y, r, b, target_cx, target_cy)
+    snapped_outside = False
+    if found is None and snap_nearby:
+        # External AI boxes can drift by several millimeters; search nearby for a solid fiducial block.
+        margin = 14 * SCALE
+        found = _find_solid_anchor_in_roi(image, x - margin, y - margin, r + margin, b + margin, target_cx, target_cy)
+        snapped_outside = found is not None
+    if found is None:
         return box
+
+    roi, dark, labels, best_idx, bx, by, bw, bh, b_area, solid, other_substantial, rx, ry = found
+    if not snapped_outside:
+        other_solid = sum(item[5] for item in solid[1:] if not item[7])
+        if other_solid + other_substantial > b_area * 0.45:
+            return box
 
     # Expand tightly around the solid block without touching neighboring dark strokes/dashed lines.
     other_dark = (dark > 0) & (labels != best_idx)
-    max_pad = max(2, min(4, round(min(bw, bh) * 0.22)))
+    max_pad = max(2, min(5, round(min(bw, bh) * 0.28)))
     pl = pr = pt = pb = 0
     for step in range(1, max_pad + 1):
         col = bx - step
@@ -299,10 +315,16 @@ def tighten_anchor_box(image, box):
             break
         pb = step
 
-    nx1 = x + bx - pl
-    ny1 = y + by - pt
-    nx2 = x + bx + bw + pr
-    ny2 = y + by + bh + pb
+    nx1 = rx + bx - pl
+    ny1 = ry + by - pt
+    nx2 = rx + bx + bw + pr
+    ny2 = ry + by + bh + pb
+    # Ensure white contrast border so solid black blocks stay below the 0.92 fill ceiling.
+    if (bw * bh) / max(1, (nx2 - nx1) * (ny2 - ny1)) > 0.82:
+        nx1 = max(0, nx1 - 2)
+        ny1 = max(0, ny1 - 2)
+        nx2 = min(iw, nx2 + 2)
+        ny2 = min(ih, ny2 + 2)
     min_px = 3 * SCALE
     if nx2 - nx1 < min_px:
         need = min_px - (nx2 - nx1)
@@ -370,11 +392,7 @@ def rectify_by_anchors(page, anchors, apply_grayscale=True):
     return cleaned, mapped
 
 
-def make_anchor(image, box, tighten=False):
-    if tighten:
-        box = tighten_anchor_box(image, box)
-    if not valid_box(box, image.shape[1] / SCALE, image.shape[0] / SCALE, 3) or max(box['width'], box['height']) > 36:
-        raise ValueError('定位参照的边长应为 3 至 36 毫米')
+def _sample_patch(image, box):
     x, y, r, b = bounds(box)
     crop = cv2.resize(image[y:b, x:r], (PATCH_SIZE, PATCH_SIZE), interpolation=cv2.INTER_AREA)
     otsu_thresh, _ = cv2.threshold(crop, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
@@ -382,6 +400,44 @@ def make_anchor(image, box, tighten=False):
     bits = crop < threshold
     if not .025 < bits.mean() < .92:
         bits = crop < 160
+    return bits
+
+
+def _expand_box(box, delta_mm, max_w, max_h):
+    x1 = max(0.0, box['x'] - delta_mm)
+    y1 = max(0.0, box['y'] - delta_mm)
+    x2 = min(max_w, box['x'] + box['width'] + delta_mm)
+    y2 = min(max_h, box['y'] + box['height'] + delta_mm)
+    w = min(36.0, round(x2 - x1, 2))
+    h = min(36.0, round(y2 - y1, 2))
+    return {'x': round(x1, 2), 'y': round(y1, 2), 'width': w, 'height': h}
+
+
+def make_anchor(image, box, tighten=False, snap_nearby=False):
+    max_w, max_h = image.shape[1] / SCALE, image.shape[0] / SCALE
+    if tighten:
+        box = tighten_anchor_box(image, box, snap_nearby=snap_nearby)
+    if not valid_box(box, max_w, max_h, 3) or max(box['width'], box['height']) > 36:
+        raise ValueError('定位参照的边长应为 3 至 36 毫米')
+    bits = _sample_patch(image, box)
+    # If a tightly drawn box covers almost 100% solid black ink, pad slightly for clean white border contrast.
+    if bits.mean() >= .92:
+        for delta in (1.25, 2.5):
+            padded = _expand_box(box, delta, max_w, max_h)
+            if valid_box(padded, max_w, max_h, 3) and max(padded['width'], padded['height']) <= 36:
+                candidate = _sample_patch(image, padded)
+                if .025 < candidate.mean() < .92:
+                    box, bits = padded, candidate
+                    break
+    # If an AI-supplied distinctive text/logo box landed slightly off-target, gently widen to capture nearby ink.
+    if bits.mean() <= .025 and snap_nearby:
+        for delta in (4.0, 8.0):
+            widened = _expand_box(box, delta, max_w, max_h)
+            if valid_box(widened, max_w, max_h, 3) and max(widened['width'], widened['height']) <= 36:
+                candidate = _sample_patch(image, widened)
+                if .025 < candidate.mean() < .92:
+                    box, bits = widened, candidate
+                    break
     if not .025 < bits.mean() < .92:
         raise ValueError('请选择含固定印刷内容的矩形')
     return {**box, 'pattern': base64.b64encode(np.packbits(bits).tobytes()).decode('ascii')}

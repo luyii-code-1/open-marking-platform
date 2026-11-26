@@ -302,7 +302,7 @@ def anchor(group_id: str, file: UploadFile = File(), box: str = Form(), paper: s
 
 @router.post('/groups/{group_id}/compatible/reextract-anchors')
 def reextract_anchors(group_id: str, file: UploadFile = File(), boxes: str = Form(), paper: str = Form(),
-                      tighten: bool = Form(True), current=Depends(admin)):
+                      tighten: bool = Form(True), lenient: bool = Form(False), current=Depends(admin)):
     with connect() as db:
         draft_in_group(db, group_id, current)
     try:
@@ -311,7 +311,24 @@ def reextract_anchors(group_id: str, file: UploadFile = File(), boxes: str = For
         raw_boxes = json.loads(boxes)
         if not isinstance(raw_boxes, list) or not 1 <= len(raw_boxes) <= 8:
             raise ValueError('定位参照数量应为 1 至 8 个')
-        return {'anchors': [omr.make_anchor(normalized, {k: item[k] for k in ('x', 'y', 'width', 'height')}, tighten=tighten) for item in raw_boxes]}
+        anchors = []
+        skipped = 0
+        for item in raw_boxes:
+            box = {k: item[k] for k in ('x', 'y', 'width', 'height')}
+            if not lenient:
+                anchors.append(omr.make_anchor(normalized, box, tighten=tighten))
+                continue
+            try:
+                sampled = omr.make_anchor(normalized, box, tighten=tighten, snap_nearby=True)
+            except ValueError:
+                skipped += 1
+                continue
+            cx, cy = sampled['x'] + sampled['width'] / 2, sampled['y'] + sampled['height'] / 2
+            if any(abs((a['x'] + a['width'] / 2) - cx) < 4 and abs((a['y'] + a['height'] / 2) - cy) < 4 for a in anchors):
+                skipped += 1
+                continue
+            anchors.append(sampled)
+        return {'anchors': anchors, 'skipped': skipped}
     except (ValueError, KeyError, TypeError, cv2.error) as error:
         raise HTTPException(422, str(error)) from error
 
@@ -348,7 +365,7 @@ def rectify(group_id: str, file: UploadFile = File(), paper: str = Form(),
             raw_anchors = json.loads(anchors)
             cleaned, mapped_boxes = omr.rectify_by_anchors(page, raw_anchors, apply_grayscale=apply_grayscale)
             normalized = cleaned if apply_grayscale else omr.grayscale(cleaned)
-            found_anchors = [omr.make_anchor(normalized, box, tighten=True) for box in mapped_boxes]
+            found_anchors = [omr.make_anchor(normalized, box, tighten=True, snap_nearby=True) for box in mapped_boxes]
         elif already_rectified:
             page = _decode_page_for_anchor(raw_content, width, height, apply_grayscale=False)
             cleaned = omr.grayscale(page) if apply_grayscale else page

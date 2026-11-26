@@ -11,8 +11,8 @@ export type ImageBox = { x: number; y: number; width: number; height: number }
 export type ExternalMode = 'blank' | 'completed'
 export const templateCreationOptions = [
   { value: 'native', label: '系统制卡' },
-  { value: 'blank', label: '已有题卡兼容制版（AI 提示词 / JSON 导入）' },
-  { value: 'completed', label: '已完成答卷兼容扫描（AI 提示词 / JSON 导入）' },
+  { value: 'blank', label: '已有题卡兼容导入（AI + JSON）' },
+  { value: 'completed', label: '已完成答卷兼容导入（AI + JSON）' },
 ]
 export type ExternalAnchor = ImageBox & { pattern: string }
 export type ExternalPage = { anchors: ExternalAnchor[]; candidate?: ImageBox[][]; absent?: ImageBox }

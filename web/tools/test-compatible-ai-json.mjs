@@ -17,11 +17,15 @@ const examPrompt = buildCompatibleAiPrompt(examCtx)
 assert.match(examPrompt, /客观题/)
 assert.match(examPrompt, /主观题/)
 assert.match(examPrompt, /norm1000/)
+assert.match(examPrompt, /识别概要/)
+assert.match(examPrompt, /回复确认前，不要直接发送最终 JSON/)
 
 const statsCtx = { paper: 'A4', page: 1, sides: 1, statistics: true, anonymous: true, candidateLength: 0, nextQuestionNumber: 1 }
 const statsPrompt = buildCompatibleAiPrompt(statsCtx)
 assert.match(statsPrompt, /无需识别准考证号/)
 assert.match(statsPrompt, /统计项目/)
+assert.match(statsPrompt, /识别概要/)
+assert.match(statsPrompt, /回复确认前，不要直接发送最终 JSON/)
 
 // Parse noisy markdown-fenced JSON with batch choices, subjective multi-region, norm1000 coordinates, and box_2d
 const aiReply = `好的，识别结果如下：

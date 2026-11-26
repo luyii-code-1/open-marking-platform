@@ -1,18 +1,18 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent } from 'react'
 import { CopyOutlined, DownloadOutlined, ZoomInOutlined, ZoomOutOutlined } from '@ant-design/icons'
-import { Alert, App, Card, Checkbox, Empty, Form, Input, InputNumber, Modal, Radio, Segmented, Select, Space, Steps, Switch, Tag, Typography, Upload } from 'antd'
+import { Alert, App, Card, Checkbox, Empty, Form, Input, InputNumber, Modal, Radio, Select, Space, Steps, Switch, Tag, Typography, Upload } from 'antd'
 import { Button } from './Button'
 import { newQuestion, request, requestBlob, type ExternalAnchor, type ExternalPage, type ImageBox, type Question, type Row, type Template } from './api'
 import { buildCompatibleAiPrompt, exportCompatibleToAiJson, parseCompatibleAiJson, type ParsedAiLayout } from './compatibleAiJson'
 import './compatible-template.css'
 
 type Point = [number, number]
-type DrawTool = 'anchor' | 'candidate' | 'choice' | 'subjective' | 'absent'
-type InteractionMode = 'draw' | 'edit'
 type ResizeHandle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w'
 type Reference = {
-  source: string; image?: string; error?: string; anchors: ExternalAnchor[]
-  candidate: ImageBox[][]; choices: ImageBox[][]; frames: ImageBox[]
+  source: string
+  image?: string
+  error?: string
+  anchors: ExternalAnchor[]
   rectified?: boolean
 }
 type Trial = { image: string; candidate: string | null; selections: Record<string, string[]>; absent: boolean }
@@ -32,12 +32,6 @@ type EditDrag = {
 }
 
 const formats = '.pdf,.png,.jpg,.jpeg,.tif,.tiff,.bmp'
-const regionTools: { value: Exclude<DrawTool, 'anchor'>; label: string }[] = [
-  { value: 'candidate', label: '考号填涂格' },
-  { value: 'absent', label: '缺考格' },
-  { value: 'choice', label: '客观题' },
-  { value: 'subjective', label: '主观题' },
-]
 const handles: { id: ResizeHandle; cx: (b: ImageBox) => number; cy: (b: ImageBox) => number; cursor: string }[] = [
   { id: 'nw', cx: b => b.x, cy: b => b.y, cursor: 'nwse-resize' },
   { id: 'n', cx: b => b.x + b.width / 2, cy: b => b.y, cursor: 'ns-resize' },
@@ -59,19 +53,6 @@ function enclosing(cells: ImageBox[]): ImageBox {
     width: round2(Math.max(...cells.map(cell => cell.x + cell.width)) - x),
     height: round2(Math.max(...cells.map(cell => cell.y + cell.height)) - y),
   }
-}
-
-function grid(box: ImageBox, columns: number, rows: number) {
-  const width = box.width / columns, height = box.height / rows
-  return Array.from({ length: columns }, (_, column) => Array.from({ length: rows }, (_, row) =>
-    ({ x: round2(box.x + column * width), y: round2(box.y + row * height), width: round2(width), height: round2(height) })))
-}
-
-function overlaps(a: ImageBox, b: ImageBox) {
-  const ix = Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x))
-  const iy = Math.max(0, Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y))
-  const area = ix * iy
-  return area > 0 && area / Math.min(a.width * a.height, b.width * b.height) > 0.3
 }
 
 function sameMark(a?: ActiveMark, b?: ActiveMark): boolean {
@@ -116,8 +97,12 @@ function applyDragDelta(initial: ImageBox, action: 'move' | ResizeHandle, dx: nu
 }
 
 type Props = {
-  value: Template; disabled: boolean; readOnly: boolean; change: (patch: Partial<Template>) => void
-  flush: () => Promise<Template>; settings: (id: string) => void
+  value: Template
+  disabled: boolean
+  readOnly: boolean
+  change: (patch: Partial<Template>) => void
+  flush: () => Promise<Template>
+  settings: (id: string) => void
 }
 
 export function CompatibleTemplateEditor({ value, disabled, readOnly, change, flush, settings }: Props) {
@@ -125,13 +110,12 @@ export function CompatibleTemplateEditor({ value, disabled, readOnly, change, fl
   const legacyStatistics = value.statistics_sheet === true
   const statistics = legacyStatistics || value.statistics_mode === true
   const anonymous = legacyStatistics || (statistics && value.candidate_enabled === false)
+
   const [page, setPage] = useState(1)
   const [step, setStep] = useState(() => {
-    if (readOnly || (profile.pages['1']?.anchors.length ?? 0) >= 4) return 2
+    if (readOnly || value.questions.length > 0 || (profile.pages['1']?.anchors.length ?? 0) >= 4) return 1
     return value.background_assets?.['1'] ? 1 : 0
   })
-  const [mode, setMode] = useState<InteractionMode>('draw')
-  const [regionTool, setRegionTool] = useState<Exclude<DrawTool, 'anchor'>>(anonymous ? 'choice' : 'candidate')
   const [pickingCorners, setPickingCorners] = useState(false)
   const [applyGrayscale, setApplyGrayscale] = useState(true)
   const [refs, setRefs] = useState<Record<number, Reference>>({})
@@ -140,35 +124,21 @@ export function CompatibleTemplateEditor({ value, disabled, readOnly, change, fl
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
   const [combine, setCombine] = useState(false)
-  const [transpose, setTranspose] = useState(false)
-  const [reverse, setReverse] = useState(false)
-  const [options, setOptions] = useState(4)
-  const [optionRows, setOptionRows] = useState(1)
-  const [choiceBatchCount, setChoiceBatchCount] = useState(1)
-  const [appendRegion, setAppendRegion] = useState(false)
-  const [selected, setSelected] = useState('')
   const [activeMark, setActiveMark] = useState<ActiveMark>()
   const [editGranularCell, setEditGranularCell] = useState(false)
   const [trial, setTrial] = useState<Trial>()
-  const [adjustCell, setAdjustCell] = useState(false)
-  const [cellColumn, setCellColumn] = useState(1)
-  const [cellDigit, setCellDigit] = useState(0)
   const [rawSize, setRawSize] = useState<Point>([1, 1])
   const [corners, setCorners] = useState<Point[]>([])
   const [zoom, setZoom] = useState(100)
-  const [drag, setDrag] = useState<ImageBox>()
   const [editDrag, setEditDrag] = useState<EditDrag>()
-  const drawStart = useRef<Point | null>(null)
-  const imgRef = useRef<HTMLImageElement | null>(null)
-  const { message } = App.useApp()
-  const [aiModalOpen, setAiModalOpen] = useState(false)
   const [aiJsonText, setAiJsonText] = useState('')
   const [aiImportMode, setAiImportMode] = useState<'replace' | 'append'>('replace')
   const [aiScopes, setAiScopes] = useState<string[]>(['anchors', 'candidate', 'absent', 'choices', 'subjective'])
   const [promptPreviewOpen, setPromptPreviewOpen] = useState(false)
+  const imgRef = useRef<HTMLImageElement | null>(null)
+  const { message } = App.useApp()
 
   const face = profile.pages[String(page)] ?? { anchors: [] }
-  const selectedQuestion = value.questions.find(q => q.id === selected)
   const reference = refs[page]
   const correctingSource = reference?.source || savedArt
   const correcting = pickingCorners && !!correctingSource
@@ -178,12 +148,7 @@ export function CompatibleTemplateEditor({ value, disabled, readOnly, change, fl
   const asset = value.background_assets?.[String(page)]
   const blocked = disabled || readOnly || busy
   const endpoint = `/groups/${value.group_id}/compatible`
-  const activeDrawTool: DrawTool = step === 1 ? 'anchor'
-    : (regionTool === 'candidate' && (anonymous || page !== 1)) ||
-      (regionTool === 'absent' && (statistics || page !== 1)) ||
-      (regionTool === 'subjective' && statistics) ? 'choice' : regionTool
-  const canDrawOnCanvas = !blocked && !trial && !correcting && mode === 'draw' && (step === 1 || step === 2)
-  const canEditOnCanvas = !blocked && !trial && !correcting && mode === 'edit' && (step === 1 || step === 2)
+  const canEditOnCanvas = !blocked && !trial && !correcting && step === 1
 
   useEffect(() => {
     let active = true
@@ -285,12 +250,17 @@ export function CompatibleTemplateEditor({ value, disabled, readOnly, change, fl
     if (result.pages.length > value.sides - page + 1) throw new Error('请先选择双面题卡，并从正面导入两页原稿')
     const next = { ...refs }
     let assets = { ...value.background_assets }
+    let nextPages = { ...profile.pages }
     for (let i = 0; i < result.pages.length; i++) {
       const sheet = { ...result.pages[i], rectified: !!result.pages[i].image }
       const n = page + i
       next[n] = opts?.preserveSource && i === 0 ? { ...sheet, source: opts.preserveSource } : sheet
       if (sheet.image && profile.mode === 'blank') {
         assets = (await saveBlankAsset(sheet.image, n, assets)) || assets
+      }
+      // Pre-populate auto-detected tight corner anchors if that face has none yet.
+      if (sheet.anchors?.length >= 4 && !(nextPages[String(n)]?.anchors?.length)) {
+        nextPages = { ...nextPages, [String(n)]: { ...(nextPages[String(n)] ?? { anchors: [] }), anchors: sheet.anchors } }
       }
     }
     setRefs(next)
@@ -299,8 +269,14 @@ export function CompatibleTemplateEditor({ value, disabled, readOnly, change, fl
     setActiveMark(undefined)
     const hasErr = !!next[page]?.error
     setPickingCorners(hasErr)
-    if (!hasErr && opts?.targetStep !== undefined) setStep(opts.targetStep)
-    if (profile.mode === 'blank') change({ background_assets: assets })
+    change({
+      ...(profile.mode === 'blank' ? { background_assets: assets } : {}),
+      external_sheet: { ...profile, pages: nextPages },
+    })
+    if (!hasErr) {
+      setStep(opts?.targetStep ?? 1)
+      setNotice('已完成灰度与矩形校正，可直接下载校正图并复制 AI 提示词发给外部 AI。')
+    }
   }
 
   async function adoptCorrectedImage(sourceImage: string, successText: string) {
@@ -309,39 +285,31 @@ export function CompatibleTemplateEditor({ value, disabled, readOnly, change, fl
     await importFiles([file], 0, undefined, {
       alreadyCorrected: true,
       preserveSource: reference?.source || sourceImage,
-      targetStep: face.anchors.length >= 4 ? 2 : 1,
+      targetStep: 1,
       grayscale: true,
     })
     setNotice(successText)
   }
 
-  async function rectifyPage(kind: 'auto' | 'corners' | 'anchors' | 'detect') {
-    const sourceUrl = kind === 'corners' || kind === 'auto' ? (reference?.source || savedArt) : (reference?.image || savedArt)
+  async function rectifyPage(kind: 'auto' | 'corners' | 'anchors') {
+    const sourceUrl = kind === 'anchors' ? (reference?.image || savedArt) : (reference?.source || savedArt)
     if (!sourceUrl) return
     const blob = await (await fetch(sourceUrl)).blob()
     const body = new FormData()
-    body.append('file', blob, kind === 'corners' || kind === 'auto' ? 'sample.jpg' : 'page.png')
+    body.append('file', blob, kind === 'anchors' ? 'page.png' : 'sample.jpg')
     body.append('paper', value.paper)
     body.append('apply_grayscale', String(applyGrayscale))
-    body.append('detect_regions', 'true')
+    body.append('detect_regions', 'false')
     if (kind === 'corners') {
       body.append('corners', JSON.stringify(corners))
     } else if (kind === 'anchors') {
       body.append('anchors', JSON.stringify(face.anchors.map(({ x, y, width: w, height: h }) => ({ x, y, width: w, height: h }))))
-    } else if (kind === 'detect') {
-      body.append('already_rectified', 'true')
     }
-    const result = await request<{ image: string; anchors: ExternalAnchor[]; candidate: ImageBox[][]; choices: ImageBox[][]; frames: ImageBox[] }>(
-      endpoint + '/rectify',
-      { method: 'POST', body },
-    )
+    const result = await request<{ image: string; anchors: ExternalAnchor[] }>(endpoint + '/rectify', { method: 'POST', body })
     const updatedRef: Reference = {
       source: reference?.source || sourceUrl,
       image: result.image,
       anchors: result.anchors,
-      candidate: result.candidate,
-      choices: result.choices,
-      frames: result.frames,
       rectified: true,
     }
     setRefs(prev => ({ ...prev, [page]: updatedRef }))
@@ -349,85 +317,26 @@ export function CompatibleTemplateEditor({ value, disabled, readOnly, change, fl
     setCorners([])
     setPickingCorners(false)
     setActiveMark(undefined)
-    if (profile.mode === 'blank') {
-      const assets = await saveBlankAsset(result.image, page)
-      if (assets) change({ background_assets: assets })
-    }
-    if (kind === 'anchors') {
-      setFace({ ...face, anchors: result.anchors })
-      setNotice(`已按定位块完成灰度与矩形校正，并在校正图上自动识别出考号 ${result.candidate.length} 位、客观题 ${result.choices.length} 题、主观题 ${result.frames.length} 区`)
-      setStep(2)
-    } else if (kind === 'detect') {
-      setNotice(`已在当前矩形校正图上识别出考号 ${result.candidate.length} 位、客观题 ${result.choices.length} 题、主观题 ${result.frames.length} 区`)
-    } else {
-      setNotice('已完成灰度与矩形校正，可进入下一步标定或核对定位块')
-      setStep(1)
-    }
+    const nextAssets = profile.mode === 'blank' ? await saveBlankAsset(result.image, page) : undefined
+    const nextAnchors = kind === 'anchors' || !face.anchors.length ? result.anchors : face.anchors
+    change({
+      ...(nextAssets ? { background_assets: nextAssets } : {}),
+      external_sheet: { ...profile, pages: { ...profile.pages, [page]: { ...face, anchors: nextAnchors } } },
+    })
+    setStep(1)
+    setNotice('已完成灰度与矩形校正，可下载当前校正图发给外部 AI 或直接粘贴 JSON 导入。')
   }
 
-  async function sampleSingleAnchor(box: ImageBox, tighten: boolean, replaceIndex?: number) {
+  async function sampleSingleAnchor(box: ImageBox, replaceIndex: number) {
     if (!image) return
     const blob = await (await fetch(image)).blob()
     const body = new FormData()
     body.append('file', blob, 'anchor.png')
     body.append('paper', value.paper)
     body.append('box', JSON.stringify(box))
-    body.append('tighten', String(tighten))
+    body.append('tighten', 'false')
     const sampled = await request<ExternalAnchor>(endpoint + '/anchor', { method: 'POST', body })
-    if (replaceIndex !== undefined) {
-      setFace({ ...face, anchors: face.anchors.map((a, idx) => idx === replaceIndex ? sampled : a) })
-    } else {
-      const nextAnchors = [...face.anchors, sampled]
-      setFace({ ...face, anchors: nextAnchors })
-      setActiveMark({ kind: 'anchor', index: nextAnchors.length - 1 })
-    }
-  }
-
-  async function reextractAnchorsFromCurrent(tighten = true) {
-    if (!image || !face.anchors.length) return
-    const blob = await (await fetch(image)).blob()
-    const body = new FormData()
-    body.append('file', blob, 'page.png')
-    body.append('paper', value.paper)
-    body.append('tighten', String(tighten))
-    body.append('boxes', JSON.stringify(face.anchors.map(({ x, y, width: w, height: h }) => ({ x, y, width: w, height: h }))))
-    const result = await request<{ anchors: ExternalAnchor[] }>(endpoint + '/reextract-anchors', { method: 'POST', body })
-    setFace({ ...face, anchors: result.anchors })
-    setNotice(tighten ? '已紧缩并重采样全部定位块' : '已按当前校正图重采样全部定位块')
-  }
-
-  function applySuggestions(kind: 'anchors' | 'candidate' | 'choices' | 'frames') {
-    if (!reference || (anonymous && kind === 'candidate') || (statistics && kind === 'frames')) return
-    if (kind === 'anchors') {
-      setFace({ ...face, anchors: reference.anchors })
-      setNotice(`已采用 ${reference.anchors.length} 个自动识别定位块`)
-    }
-    if (kind === 'candidate') {
-      const page1 = profile.pages['1'] ?? { anchors: [] }
-      change({
-        candidate_length: reference.candidate.length,
-        external_sheet: { ...profile, pages: { ...profile.pages, '1': { ...page1, candidate: reference.candidate } } },
-      })
-      setNotice(`已采用 ${reference.candidate.length} 位考号填涂区`)
-    }
-    if (kind === 'choices' || kind === 'frames') {
-      const existingOnPage = value.questions.flatMap(q => q.regions.filter(r => r.page === page))
-      const number = Math.max(0, ...value.questions.map(q => q.number)) + 1
-      const filtered = kind === 'choices'
-        ? reference.choices.filter(cells => { const box = enclosing(cells); return !existingOnPage.some(r => overlaps(r, box)) })
-        : reference.frames.filter(box => !existingOnPage.some(r => overlaps(r, box)))
-      if (!filtered.length) {
-        setNotice('识别结果已全部添加或与现有题目重叠')
-        return
-      }
-      const additions = kind === 'choices' ? (filtered as ImageBox[][]).map((cells, i) => ({
-        ...newQuestion(number + i), type: 'single' as const, points: 1,
-        options: cells.length, external_options: cells, regions: [{ page, ...enclosing(cells) }],
-      })) : (filtered as ImageBox[]).map((box, i) => ({ ...newQuestion(number + i), regions: [{ page, ...box }] }))
-      change({ questions: [...value.questions, ...additions] })
-      setNotice(`已添加 ${additions.length} 项${kind === 'choices' ? '客观题' : '主观题'}区域`)
-    }
-    setTrial(undefined)
+    setFace({ ...face, anchors: face.anchors.map((a, idx) => idx === replaceIndex ? sampled : a) })
   }
 
   function commitMarkBox(mark: ActiveMark, nextBox: ImageBox, syncAnchorPattern = true) {
@@ -437,7 +346,7 @@ export function CompatibleTemplateEditor({ value, disabled, readOnly, change, fl
       const nextAnchors = face.anchors.map((a, idx) => idx === mark.index ? { ...a, ...nextBox } : a)
       setFace({ ...face, anchors: nextAnchors })
       if (syncAnchorPattern && image) {
-        void run(() => sampleSingleAnchor(nextBox, false, mark.index))
+        void run(() => sampleSingleAnchor(nextBox, mark.index))
       }
     } else if (mark.kind === 'candidate') {
       const cols = face.candidate
@@ -485,7 +394,6 @@ export function CompatibleTemplateEditor({ value, disabled, readOnly, change, fl
       if (q.type === 'subjective' && q.regions.length > 1) {
         questionUpdate(q.id, { regions: q.regions.filter((_, idx) => idx !== mark.regionIndex) })
       } else {
-        if (selected === q.id) setSelected('')
         change({ questions: value.questions.filter(other => other.id !== q.id) })
         setTrial(undefined)
       }
@@ -531,89 +439,12 @@ export function CompatibleTemplateEditor({ value, disabled, readOnly, change, fl
     ]
   }
 
-  function rectangle(a: Point, b: Point): ImageBox {
-    return {
-      x: round2(Math.min(a[0], b[0])),
-      y: round2(Math.min(a[1], b[1])),
-      width: round2(Math.abs(a[0] - b[0])),
-      height: round2(Math.abs(a[1] - b[1])),
-    }
-  }
-
-  function finishBox(box: ImageBox) {
-    if (box.width < 1 || box.height < 1) return
-    if (activeDrawTool === 'anchor') {
-      if (face.anchors.length >= 8) { setError('每面最多八个定位参照'); return }
-      void run(() => sampleSingleAnchor(box, true))
-    } else if (activeDrawTool === 'candidate') {
-      if (adjustCell && face.candidate?.[cellColumn - 1]) {
-        setFace({
-          ...face,
-          candidate: face.candidate.map((column, i) =>
-            i === cellColumn - 1 ? column.map((cell, d) => d === cellDigit ? box : cell) : column),
-        })
-        return
-      }
-      const partition = transpose ? grid(box, 10, value.candidate_length) : grid(box, value.candidate_length, 10)
-      const digits = transpose ? Array.from({ length: value.candidate_length }, (_, row) => partition.map(col => col[row])) : partition
-      setFace({ ...face, candidate: reverse ? digits.map(cells => [...cells].reverse()) : digits })
-    } else if (activeDrawTool === 'absent') {
-      setFace({ ...face, absent: box })
-    } else {
-      const current = value.questions.find(q => q.id === selected)
-      if (current && (activeDrawTool === 'subjective') !== (current.type === 'subjective')) {
-        setError('请选取相同题型的题目，或取消选中后新建题目')
-        return
-      }
-      if (activeDrawTool === 'choice' && adjustCell && current?.external_options?.[cellColumn - 1] && current.regions[0].page === page) {
-        const cells = current.external_options.map((cell, i) => i === cellColumn - 1 ? box : cell)
-        questionUpdate(current.id, { external_options: cells, regions: [{ page, ...enclosing(cells) }] })
-        return
-      }
-      if (activeDrawTool === 'choice' && !current && choiceBatchCount > 1 && (transpose || optionRows === 1)) {
-        const startNum = Math.max(0, ...value.questions.map(q => q.number)) + 1
-        const additions: Question[] = []
-        if (transpose) {
-          const cols = grid(box, choiceBatchCount, options)
-          for (let i = 0; i < choiceBatchCount; i++) {
-            const cells = cols[i]
-            additions.push({ ...newQuestion(startNum + i), type: 'single', points: 1, options, answer: [], external_options: cells, regions: [{ page, ...enclosing(cells) }] })
-          }
-        } else {
-          const cols = grid(box, options, choiceBatchCount)
-          for (let i = 0; i < choiceBatchCount; i++) {
-            const cells = cols.map(col => col[i])
-            additions.push({ ...newQuestion(startNum + i), type: 'single', points: 1, options, answer: [], external_options: cells, regions: [{ page, ...enclosing(cells) }] })
-          }
-        }
-        change({ questions: [...value.questions, ...additions] })
-        setTrial(undefined)
-        return
-      }
-      const region = { page, ...box }
-      const rows = statistics ? Math.min(options, optionRows) : 1
-      const layout = grid(box, Math.ceil(options / rows), rows)
-      const cells = transpose ? grid(box, 1, options)[0] : Array.from({ length: rows }, (_, row) =>
-        layout.map(column => column[row])).flat().slice(0, options)
-      const question = current ?? newQuestion(Math.max(0, ...value.questions.map(q => q.number)) + 1)
-      const next: Question = activeDrawTool === 'choice'
-        ? { ...question, type: current?.type === 'multiple' ? 'multiple' : 'single', options, answer: question.answer.filter(a => a < String.fromCharCode(65 + options)), external_options: cells, regions: [region] }
-        : { ...question, type: 'subjective', regions: current && appendRegion ? [...question.regions, region] : [...question.regions.filter(r => r.page !== page), region] }
-      change({ questions: current ? value.questions.map(q => q.id === selected ? next : q) : [...value.questions, next] })
-      setTrial(undefined)
-    }
-  }
-
   function goStep(nextStep: number) {
     setTrial(undefined)
     setPickingCorners(false)
     setCorners([])
-    setAdjustCell(false)
     setActiveMark(undefined)
     setStep(nextStep)
-    if (nextStep === 2 && page === 2 && (regionTool === 'candidate' || regionTool === 'absent')) {
-      setRegionTool('choice')
-    }
   }
 
   function switchPage(next: number) {
@@ -621,11 +452,10 @@ export function CompatibleTemplateEditor({ value, disabled, readOnly, change, fl
     setTrial(undefined)
     setCorners([])
     setPickingCorners(false)
-    setSelected('')
     setActiveMark(undefined)
-    setAdjustCell(false)
     setNotice('')
-    setStep(readOnly || (profile.pages[String(next)]?.anchors.length ?? 0) >= 4 ? 2 : refs[next]?.image || value.background_assets?.[String(next)] ? 1 : 0)
+    setAiJsonText('')
+    setStep(refs[next]?.image || value.background_assets?.[String(next)] ? 1 : 0)
   }
 
   async function tryScan(file: Blob) {
@@ -642,7 +472,6 @@ export function CompatibleTemplateEditor({ value, disabled, readOnly, change, fl
     const box = getMarkBox(mark)
     if (!box) return
     setActiveMark(mark)
-    if (mark.kind === 'question' || mark.kind === 'choice-cell') setSelected(mark.id)
     const svg = event.currentTarget.ownerSVGElement
     if (!svg) return
     const rect = svg.getBoundingClientRect()
@@ -660,81 +489,6 @@ export function CompatibleTemplateEditor({ value, disabled, readOnly, change, fl
   const canAutoCorrect = !!(reference?.source || savedArt)
   const hasRectifiedPage = !!(reference?.image || savedArt)
 
-  type RenderMark = {
-    key: string
-    box: ImageBox
-    kind: string
-    label?: string
-    mark?: ActiveMark
-  }
-  const marks: RenderMark[] = [
-    ...face.anchors.map((box, index) => {
-      const m: ActiveMark = { kind: 'anchor', index }
-      const b = editDrag && sameMark(editDrag.mark, m) ? editDrag.currentBox : box
-      return { key: `anchor-${index}`, box: b, kind: sameMark(activeMark, m) ? 'selected' : 'anchor', label: `定${index + 1}`, mark: m }
-    }),
-    ...(candidateEnvelope && !editGranularCell ? [{
-      key: 'candidate-envelope',
-      box: editDrag && sameMark(editDrag.mark, { kind: 'candidate' }) ? editDrag.currentBox : candidateEnvelope,
-      kind: sameMark(activeMark, { kind: 'candidate' }) ? 'selected' : 'candidate-group',
-      label: '考号',
-      mark: { kind: 'candidate' } as ActiveMark,
-    }] : []),
-    ...(!anonymous ? face.candidate ?? [] : []).flatMap((col, cIndex) => col.map((box, dIndex) => {
-      const cellMark: ActiveMark = { kind: 'candidate-cell', col: cIndex, digit: dIndex }
-      let b = box
-      if (editDrag && sameMark(editDrag.mark, { kind: 'candidate' }) && candidateEnvelope) {
-        b = remapBox(box, candidateEnvelope, editDrag.currentBox)
-      } else if (editDrag && sameMark(editDrag.mark, cellMark)) {
-        b = editDrag.currentBox
-      }
-      return {
-        key: `cand-${cIndex}-${dIndex}`,
-        box: b,
-        kind: sameMark(activeMark, cellMark) ? 'selected' : 'candidate',
-        label: dIndex === 0 ? `${cIndex + 1}` : undefined,
-        mark: editGranularCell ? cellMark : ({ kind: 'candidate' } as ActiveMark),
-      }
-    })),
-    ...(!statistics && face.absent ? [{
-      key: 'absent',
-      box: editDrag && sameMark(editDrag.mark, { kind: 'absent' }) ? editDrag.currentBox : face.absent,
-      kind: sameMark(activeMark, { kind: 'absent' }) ? 'selected' : 'absent',
-      label: '缺考',
-      mark: { kind: 'absent' } as ActiveMark,
-    }] : []),
-    ...pageQuestions.flatMap(q => q.regions.map((r, regionIndex) => ({ r, regionIndex })).filter(({ r }) => r.page === page).map(({ r, regionIndex }, visIdx) => {
-      const qMark: ActiveMark = { kind: 'question', id: q.id, regionIndex }
-      const b = editDrag && sameMark(editDrag.mark, qMark) ? editDrag.currentBox : r
-      const isSelected = sameMark(activeMark, qMark) || (mode === 'draw' && q.id === selected)
-      return {
-        key: `q-${q.id}-${regionIndex}`,
-        box: b,
-        kind: isSelected ? 'selected' : 'question',
-        label: visIdx === 0 ? `Q${q.number}` : `Q${q.number}续`,
-        mark: editGranularCell && q.type !== 'subjective' ? undefined : qMark,
-      }
-    })),
-    ...value.questions.filter(q => q.regions[0]?.page === page).flatMap(q => (q.external_options || []).map((box, optionIndex) => {
-      const cellMark: ActiveMark = { kind: 'choice-cell', id: q.id, optionIndex }
-      const qMark: ActiveMark = { kind: 'question', id: q.id, regionIndex: 0 }
-      let b = box
-      if (editDrag && sameMark(editDrag.mark, qMark)) {
-        b = remapBox(box, editDrag.initialBox, editDrag.currentBox)
-      } else if (editDrag && sameMark(editDrag.mark, cellMark)) {
-        b = editDrag.currentBox
-      }
-      return {
-        key: `opt-${q.id}-${optionIndex}`,
-        box: b,
-        kind: sameMark(activeMark, cellMark) ? 'selected' : 'choice',
-        label: String.fromCharCode(65 + optionIndex),
-        mark: editGranularCell ? cellMark : qMark,
-      }
-    })),
-  ]
-
-  const showCanvas = !!image || (statistics && readOnly && marks.length > 0)
   const nextQuestionNumber = Math.max(0, ...value.questions.map(q => q.number)) + 1
   const aiContext = useMemo(() => ({
     paper: value.paper,
@@ -762,7 +516,7 @@ export function CompatibleTemplateEditor({ value, disabled, readOnly, change, fl
       message.success(okMsg)
     } catch {
       setPromptPreviewOpen(true)
-      message.info('当前环境无法自动写入剪贴板，请直接全选复制弹窗中的内容')
+      message.info('请直接全选复制弹窗中的内容')
     }
   }
 
@@ -784,21 +538,36 @@ export function CompatibleTemplateEditor({ value, disabled, readOnly, change, fl
     let nextFace: ExternalPage = { ...face }
     let nextCandidateLength = value.candidate_length
     const summary: string[] = []
+    const extraNotes: string[] = []
 
     if (scopeSet.has('anchors') && layout.anchors.length > 0) {
-      if (!image) throw new Error('导入定位块前请先载入并校正当前纸面底图')
-      const blob = await (await fetch(image)).blob()
-      const body = new FormData()
-      body.append('file', blob, 'page.png')
-      body.append('paper', value.paper)
-      body.append('tighten', 'true')
-      body.append('boxes', JSON.stringify(layout.anchors))
-      const sampled = await request<{ anchors: ExternalAnchor[] }>(endpoint + '/reextract-anchors', { method: 'POST', body })
-      nextFace = {
-        ...nextFace,
-        anchors: aiImportMode === 'replace' ? sampled.anchors : [...nextFace.anchors, ...sampled.anchors].slice(0, 8),
+      if (image) {
+        const blob = await (await fetch(image)).blob()
+        const body = new FormData()
+        body.append('file', blob, 'page.png')
+        body.append('paper', value.paper)
+        body.append('tighten', 'true')
+        body.append('lenient', 'true')
+        body.append('boxes', JSON.stringify(layout.anchors))
+        const sampled = await request<{ anchors: ExternalAnchor[]; skipped?: number }>(endpoint + '/reextract-anchors', { method: 'POST', body })
+        if (sampled.anchors.length > 0) {
+          nextFace = {
+            ...nextFace,
+            anchors: aiImportMode === 'replace' ? sampled.anchors : [...nextFace.anchors, ...sampled.anchors].slice(0, 8),
+          }
+          summary.push(`定位块 ${sampled.anchors.length} 个`)
+        }
+        if (sampled.skipped) {
+          extraNotes.push(`${sampled.skipped} 个空白或重复定位框已自动忽略`)
+        }
+      } else {
+        extraNotes.push('尚未导入校正底图，已先导入题目与考号，定位块将在导入底图后自动补齐')
       }
-      summary.push(`定位块 ${sampled.anchors.length} 个`)
+    }
+
+    if (nextFace.anchors.length < 4 && (reference?.anchors?.length ?? 0) >= 4) {
+      nextFace = { ...nextFace, anchors: reference!.anchors }
+      summary.push(`自动定位块 ${reference!.anchors.length} 个`)
     }
 
     if (scopeSet.has('candidate') && !anonymous && page === 1 && layout.candidate?.length) {
@@ -872,43 +641,88 @@ export function CompatibleTemplateEditor({ value, disabled, readOnly, change, fl
     })
     setTrial(undefined)
     setActiveMark(undefined)
-    setAiModalOpen(false)
-    setStep(2)
-    setMode('edit')
-    setNotice(`已从外部 AI JSON 导入：${summary.join('、')}。可在右侧画布「移动 / 调整」模式下微调任意标记。`)
+    setNotice(
+      `已导入：${summary.join('、') || '无新增区域'}${extraNotes.length ? `（${extraNotes.join('；')}）` : ''}。可在右侧画布点击任意标记微调位置。`,
+    )
   }
 
+  type RenderMark = { key: string; box: ImageBox; kind: string; label?: string; mark?: ActiveMark }
+  const marks: RenderMark[] = [
+    ...face.anchors.map((box, index) => {
+      const m: ActiveMark = { kind: 'anchor', index }
+      const b = editDrag && sameMark(editDrag.mark, m) ? editDrag.currentBox : box
+      return { key: `anchor-${index}`, box: b, kind: sameMark(activeMark, m) ? 'selected' : 'anchor', label: `定${index + 1}`, mark: m }
+    }),
+    ...(candidateEnvelope && !editGranularCell ? [{
+      key: 'candidate-envelope',
+      box: editDrag && sameMark(editDrag.mark, { kind: 'candidate' }) ? editDrag.currentBox : candidateEnvelope,
+      kind: sameMark(activeMark, { kind: 'candidate' }) ? 'selected' : 'candidate-group',
+      label: '考号',
+      mark: { kind: 'candidate' } as ActiveMark,
+    }] : []),
+    ...(!anonymous ? (face.candidate ?? []) : []).flatMap((col, cIndex) => col.map((box, dIndex) => {
+      const cellMark: ActiveMark = { kind: 'candidate-cell', col: cIndex, digit: dIndex }
+      let b = box
+      if (editDrag && sameMark(editDrag.mark, { kind: 'candidate' }) && candidateEnvelope) {
+        b = remapBox(box, candidateEnvelope, editDrag.currentBox)
+      } else if (editDrag && sameMark(editDrag.mark, cellMark)) {
+        b = editDrag.currentBox
+      }
+      return {
+        key: `cand-${cIndex}-${dIndex}`,
+        box: b,
+        kind: sameMark(activeMark, cellMark) ? 'selected' : 'candidate',
+        label: dIndex === 0 ? `${cIndex + 1}` : undefined,
+        mark: editGranularCell ? cellMark : ({ kind: 'candidate' } as ActiveMark),
+      }
+    })),
+    ...(!statistics && face.absent ? [{
+      key: 'absent',
+      box: editDrag && sameMark(editDrag.mark, { kind: 'absent' }) ? editDrag.currentBox : face.absent,
+      kind: sameMark(activeMark, { kind: 'absent' }) ? 'selected' : 'absent',
+      label: '缺考',
+      mark: { kind: 'absent' } as ActiveMark,
+    }] : []),
+    ...pageQuestions.flatMap(q => q.regions.map((r, regionIndex) => ({ r, regionIndex })).filter(({ r }) => r.page === page).map(({ r, regionIndex }, visIdx) => {
+      const qMark: ActiveMark = { kind: 'question', id: q.id, regionIndex }
+      const b = editDrag && sameMark(editDrag.mark, qMark) ? editDrag.currentBox : r
+      return {
+        key: `q-${q.id}-${regionIndex}`,
+        box: b,
+        kind: sameMark(activeMark, qMark) ? 'selected' : 'question',
+        label: visIdx === 0 ? `Q${q.number}` : `Q${q.number}续`,
+        mark: editGranularCell && q.type !== 'subjective' ? undefined : qMark,
+      }
+    })),
+    ...value.questions.filter(q => q.regions[0]?.page === page).flatMap(q => (q.external_options || []).map((box, optionIndex) => {
+      const cellMark: ActiveMark = { kind: 'choice-cell', id: q.id, optionIndex }
+      const qMark: ActiveMark = { kind: 'question', id: q.id, regionIndex: 0 }
+      let b = box
+      if (editDrag && sameMark(editDrag.mark, qMark)) {
+        b = remapBox(box, editDrag.initialBox, editDrag.currentBox)
+      } else if (editDrag && sameMark(editDrag.mark, cellMark)) {
+        b = editDrag.currentBox
+      }
+      return {
+        key: `opt-${q.id}-${optionIndex}`,
+        box: b,
+        kind: sameMark(activeMark, cellMark) ? 'selected' : 'choice',
+        label: String.fromCharCode(65 + optionIndex),
+        mark: editGranularCell ? cellMark : qMark,
+      }
+    })),
+  ]
+
+  const showCanvas = !!image || marks.length > 0
   const stepItems = [
-    { title: '导入与校正', description: hasRectifiedPage ? '已就绪' : '待导入' },
-    { title: '标定定位块', description: `${face.anchors.length} 个` },
-    { title: 'AI 导入与框选', description: `${pageQuestions.length} 题` },
+    { title: '导入与校正底图', description: hasRectifiedPage ? '已就绪' : '待导入' },
+    { title: 'AI 识别与 JSON 导入', description: `${pageQuestions.length} 题` },
     { title: '试扫核验', description: trial ? '已试扫' : '待核验' },
   ]
 
   return <div className="compatible-layout">
     <Card size="small" className="compatible-steps-card">
-      <Space direction="vertical" size={10} style={{ width: '100%' }}>
-        <Steps size="small" current={step} onChange={goStep} items={stepItems} />
-        {!readOnly && <div className="compatible-ai-bar">
-          <Space wrap size={8} align="center">
-            <Tag color="blue" style={{ marginInlineEnd: 0 }}>外部 AI 制版</Tag>
-            <Button size="small" type="primary" icon={<CopyOutlined />} disabled={blocked}
-              onClick={() => void copyTextToClipboard(aiPromptText, '已复制 AI 识别提示词')}>
-              复制 AI 提示词
-            </Button>
-            <Button size="small" icon={<DownloadOutlined />} disabled={blocked || !image} onClick={downloadRectifiedImage}>
-              下载当前校正图
-            </Button>
-            <Button size="small" disabled={blocked} onClick={() => setAiModalOpen(true)}>
-              粘贴 AI JSON 导入
-            </Button>
-            <Button size="small" type="link" onClick={() => setPromptPreviewOpen(true)}>查看提示词</Button>
-            <Button size="small" type="link" onClick={() => void copyTextToClipboard(exportCompatibleToAiJson(value, page), '已复制当前面标定 JSON')}>
-              导出当前 JSON
-            </Button>
-          </Space>
-        </div>}
-      </Space>
+      <Steps size="small" current={step} onChange={goStep} items={stepItems} />
     </Card>
     <div className="compatible-workbench">
       <Card
@@ -920,20 +734,24 @@ export function CompatibleTemplateEditor({ value, disabled, readOnly, change, fl
           <Form layout="vertical">
             <Form.Item label="题卡名称"><Input disabled={blocked} value={value.name} onChange={e => change({ name: e.target.value })} /></Form.Item>
             {statistics && !legacyStatistics && <Form.Item label="准考证号">
-              <Space><Switch checked={!anonymous} disabled={blocked} aria-label="启用准考证号"
-                onChange={candidate_enabled => { change({candidate_enabled}); setActiveMark(undefined); setAdjustCell(false); setTrial(undefined) }} />
-                <Typography.Text type="secondary">{anonymous?'每张入库题卡计一份':'扫描时按考号匹配应考名单'}</Typography.Text></Space>
+              <Space>
+                <Switch checked={!anonymous} disabled={blocked} aria-label="启用准考证号"
+                  onChange={candidate_enabled => { change({ candidate_enabled }); setActiveMark(undefined); setTrial(undefined) }} />
+                <Typography.Text type="secondary">{anonymous ? '每张入库题卡计一份' : '扫描时按考号匹配应考名单'}</Typography.Text>
+              </Space>
             </Form.Item>}
             <Space wrap>
               <Select aria-label="纸型" disabled={blocked || !!value.questions.length || !!Object.keys(refs).length || !!Object.keys(profile.pages).length}
                 value={value.paper} onChange={paper => change({ paper })} options={[{ value: 'A4', label: 'A4 纵向' }, { value: 'A3', label: 'A3 横向' }]} />
               <Select aria-label="面数" disabled={blocked || !!Object.keys(refs).length || !!Object.keys(profile.pages).length}
                 value={value.sides} onChange={sides => { change({ sides }); switchPage(1) }} options={[{ value: 1, label: '单面' }, { value: 2, label: '双面' }]} />
+              {!anonymous && <InputNumber aria-label="考号位数" min={1} max={20} value={value.candidate_length} disabled={blocked} addonBefore="考号位数" style={{ width: 136 }}
+                onChange={length => { if (length) change({ candidate_length: length }) }} />}
             </Space>
           </Form>
           {!readOnly && <>
             <Typography.Paragraph type="secondary" className="compatible-tools">
-              先导入样张并完成灰度与矩形校正，再进入下一步标定定位块与自动识别答题区。
+              先导入空白原稿或样张并完成灰度与矩形校正，再进入下一步复制提示词给外部 AI 生成 JSON。
             </Typography.Paragraph>
             <Space wrap className="compatible-tools">
               <Upload accept={formats} multiple showUploadList={false} disabled={blocked}
@@ -962,179 +780,121 @@ export function CompatibleTemplateEditor({ value, disabled, readOnly, change, fl
             </div>}
           </>}
           <div className="compatible-step-footer">
-            {!readOnly && hasRectifiedPage && !pickingCorners && <Button onClick={() => setAiModalOpen(true)}>直接粘贴 AI JSON</Button>}
-            <Button type="primary" disabled={!hasRectifiedPage || pickingCorners} onClick={() => goStep(1)}>下一步：标定定位块</Button>
+            <Button type="primary" disabled={!hasRectifiedPage || pickingCorners} onClick={() => goStep(1)}>下一步：AI 识别与 JSON 导入</Button>
           </div>
         </>}
 
         {step === 1 && <>
-          <Typography.Paragraph type="secondary">
-            每面需标定 4 至 8 个定位块（四角黑块尽量紧贴，避免框入虚线或边框，并至少保留 1 处含方向特征的印刷块）。定完 4 个角定位块后，可先执行「灰度与矩形校正」拉正整页，再进入自动识别。
-          </Typography.Paragraph>
-          {!readOnly && <>
-            <Space wrap className="compatible-tools">
-              {reference?.anchors?.length ? <Button disabled={blocked} onClick={() => applySuggestions('anchors')}>采用自动定位（{reference.anchors.length}）</Button> : null}
-              <Button disabled={blocked || !image || !face.anchors.length} onClick={() => void run(() => reextractAnchorsFromCurrent(true))}>紧缩并重采样定位</Button>
-              <Checkbox disabled={blocked} checked={applyGrayscale} onChange={e => setApplyGrayscale(e.target.checked)}>同步灰度校正</Checkbox>
-            </Space>
-            <div className="compatible-panel-box">
-              <Typography.Text strong>基于定位块执行矩形校正</Typography.Text>
-              <Typography.Paragraph type="secondary" style={{ margin: '4px 0 8px' }}>
-                按当前 4 个角定位块消除透视倾斜并统一纸面灰度，随后在校正图上自动识别{anonymous ? '选项区' : statistics ? '考号和选项区' : '考号、客观题与主观题区域'}。
-              </Typography.Paragraph>
-              <Button type="primary" disabled={blocked || !image || face.anchors.length < 4} onClick={() => void run(() => rectifyPage('anchors'))}>
-                按定位块灰度与矩形校正并自动识别
-              </Button>
-            </div>
-            {face.anchors.length > 0 && <Space wrap size={[6, 6]} className="compatible-tools">
-              {face.anchors.map((_, index) => {
-                const isCur = activeMark?.kind === 'anchor' && activeMark.index === index
-                return <Tag key={index} color={isCur ? 'orange' : 'purple'} closable={!blocked}
-                  style={{ cursor: 'pointer' }}
-                  onClick={() => { setMode('edit'); setActiveMark({ kind: 'anchor', index }) }}
-                  onClose={e => { e.preventDefault(); setFace({ ...face, anchors: face.anchors.filter((__, i) => i !== index) }); if (isCur) setActiveMark(undefined) }}>
-                  定位 {index + 1}
-                </Tag>
-              })}
-            </Space>}
-          </>}
-          <div className="compatible-step-footer">
-            <Button onClick={() => goStep(0)}>上一步</Button>
-            <Button type="primary" disabled={face.anchors.length < 4} onClick={() => goStep(2)}>下一步：识别与框选</Button>
-          </div>
-        </>}
-
-        {step === 2 && <>
           {!readOnly && <>
             <div className="compatible-panel-box">
-              <Typography.Text strong>外部 AI 识别与 JSON 制版（推荐）</Typography.Text>
+              <Typography.Text strong>1. 发送校正图与提示词给外部 AI</Typography.Text>
               <Typography.Paragraph type="secondary" style={{ margin: '4px 0 8px' }}>
-                {statistics
-                  ? '复制提示词并连同校正图发送给外部 AI，直接提取所有统计选择题坐标（不含考试题卡结构），粘贴 JSON 一键生成。'
-                  : '复制提示词并连同校正图发送给外部 AI，一次性识别全部客观题、主观题、考号与定位块，粘贴 JSON 自动框题。'}
+                AI 会先发给您一份「识别概要」供核对，确认无误后再输出 JSON，确保题号、选项和区域完整准确。
               </Typography.Paragraph>
               <Space wrap>
-                <Button type="primary" icon={<CopyOutlined />} disabled={blocked} onClick={() => void copyTextToClipboard(aiPromptText, '已复制 AI 识别提示词')}>
-                  复制 AI 提示词
-                </Button>
                 <Button icon={<DownloadOutlined />} disabled={blocked || !image} onClick={downloadRectifiedImage}>
                   下载当前校正图
                 </Button>
-                <Button disabled={blocked} onClick={() => setAiModalOpen(true)}>
-                  粘贴 JSON 导入
+                <Button type="primary" icon={<CopyOutlined />} disabled={blocked} onClick={() => void copyTextToClipboard(aiPromptText, '已复制 AI 识别提示词')}>
+                  复制 AI 提示词
                 </Button>
                 <Button size="small" type="link" onClick={() => setPromptPreviewOpen(true)}>查看提示词</Button>
-                <Button size="small" type="link" onClick={() => void copyTextToClipboard(exportCompatibleToAiJson(value, page), '已复制当前面标定 JSON')}>导出当前 JSON</Button>
-              </Space>
-            </div>
-            <div className="compatible-panel-box">
-              <Space wrap>
-                <Button disabled={blocked || !image} onClick={() => void run(() => rectifyPage('detect'))}>本地自动识别区域</Button>
-                {!anonymous && page === 1 && <Button disabled={blocked || !reference?.candidate?.length} onClick={() => applySuggestions('candidate')}>
-                  采用考号（{reference?.candidate?.length || 0}位）
-                </Button>}
-                <Button disabled={blocked || !reference?.choices?.length} onClick={() => applySuggestions('choices')}>
-                  添加{statistics ? '选择题' : '客观题'}（{reference?.choices?.length || 0}）
+                <Button size="small" type="link" disabled={!marks.length} onClick={() => void copyTextToClipboard(exportCompatibleToAiJson(value, page), '已复制当前面 JSON，可发给 AI 微调')}>
+                  导出当前 JSON
                 </Button>
-                {!statistics && <Button disabled={blocked || !reference?.frames?.length} onClick={() => applySuggestions('frames')}>
-                  添加主观题（{reference?.frames?.length || 0}）
-                </Button>}
               </Space>
             </div>
-            {mode === 'draw' ? <Space wrap className="compatible-tools">
-              <Select aria-label="框选区域类型" value={activeDrawTool === 'anchor' ? 'choice' : activeDrawTool} disabled={blocked}
-                options={regionTools.filter(item => (!statistics || !['subjective','absent'].includes(item.value)) &&
-                  ((!anonymous && page === 1) || !['candidate', 'absent'].includes(item.value)))}
-                onChange={next => { setRegionTool(next); setAdjustCell(false) }} style={{ minWidth: 132 }} />
-              {selected && <Button size="small" disabled={blocked} onClick={() => { setSelected(''); setAdjustCell(false) }}>取消选中（新建下一题）</Button>}
-              {activeDrawTool === 'candidate' && <>
-                <InputNumber aria-label="考号位数" min={1} max={20} value={value.candidate_length} disabled={blocked}
-                  onChange={length => { if (length) change({ candidate_length: length }) }} />
-                <Checkbox disabled={blocked} checked={reverse} onChange={e => setReverse(e.target.checked)}>反向数字顺序</Checkbox>
-              </>}
-              {activeDrawTool === 'choice' && <>
-                <InputNumber aria-label="选项数量" min={statistics ? 2 : 3} max={statistics ? 26 : 7}
-                  value={options} disabled={blocked} addonBefore="选项" style={{ width: 112 }}
-                  onChange={n => {
-                    setOptions(n ?? 4)
-                    if (statistics) { setOptionRows((n ?? 4) > 13 ? 2 : 1); setChoiceBatchCount(1) }
-                  }} />
-                {statistics && !transpose && !adjustCell && <InputNumber aria-label="每题选项行数" min={1} max={Math.min(8, options)}
-                  value={optionRows} disabled={blocked} addonBefore="选项行数" style={{ width: 130 }}
-                  onChange={n => { setOptionRows(n ?? 1); setChoiceBatchCount(1) }} />}
-                {!selected && !adjustCell && (transpose || optionRows === 1) && <InputNumber aria-label="批量题数" min={1} max={50} value={choiceBatchCount} disabled={blocked} addonBefore="连框题数" style={{ width: 132 }}
-                  onChange={n => setChoiceBatchCount(n ?? 1)} />}
-              </>}
-              {activeDrawTool === 'subjective' && !!selectedQuestion && selectedQuestion.type === 'subjective' && <Checkbox disabled={blocked} checked={appendRegion}
-                onChange={e => setAppendRegion(e.target.checked)}>追加同面续区</Checkbox>}
-              {(activeDrawTool === 'candidate' || activeDrawTool === 'choice') && <Checkbox disabled={blocked} checked={transpose}
-                onChange={e => setTranspose(e.target.checked)}>{activeDrawTool === 'candidate' ? '数字横向排列' : '选项竖向排列'}</Checkbox>}
-              {((activeDrawTool === 'candidate' && !!face.candidate?.length)
-                || (activeDrawTool === 'choice' && !!selectedQuestion?.external_options?.length)) && <>
-                <Checkbox disabled={blocked} checked={adjustCell} onChange={e => { setAdjustCell(e.target.checked); setCellColumn(1) }}>重框单格</Checkbox>
-                {adjustCell && <Select aria-label={activeDrawTool === 'candidate' ? '考号位' : '题目选项'} value={cellColumn}
-                  options={Array.from({ length: activeDrawTool === 'candidate' ? face.candidate!.length : selectedQuestion!.options },
-                    (_, i) => ({ label: activeDrawTool === 'candidate' ? `第 ${i + 1} 位` : String.fromCharCode(65 + i), value: i + 1 }))}
-                  onChange={setCellColumn} />}
-                {adjustCell && activeDrawTool === 'candidate' && <Select aria-label="数字" value={cellDigit}
-                  options={Array.from({ length: 10 }, (_, digit) => ({ value: digit, label: `数字 ${digit}` }))} onChange={setCellDigit} />}
-              </>}
-              {activeDrawTool === 'absent' && face.absent && <Button disabled={blocked} onClick={() => setFace({ ...face, absent: undefined })}>清除缺考格</Button>}
-            </Space> : <Alert className="compatible-tools" showIcon type="info"
-              message="当前为「移动 / 调整」模式"
-              description="点击画布上的任意标记可拖动位置或拖拽边角控制点缩放，方向键可微调坐标；如需新建标记，请切换回「框选标记」。" />}
+
+            <div className="compatible-panel-box">
+              <Space style={{ width: '100%', justifyContent: 'space-between', marginBottom: 6 }}>
+                <Typography.Text strong>2. 粘贴 AI 返回的 JSON</Typography.Text>
+                {aiJsonText && <Button size="small" type="link" onClick={() => setAiJsonText('')}>清空</Button>}
+              </Space>
+              <Input.TextArea
+                rows={7}
+                disabled={blocked}
+                value={aiJsonText}
+                onChange={e => setAiJsonText(e.target.value)}
+                placeholder='将 AI 确认后返回的 JSON（支持直接粘贴整段带 ```json 代码块的回复）粘贴到此处…'
+                style={{ fontFamily: 'monospace' }}
+              />
+              {aiParsed.error && <Alert style={{ marginTop: 8 }} type="error" showIcon message={aiParsed.error} />}
+              {aiParsed.layout && <Space direction="vertical" size={8} style={{ width: '100%', marginTop: 8 }}>
+                <Space wrap size={[6, 6]}>
+                  <Tag color="purple">定位块 {aiParsed.layout.anchors.length}</Tag>
+                  {!anonymous && page === 1 && <Tag color="green">考号 {aiParsed.layout.candidate ? `${aiParsed.layout.candidate.length}位` : '无'}</Tag>}
+                  {!statistics && page === 1 && <Tag color="green">缺考 {aiParsed.layout.absent ? '有' : '无'}</Tag>}
+                  <Tag color="blue">{statistics ? '选择题' : '客观题'} {aiParsed.layout.choices.length} 题</Tag>
+                  {!statistics && <Tag color="blue">主观题 {aiParsed.layout.subjective.length} 题</Tag>}
+                </Space>
+                {aiParsed.layout.warnings.length > 0 && <Alert type="warning" showIcon message={aiParsed.layout.warnings.join('；')} />}
+                <Radio.Group size="small" value={aiImportMode} onChange={e => setAiImportMode(e.target.value)}>
+                  <Radio value="replace">替换本面同类区域</Radio>
+                  <Radio value="append">保留现有并追加</Radio>
+                </Radio.Group>
+                <Checkbox.Group
+                  value={aiScopes}
+                  onChange={vals => setAiScopes(vals.map(String))}
+                  options={[
+                    { label: `定位块(${aiParsed.layout.anchors.length})`, value: 'anchors', disabled: !aiParsed.layout.anchors.length },
+                    ...(!anonymous && page === 1 ? [{ label: `考号(${aiParsed.layout.candidate?.length || 0}位)`, value: 'candidate', disabled: !aiParsed.layout.candidate?.length }] : []),
+                    ...(!statistics && page === 1 ? [{ label: '缺考', value: 'absent', disabled: !aiParsed.layout.absent }] : []),
+                    { label: `${statistics ? '选择题' : '客观题'}(${aiParsed.layout.choices.length})`, value: 'choices', disabled: !aiParsed.layout.choices.length },
+                    ...(!statistics ? [{ label: `主观题(${aiParsed.layout.subjective.length})`, value: 'subjective', disabled: !aiParsed.layout.subjective.length }] : []),
+                  ]}
+                />
+                <Button type="primary" block loading={busy} onClick={() => void run(applyAiJsonImport)}>
+                  导入并生成题卡区域
+                </Button>
+              </Space>}
+            </div>
           </>}
+
           <div className="compatible-tools">
-            <Tag>定位 {face.anchors.length}</Tag>
-            {!anonymous && page === 1 && <Tag color={face.candidate?.length && face.candidate.length !== value.candidate_length ? 'orange' : undefined}>
-              考号 {face.candidate?.length || 0} / {value.candidate_length} 位
-            </Tag>}
-            <Tag>本面 {pageQuestions.length} 题</Tag>
+            <Space wrap size={[6, 6]}>
+              <Tag color={face.anchors.length >= 4 ? 'purple' : 'orange'}>定位块 {face.anchors.length}</Tag>
+              {!anonymous && page === 1 && <Tag color={face.candidate?.length === value.candidate_length ? 'green' : 'orange'}>
+                考号 {face.candidate?.length || 0} / {value.candidate_length} 位
+              </Tag>}
+              <Tag color="blue">本面 {pageQuestions.length} 题</Tag>
+              {!readOnly && face.anchors.length >= 4 && !!image && <Button size="small" disabled={blocked} onClick={() => void run(() => rectifyPage('anchors'))}>按定位块再拉正</Button>}
+            </Space>
           </div>
+
           <div className="compatible-questions">
             {pageQuestions.map(q => <div key={q.id} className="compatible-question">
-              <Button type={selected === q.id ? 'primary' : 'default'} onClick={() => {
-                const nextSelected = selected === q.id ? '' : q.id
-                setSelected(nextSelected)
-                if (nextSelected) {
-                  setRegionTool(q.type === 'subjective' ? 'subjective' : 'choice')
-                  setOptions(q.options)
-                  setOptionRows(statistics && q.options > 13 ? 2 : 1)
-                  setAdjustCell(false)
-                  const regionIndex = q.regions.findIndex(r => r.page === page)
-                  if (regionIndex >= 0) setActiveMark({ kind: 'question', id: q.id, regionIndex })
-                } else {
-                  setActiveMark(undefined)
-                }
+              <Button type={activeMark?.kind === 'question' && activeMark.id === q.id ? 'primary' : 'default'} onClick={() => {
+                const regionIndex = q.regions.findIndex(r => r.page === page)
+                if (regionIndex >= 0) setActiveMark({ kind: 'question', id: q.id, regionIndex })
               }}>第 {q.number} 题</Button>
               <InputNumber aria-label={`第 ${q.number} 题题号`} disabled={blocked} min={1} value={q.number}
                 onChange={number => { if (number && !value.questions.some(other => other.id !== q.id && other.number === number)) questionUpdate(q.id, { number }) }} />
               {statistics ? <>
-                <Select size="small" aria-label={'第 '+q.number+' 题题型'} disabled={blocked} value={q.type}
+                <Select size="small" aria-label={`第 ${q.number} 题题型`} disabled={blocked} value={q.type}
                   options={[{ value: 'single', label: '单选' }, { value: 'multiple', label: '多选' }]}
                   onChange={type => questionUpdate(q.id, { type })} />
-                <Input size="small" aria-label={'第 '+q.number+' 题说明'} disabled={blocked} maxLength={64}
+                <Input size="small" aria-label={`第 ${q.number} 题说明`} disabled={blocked} maxLength={64}
                   placeholder="题目说明" value={q.title || ''} onChange={e => questionUpdate(q.id, { title: e.target.value })} />
               </> : <>
-                <InputNumber aria-label={'第 '+q.number+' 题分值'} disabled={blocked} value={q.points} min={.01} precision={2}
+                <InputNumber aria-label={`第 ${q.number} 题分值`} disabled={blocked} value={q.points} min={.01} precision={2}
                   onChange={points => { if (points) questionUpdate(q.id, { points }) }} />
                 <Button disabled={blocked} onClick={() => settings(q.id)}>设置</Button>
               </>}
               <Button disabled={blocked} danger onClick={() => {
-                if (selected === q.id) setSelected('')
                 if (activeMark && (activeMark.kind === 'question' || activeMark.kind === 'choice-cell') && activeMark.id === q.id) setActiveMark(undefined)
                 change({ questions: value.questions.filter(other => other.id !== q.id) })
                 setTrial(undefined)
               }}>删除</Button>
             </div>)}
           </div>
+
           <div className="compatible-step-footer">
-            <Button onClick={() => goStep(1)}>上一步</Button>
-            <Button type="primary" onClick={() => goStep(3)}>下一步：试扫核验</Button>
+            <Button onClick={() => goStep(0)}>上一步</Button>
+            <Button type="primary" disabled={face.anchors.length < 4 || !pageQuestions.length} onClick={() => goStep(2)}>下一步：试扫核验</Button>
           </div>
         </>}
 
-        {step === 3 && <>
+        {step === 2 && <>
           <Typography.Paragraph type="secondary">
             上传一张实扫答卷或使用当前样张进行试扫，确认定位和{anonymous ? '选项' : '考号及选项'}识读准确后即可发布题卡。
           </Typography.Paragraph>
@@ -1153,19 +913,15 @@ export function CompatibleTemplateEditor({ value, disabled, readOnly, change, fl
             <Tag>本面 {pageQuestions.length} 题</Tag>
           </div>
           <div className="compatible-step-footer">
-            <Button onClick={() => goStep(2)}>返回调整区域</Button>
+            <Button onClick={() => goStep(1)}>返回微调 / 重导 JSON</Button>
           </div>
         </>}
       </Card>
 
       <Card
-        title={correcting ? '原图四角校正' : trial ? '试扫自动校正预览' : readOnly ? '题卡预览' : '标定画布'}
+        title={correcting ? '原图四角校正' : trial ? '试扫自动校正预览' : '标定预览（点击标记可微调位置）'}
         extra={<Space wrap size={6}>
-          {!readOnly && !correcting && !trial && (step === 1 || step === 2) && <>
-            <Segmented size="small" value={mode} onChange={val => { setMode(val as InteractionMode); setDrag(undefined); setEditDrag(undefined) }}
-              options={[{ value: 'draw', label: '框选标记' }, { value: 'edit', label: '移动 / 调整' }]} />
-            {mode === 'edit' && step === 2 && <Checkbox checked={editGranularCell} onChange={e => { setEditGranularCell(e.target.checked); setActiveMark(undefined) }}>微调单格</Checkbox>}
-          </>}
+          {canEditOnCanvas && <Checkbox checked={editGranularCell} onChange={e => { setEditGranularCell(e.target.checked); setActiveMark(undefined) }}>微调单格</Checkbox>}
           <Button size="small" icon={<ZoomOutOutlined />} aria-label="缩小画布" disabled={!showCanvas || zoom <= 50} onClick={() => setZoom(z => Math.max(50, z - 25))} />
           <Button size="small" disabled={!showCanvas} onClick={() => setZoom(100)}>{zoom}%</Button>
           <Button size="small" icon={<ZoomInOutlined />} aria-label="放大画布" disabled={!showCanvas || zoom >= 250} onClick={() => setZoom(z => Math.min(250, z + 25))} />
@@ -1179,7 +935,7 @@ export function CompatibleTemplateEditor({ value, disabled, readOnly, change, fl
           <Space wrap size={8}>
             <Tag color="orange">{markLabel(activeMark)}</Tag>
             <Typography.Text type="secondary">
-              X {activeBox.x} · Y {activeBox.y} · {activeBox.width} × {activeBox.height} mm（可用方向键微调）
+              X {activeBox.x} · Y {activeBox.y} · {activeBox.width} × {activeBox.height} mm（可拖动或用方向键微调）
             </Typography.Text>
             {activeMark.kind !== 'candidate-cell' && activeMark.kind !== 'choice-cell' && <Button size="small" danger onClick={() => deleteActiveMark(activeMark)}>删除此标记</Button>}
             <Button size="small" onClick={() => setActiveMark(undefined)}>取消选中</Button>
@@ -1189,49 +945,33 @@ export function CompatibleTemplateEditor({ value, disabled, readOnly, change, fl
           description={<div>{!anonymous && page === 1 && <div>考号 {trial.candidate || '未识读'}{!statistics && trial.absent ? ' · 缺考' : ''}</div>}
             {Object.entries(trial.selections).map(([id, choices]) => <Tag key={id}>第 {value.questions.find(q => q.id === id)?.number} 题 {choices.join('') || '空白'}</Tag>)}</div>}
           action={<Space direction="vertical" size={6}>
-            {!readOnly && !(statistics && profile.mode === 'blank') && <Button type="primary" size="small" disabled={blocked} onClick={() => void run(() => adoptCorrectedImage(trial.image, '已引用自动校正图作为当前底图，可继续框选或微调区域'))}>引用此校正图继续框选</Button>}
-            <Button size="small" onClick={() => setTrial(undefined)}>返回标定</Button>
+            {!readOnly && !(statistics && profile.mode === 'blank') && <Button type="primary" size="small" disabled={blocked} onClick={() => void run(() => adoptCorrectedImage(trial.image, '已引用自动校正图作为当前底图，可导出给 AI 或继续微调'))}>引用此校正图</Button>}
+            <Button size="small" onClick={() => setTrial(undefined)}>返回预览</Button>
           </Space>} />}
         {showCanvas ? <div className="compatible-canvas-viewport"><div className="compatible-canvas" style={{ aspectRatio: `${width}/${height}`, width: `${zoom}%`, maxWidth: zoom > 100 ? 'none' : 920 }}>
           {image && <img ref={imgRef} src={image} alt={correcting ? '待校正原图' : '当前纸面'} draggable={false}
             onLoad={event => { if (correcting) setRawSize([event.currentTarget.naturalWidth, event.currentTarget.naturalHeight]) }} />}
           <svg role="img" aria-label="题卡标定区域" viewBox={`0 0 ${width} ${height}`}
-            className={correcting || canDrawOnCanvas ? 'compatible-draw' : canEditOnCanvas ? 'compatible-edit' : ''}
+            className={correcting ? 'compatible-draw' : canEditOnCanvas ? 'compatible-edit' : ''}
             onPointerDown={event => {
               if (blocked || trial) return
               if (correcting) { if (corners.length < 4) setCorners([...corners, point(event)]); return }
-              if (canEditOnCanvas) { setActiveMark(undefined); return }
-              if (!canDrawOnCanvas) return
-              drawStart.current = point(event)
-              event.currentTarget.setPointerCapture(event.pointerId)
+              if (canEditOnCanvas) setActiveMark(undefined)
             }}
             onPointerMove={event => {
-              if (drawStart.current) {
-                setDrag(rectangle(drawStart.current, point(event)))
-                return
-              }
-              if (editDrag) {
-                const cur = point(event)
-                const dx = cur[0] - editDrag.origin[0], dy = cur[1] - editDrag.origin[1]
-                const minSize = editDrag.mark.kind === 'anchor' ? 3 : 1.2
-                setEditDrag({ ...editDrag, currentBox: applyDragDelta(editDrag.initialBox, editDrag.action, dx, dy, width, height, minSize) })
-              }
+              if (!editDrag) return
+              const cur = point(event)
+              const dx = cur[0] - editDrag.origin[0], dy = cur[1] - editDrag.origin[1]
+              const minSize = editDrag.mark.kind === 'anchor' ? 3 : 1.2
+              setEditDrag({ ...editDrag, currentBox: applyDragDelta(editDrag.initialBox, editDrag.action, dx, dy, width, height, minSize) })
             }}
-            onPointerCancel={() => { setDrag(undefined); drawStart.current = null; setEditDrag(undefined) }}
-            onPointerUp={event => {
-              if (drawStart.current) {
-                const box = rectangle(drawStart.current, point(event))
-                drawStart.current = null
-                setDrag(undefined)
-                finishBox(box)
-                return
-              }
-              if (editDrag) {
-                const { mark, initialBox, currentBox } = editDrag
-                setEditDrag(undefined)
-                if (initialBox.x !== currentBox.x || initialBox.y !== currentBox.y || initialBox.width !== currentBox.width || initialBox.height !== currentBox.height) {
-                  commitMarkBox(mark, currentBox, true)
-                }
+            onPointerCancel={() => setEditDrag(undefined)}
+            onPointerUp={() => {
+              if (!editDrag) return
+              const { mark, initialBox, currentBox } = editDrag
+              setEditDrag(undefined)
+              if (initialBox.x !== currentBox.x || initialBox.y !== currentBox.y || initialBox.width !== currentBox.width || initialBox.height !== currentBox.height) {
+                commitMarkBox(mark, currentBox, true)
               }
             }}>
             {correcting ? <>
@@ -1253,70 +993,10 @@ export function CompatibleTemplateEditor({ value, disabled, readOnly, change, fl
                   onPointerDown={event => startEditDrag(event, activeMark, h.id)} />
               })}
             </>}
-            {drag && <rect {...drag} className="compatible-mark-selected" />}
           </svg>
         </div></div> : <Empty description={readOnly ? '已保存题区与扫描定位配置' : '请先在左侧步骤 1 导入该面的空白原稿或扫描样张'} />}
       </Card>
     </div>
-    <Modal
-      title={`粘贴外部 AI 识别 JSON（第 ${page} 面 · ${value.paper}）`}
-      open={aiModalOpen}
-      width={680}
-      onCancel={() => !busy && setAiModalOpen(false)}
-      confirmLoading={busy}
-      okText="导入并应用到画布"
-      okButtonProps={{ disabled: !aiParsed.layout || busy }}
-      onOk={() => void run(applyAiJsonImport)}
-    >
-      <Space direction="vertical" size={12} style={{ width: '100%' }}>
-        <Space wrap>
-          <Button size="small" icon={<CopyOutlined />} onClick={() => void copyTextToClipboard(aiPromptText, '已复制 AI 识别提示词')}>复制提示词</Button>
-          <Button size="small" icon={<DownloadOutlined />} disabled={!image} onClick={downloadRectifiedImage}>下载当前校正图</Button>
-          <Button size="small" onClick={() => setAiJsonText('')}>清空内容</Button>
-        </Space>
-        <Input.TextArea
-          rows={10}
-          value={aiJsonText}
-          onChange={e => setAiJsonText(e.target.value)}
-          placeholder='将外部 AI 返回的 JSON（支持直接粘贴带 ```json 代码块的回复）粘贴到此处…'
-          style={{ fontFamily: 'monospace' }}
-        />
-        {aiParsed.error && <Alert type="error" showIcon message={aiParsed.error} />}
-        {aiParsed.layout && <>
-          <Alert
-            type="success"
-            showIcon
-            message="JSON 解析成功，请确认要应用到当前面的区域"
-            description={<Space wrap size={[6, 6]} style={{ marginTop: 4 }}>
-              <Tag color="purple">定位块 {aiParsed.layout.anchors.length} 个</Tag>
-              {!anonymous && page === 1 && <Tag color="green">考号 {aiParsed.layout.candidate ? `${aiParsed.layout.candidate.length} 位` : '无'}</Tag>}
-              {!statistics && page === 1 && <Tag color="green">缺考格 {aiParsed.layout.absent ? '有' : '无'}</Tag>}
-              <Tag color="blue">{statistics ? '选择题' : '客观题'} {aiParsed.layout.choices.length} 题</Tag>
-              {!statistics && <Tag color="blue">主观题 {aiParsed.layout.subjective.length} 题</Tag>}
-            </Space>}
-          />
-          {aiParsed.layout.warnings.length > 0 && <Alert type="warning" showIcon message={aiParsed.layout.warnings.join('；')} />}
-          <Space wrap align="center">
-            <Typography.Text>导入方式：</Typography.Text>
-            <Radio.Group value={aiImportMode} onChange={e => setAiImportMode(e.target.value)}>
-              <Radio value="replace">替换本面同类标注</Radio>
-              <Radio value="append">保留现有并追加</Radio>
-            </Radio.Group>
-          </Space>
-          <Checkbox.Group
-            value={aiScopes}
-            onChange={vals => setAiScopes(vals.map(String))}
-            options={[
-              { label: `定位块 (${aiParsed.layout.anchors.length})`, value: 'anchors', disabled: !aiParsed.layout.anchors.length },
-              ...(!anonymous && page === 1 ? [{ label: `考号 (${aiParsed.layout.candidate?.length || 0}位)`, value: 'candidate', disabled: !aiParsed.layout.candidate?.length }] : []),
-              ...(!statistics && page === 1 ? [{ label: '缺考格', value: 'absent', disabled: !aiParsed.layout.absent }] : []),
-              { label: `${statistics ? '选择题' : '客观题'} (${aiParsed.layout.choices.length})`, value: 'choices', disabled: !aiParsed.layout.choices.length },
-              ...(!statistics ? [{ label: `主观题 (${aiParsed.layout.subjective.length})`, value: 'subjective', disabled: !aiParsed.layout.subjective.length }] : []),
-            ]}
-          />
-        </>}
-      </Space>
-    </Modal>
     <Modal
       title="外部 AI 识别提示词"
       open={promptPreviewOpen}
@@ -1327,7 +1007,7 @@ export function CompatibleTemplateEditor({ value, disabled, readOnly, change, fl
         <Button type="primary" icon={<CopyOutlined />} onClick={() => void copyTextToClipboard(aiPromptText, '已复制 AI 识别提示词')}>复制全部提示词</Button>
       </Space>}
     >
-      <Input.TextArea rows={16} readOnly value={aiPromptText} style={{ fontFamily: 'monospace' }} />
+      <Input.TextArea rows={18} readOnly value={aiPromptText} style={{ fontFamily: 'monospace' }} />
     </Modal>
   </div>
 }
