@@ -887,7 +887,28 @@ export function CompatibleTemplateEditor({ value, disabled, readOnly, change, fl
 
   return <div className="compatible-layout">
     <Card size="small" className="compatible-steps-card">
-      <Steps size="small" current={step} onChange={goStep} items={stepItems} />
+      <Space direction="vertical" size={10} style={{ width: '100%' }}>
+        <Steps size="small" current={step} onChange={goStep} items={stepItems} />
+        {!readOnly && <div className="compatible-ai-bar">
+          <Space wrap size={8} align="center">
+            <Tag color="blue" style={{ marginInlineEnd: 0 }}>外部 AI 制版</Tag>
+            <Button size="small" type="primary" icon={<CopyOutlined />} disabled={blocked}
+              onClick={() => void copyTextToClipboard(aiPromptText, '已复制 AI 识别提示词')}>
+              复制 AI 提示词
+            </Button>
+            <Button size="small" icon={<DownloadOutlined />} disabled={blocked || !image} onClick={downloadRectifiedImage}>
+              下载当前校正图
+            </Button>
+            <Button size="small" disabled={blocked} onClick={() => setAiModalOpen(true)}>
+              粘贴 AI JSON 导入
+            </Button>
+            <Button size="small" type="link" onClick={() => setPromptPreviewOpen(true)}>查看提示词</Button>
+            <Button size="small" type="link" onClick={() => void copyTextToClipboard(exportCompatibleToAiJson(value, page), '已复制当前面标定 JSON')}>
+              导出当前 JSON
+            </Button>
+          </Space>
+        </div>}
+      </Space>
     </Card>
     <div className="compatible-workbench">
       <Card
