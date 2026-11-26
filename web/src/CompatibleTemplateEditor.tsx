@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState, type PointerEvent } from 'react'
-import { ZoomInOutlined, ZoomOutOutlined } from '@ant-design/icons'
-import { Alert, Card, Checkbox, Empty, Form, Input, InputNumber, Segmented, Select, Space, Steps, Switch, Tag, Typography, Upload } from 'antd'
+import { useEffect, useMemo, useRef, useState, type PointerEvent } from 'react'
+import { CopyOutlined, DownloadOutlined, ZoomInOutlined, ZoomOutOutlined } from '@ant-design/icons'
+import { Alert, App, Card, Checkbox, Empty, Form, Input, InputNumber, Modal, Radio, Segmented, Select, Space, Steps, Switch, Tag, Typography, Upload } from 'antd'
 import { Button } from './Button'
 import { newQuestion, request, requestBlob, type ExternalAnchor, type ExternalPage, type ImageBox, type Question, type Row, type Template } from './api'
+import { buildCompatibleAiPrompt, exportCompatibleToAiJson, parseCompatibleAiJson, type ParsedAiLayout } from './compatibleAiJson'
 import './compatible-template.css'
 
 type Point = [number, number]
@@ -159,6 +160,12 @@ export function CompatibleTemplateEditor({ value, disabled, readOnly, change, fl
   const [editDrag, setEditDrag] = useState<EditDrag>()
   const drawStart = useRef<Point | null>(null)
   const imgRef = useRef<HTMLImageElement | null>(null)
+  const { message } = App.useApp()
+  const [aiModalOpen, setAiModalOpen] = useState(false)
+  const [aiJsonText, setAiJsonText] = useState('')
+  const [aiImportMode, setAiImportMode] = useState<'replace' | 'append'>('replace')
+  const [aiScopes, setAiScopes] = useState<string[]>(['anchors', 'candidate', 'absent', 'choices', 'subjective'])
+  const [promptPreviewOpen, setPromptPreviewOpen] = useState(false)
 
   const face = profile.pages[String(page)] ?? { anchors: [] }
   const selectedQuestion = value.questions.find(q => q.id === selected)
@@ -728,10 +735,153 @@ export function CompatibleTemplateEditor({ value, disabled, readOnly, change, fl
   ]
 
   const showCanvas = !!image || (statistics && readOnly && marks.length > 0)
+  const nextQuestionNumber = Math.max(0, ...value.questions.map(q => q.number)) + 1
+  const aiContext = useMemo(() => ({
+    paper: value.paper,
+    page,
+    sides: value.sides,
+    statistics,
+    anonymous,
+    candidateLength: value.candidate_length || 9,
+    nextQuestionNumber,
+    sheetName: value.name,
+  }), [value.paper, page, value.sides, statistics, anonymous, value.candidate_length, nextQuestionNumber, value.name])
+  const aiPromptText = useMemo(() => buildCompatibleAiPrompt(aiContext), [aiContext])
+  const aiParsed = useMemo<{ layout?: ParsedAiLayout; error?: string }>(() => {
+    if (!aiJsonText.trim()) return {}
+    try {
+      return { layout: parseCompatibleAiJson(aiJsonText, aiContext) }
+    } catch (err) {
+      return { error: (err as Error).message }
+    }
+  }, [aiJsonText, aiContext])
+
+  async function copyTextToClipboard(text: string, okMsg: string) {
+    try {
+      await navigator.clipboard.writeText(text)
+      message.success(okMsg)
+    } catch {
+      setPromptPreviewOpen(true)
+      message.info('当前环境无法自动写入剪贴板，请直接全选复制弹窗中的内容')
+    }
+  }
+
+  function downloadRectifiedImage() {
+    if (!image) return
+    const link = document.createElement('a')
+    link.href = image
+    link.download = `${(value.name || '题卡').trim()}-第${page}面-校正图.png`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    message.success('已下载当前校正基准图，请连同提示词发给外部 AI')
+  }
+
+  async function applyAiJsonImport() {
+    const layout = aiParsed.layout
+    if (!layout) return
+    const scopeSet = new Set(aiScopes)
+    let nextFace: ExternalPage = { ...face }
+    let nextCandidateLength = value.candidate_length
+    const summary: string[] = []
+
+    if (scopeSet.has('anchors') && layout.anchors.length > 0) {
+      if (!image) throw new Error('导入定位块前请先载入并校正当前纸面底图')
+      const blob = await (await fetch(image)).blob()
+      const body = new FormData()
+      body.append('file', blob, 'page.png')
+      body.append('paper', value.paper)
+      body.append('tighten', 'true')
+      body.append('boxes', JSON.stringify(layout.anchors))
+      const sampled = await request<{ anchors: ExternalAnchor[] }>(endpoint + '/reextract-anchors', { method: 'POST', body })
+      nextFace = {
+        ...nextFace,
+        anchors: aiImportMode === 'replace' ? sampled.anchors : [...nextFace.anchors, ...sampled.anchors].slice(0, 8),
+      }
+      summary.push(`定位块 ${sampled.anchors.length} 个`)
+    }
+
+    if (scopeSet.has('candidate') && !anonymous && page === 1 && layout.candidate?.length) {
+      nextFace = { ...nextFace, candidate: layout.candidate }
+      if (layout.candidateLength) nextCandidateLength = layout.candidateLength
+      summary.push(`考号 ${layout.candidate.length} 位`)
+    }
+
+    if (scopeSet.has('absent') && !statistics && page === 1 && layout.absent) {
+      nextFace = { ...nextFace, absent: layout.absent }
+      summary.push('缺考格')
+    }
+
+    let nextQuestions = [...value.questions]
+    const importingChoices = scopeSet.has('choices') && layout.choices.length > 0
+    const importingSubjective = !statistics && scopeSet.has('subjective') && layout.subjective.length > 0
+
+    if (aiImportMode === 'replace' && (importingChoices || importingSubjective)) {
+      nextQuestions = nextQuestions.flatMap(q => {
+        const isSub = q.type === 'subjective'
+        if ((isSub && !importingSubjective) || (!isSub && !importingChoices)) return [q]
+        const remaining = q.regions.filter(r => r.page !== page)
+        return remaining.length ? [{ ...q, regions: remaining }] : []
+      })
+    }
+
+    const usedNumbers = new Set(nextQuestions.map(q => q.number))
+    const takeNumber = (preferred: number) => {
+      let n = Math.max(1, preferred)
+      while (usedNumbers.has(n)) n++
+      usedNumbers.add(n)
+      return n
+    }
+
+    if (importingChoices) {
+      const additions: Question[] = layout.choices.map(item => {
+        const num = takeNumber(item.number)
+        return {
+          ...newQuestion(num),
+          type: item.type,
+          options: item.options,
+          points: statistics ? 0 : item.points,
+          title: item.title,
+          answer: [],
+          external_options: item.cells,
+          regions: [{ page, ...item.region }],
+        }
+      })
+      nextQuestions = [...nextQuestions, ...additions]
+      summary.push(`${statistics ? '选择题' : '客观题'} ${additions.length} 题`)
+    }
+
+    if (importingSubjective) {
+      const additions: Question[] = layout.subjective.map(item => {
+        const num = takeNumber(item.number)
+        return {
+          ...newQuestion(num),
+          type: 'subjective',
+          points: item.points,
+          regions: item.regions.map(r => ({ page, ...r })),
+        }
+      })
+      nextQuestions = [...nextQuestions, ...additions]
+      summary.push(`主观题 ${additions.length} 题`)
+    }
+
+    change({
+      candidate_length: nextCandidateLength,
+      external_sheet: { ...profile, pages: { ...profile.pages, [page]: nextFace } },
+      questions: nextQuestions,
+    })
+    setTrial(undefined)
+    setActiveMark(undefined)
+    setAiModalOpen(false)
+    setStep(2)
+    setMode('edit')
+    setNotice(`已从外部 AI JSON 导入：${summary.join('、')}。可在右侧画布「移动 / 调整」模式下微调任意标记。`)
+  }
+
   const stepItems = [
     { title: '导入与校正', description: hasRectifiedPage ? '已就绪' : '待导入' },
     { title: '标定定位块', description: `${face.anchors.length} 个` },
-    { title: '识别与框选', description: `${pageQuestions.length} 题` },
+    { title: 'AI 导入与框选', description: `${pageQuestions.length} 题` },
     { title: '试扫核验', description: trial ? '已试扫' : '待核验' },
   ]
 
@@ -791,6 +941,7 @@ export function CompatibleTemplateEditor({ value, disabled, readOnly, change, fl
             </div>}
           </>}
           <div className="compatible-step-footer">
+            {!readOnly && hasRectifiedPage && !pickingCorners && <Button onClick={() => setAiModalOpen(true)}>直接粘贴 AI JSON</Button>}
             <Button type="primary" disabled={!hasRectifiedPage || pickingCorners} onClick={() => goStep(1)}>下一步：标定定位块</Button>
           </div>
         </>}
@@ -835,8 +986,29 @@ export function CompatibleTemplateEditor({ value, disabled, readOnly, change, fl
         {step === 2 && <>
           {!readOnly && <>
             <div className="compatible-panel-box">
+              <Typography.Text strong>外部 AI 识别与 JSON 制版（推荐）</Typography.Text>
+              <Typography.Paragraph type="secondary" style={{ margin: '4px 0 8px' }}>
+                {statistics
+                  ? '复制提示词并连同校正图发送给外部 AI，直接提取所有统计选择题坐标（不含考试题卡结构），粘贴 JSON 一键生成。'
+                  : '复制提示词并连同校正图发送给外部 AI，一次性识别全部客观题、主观题、考号与定位块，粘贴 JSON 自动框题。'}
+              </Typography.Paragraph>
               <Space wrap>
-                <Button disabled={blocked || !image} onClick={() => void run(() => rectifyPage('detect'))}>在校正图上自动识别区域</Button>
+                <Button type="primary" icon={<CopyOutlined />} disabled={blocked} onClick={() => void copyTextToClipboard(aiPromptText, '已复制 AI 识别提示词')}>
+                  复制 AI 提示词
+                </Button>
+                <Button icon={<DownloadOutlined />} disabled={blocked || !image} onClick={downloadRectifiedImage}>
+                  下载当前校正图
+                </Button>
+                <Button disabled={blocked} onClick={() => setAiModalOpen(true)}>
+                  粘贴 JSON 导入
+                </Button>
+                <Button size="small" type="link" onClick={() => setPromptPreviewOpen(true)}>查看提示词</Button>
+                <Button size="small" type="link" onClick={() => void copyTextToClipboard(exportCompatibleToAiJson(value, page), '已复制当前面标定 JSON')}>导出当前 JSON</Button>
+              </Space>
+            </div>
+            <div className="compatible-panel-box">
+              <Space wrap>
+                <Button disabled={blocked || !image} onClick={() => void run(() => rectifyPage('detect'))}>本地自动识别区域</Button>
                 {!anonymous && page === 1 && <Button disabled={blocked || !reference?.candidate?.length} onClick={() => applySuggestions('candidate')}>
                   采用考号（{reference?.candidate?.length || 0}位）
                 </Button>}
@@ -1065,5 +1237,76 @@ export function CompatibleTemplateEditor({ value, disabled, readOnly, change, fl
         </div></div> : <Empty description={readOnly ? '已保存题区与扫描定位配置' : '请先在左侧步骤 1 导入该面的空白原稿或扫描样张'} />}
       </Card>
     </div>
+    <Modal
+      title={`粘贴外部 AI 识别 JSON（第 ${page} 面 · ${value.paper}）`}
+      open={aiModalOpen}
+      width={680}
+      onCancel={() => !busy && setAiModalOpen(false)}
+      confirmLoading={busy}
+      okText="导入并应用到画布"
+      okButtonProps={{ disabled: !aiParsed.layout || busy }}
+      onOk={() => void run(applyAiJsonImport)}
+    >
+      <Space direction="vertical" size={12} style={{ width: '100%' }}>
+        <Space wrap>
+          <Button size="small" icon={<CopyOutlined />} onClick={() => void copyTextToClipboard(aiPromptText, '已复制 AI 识别提示词')}>复制提示词</Button>
+          <Button size="small" icon={<DownloadOutlined />} disabled={!image} onClick={downloadRectifiedImage}>下载当前校正图</Button>
+          <Button size="small" onClick={() => setAiJsonText('')}>清空内容</Button>
+        </Space>
+        <Input.TextArea
+          rows={10}
+          value={aiJsonText}
+          onChange={e => setAiJsonText(e.target.value)}
+          placeholder='将外部 AI 返回的 JSON（支持直接粘贴带 ```json 代码块的回复）粘贴到此处…'
+          style={{ fontFamily: 'monospace' }}
+        />
+        {aiParsed.error && <Alert type="error" showIcon message={aiParsed.error} />}
+        {aiParsed.layout && <>
+          <Alert
+            type="success"
+            showIcon
+            message="JSON 解析成功，请确认要应用到当前面的区域"
+            description={<Space wrap size={[6, 6]} style={{ marginTop: 4 }}>
+              <Tag color="purple">定位块 {aiParsed.layout.anchors.length} 个</Tag>
+              {!anonymous && page === 1 && <Tag color="green">考号 {aiParsed.layout.candidate ? `${aiParsed.layout.candidate.length} 位` : '无'}</Tag>}
+              {!statistics && page === 1 && <Tag color="green">缺考格 {aiParsed.layout.absent ? '有' : '无'}</Tag>}
+              <Tag color="blue">{statistics ? '选择题' : '客观题'} {aiParsed.layout.choices.length} 题</Tag>
+              {!statistics && <Tag color="blue">主观题 {aiParsed.layout.subjective.length} 题</Tag>}
+            </Space>}
+          />
+          {aiParsed.layout.warnings.length > 0 && <Alert type="warning" showIcon message={aiParsed.layout.warnings.join('；')} />}
+          <Space wrap align="center">
+            <Typography.Text>导入方式：</Typography.Text>
+            <Radio.Group value={aiImportMode} onChange={e => setAiImportMode(e.target.value)}>
+              <Radio value="replace">替换本面同类标注</Radio>
+              <Radio value="append">保留现有并追加</Radio>
+            </Radio.Group>
+          </Space>
+          <Checkbox.Group
+            value={aiScopes}
+            onChange={vals => setAiScopes(vals.map(String))}
+            options={[
+              { label: `定位块 (${aiParsed.layout.anchors.length})`, value: 'anchors', disabled: !aiParsed.layout.anchors.length },
+              ...(!anonymous && page === 1 ? [{ label: `考号 (${aiParsed.layout.candidate?.length || 0}位)`, value: 'candidate', disabled: !aiParsed.layout.candidate?.length }] : []),
+              ...(!statistics && page === 1 ? [{ label: '缺考格', value: 'absent', disabled: !aiParsed.layout.absent }] : []),
+              { label: `${statistics ? '选择题' : '客观题'} (${aiParsed.layout.choices.length})`, value: 'choices', disabled: !aiParsed.layout.choices.length },
+              ...(!statistics ? [{ label: `主观题 (${aiParsed.layout.subjective.length})`, value: 'subjective', disabled: !aiParsed.layout.subjective.length }] : []),
+            ]}
+          />
+        </>}
+      </Space>
+    </Modal>
+    <Modal
+      title="外部 AI 识别提示词"
+      open={promptPreviewOpen}
+      width={680}
+      onCancel={() => setPromptPreviewOpen(false)}
+      footer={<Space>
+        <Button onClick={() => setPromptPreviewOpen(false)}>关闭</Button>
+        <Button type="primary" icon={<CopyOutlined />} onClick={() => void copyTextToClipboard(aiPromptText, '已复制 AI 识别提示词')}>复制全部提示词</Button>
+      </Space>}
+    >
+      <Input.TextArea rows={16} readOnly value={aiPromptText} style={{ fontFamily: 'monospace' }} />
+    </Modal>
   </div>
 }

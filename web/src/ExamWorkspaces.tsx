@@ -20,6 +20,7 @@ const Scans = loadPage(() => import('./Management').then(module => ({ default: m
 const ReviewAllocation = loadPage(() => import('./ReviewAllocation').then(module => ({ default: module.ReviewAllocation })))
 const Exceptions = loadPage(() => import('./Exceptions').then(module => ({ default: module.Exceptions })))
 export const StatisticsResults = loadPage(() => import('./StatisticsWorkspace').then(module => ({ default: module.StatisticsResults })))
+export const StatisticsOverviewPanel = loadPage(() => import('./StatisticsWorkspace').then(module => ({ default: module.StatisticsOverviewPanel })))
 const Results = loadPage(() => import('./Results').then(module => ({ default: module.Results })))
 
 export function ExamStatusTag({ row }: { row: Row }) {
@@ -344,6 +345,7 @@ export function ScopedWorkspace({
   gradeId,
   section,
   onSection,
+  onReload,
   children,
 }: {
   project: Row
@@ -351,9 +353,10 @@ export function ScopedWorkspace({
   gradeId?: string
   section?: string
   onSection: (section?: string) => void
+  onReload?: () => Promise<unknown>
   children: ReactNode
 }) {
-  if (project.category === 'statistics') return <>{children}</>
+  const statistics = project.category === 'statistics'
   const activeKey = section === 'results' ? 'results' : 'cards'
   return (
     <Tabs
@@ -361,7 +364,20 @@ export function ScopedWorkspace({
       onChange={key => onSection(key === 'cards' ? undefined : key)}
       items={[
         { key: 'cards', label: gradeId ? '题卡' : '年级', children },
-        { key: 'results', label: '成绩', children: <Results admin projectId={project.id} subjectId={subject.id} gradeId={gradeId} /> },
+        {
+          key: 'results',
+          label: statistics ? '统计结果' : '成绩',
+          children: statistics ? (
+            <StatisticsOverviewPanel
+              project={project}
+              subjectId={subject.id}
+              gradeId={gradeId}
+              onReload={onReload ?? (async () => {})}
+            />
+          ) : (
+            <Results admin projectId={project.id} subjectId={subject.id} gradeId={gradeId} />
+          ),
+        },
       ]}
     />
   )

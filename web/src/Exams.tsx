@@ -13,7 +13,7 @@ import {
   ExamStatusMenu,
   ExamStatusTag,
   GroupWorkspace,
-  StatisticsResults,
+  StatisticsOverviewPanel,
   Rename,
   ScopedWorkspace,
   SubjectGrades,
@@ -363,9 +363,15 @@ function ProjectCollapsibleTree({
                                   </Tag>
                                   <Tag>{rosterText}</Tag>
                                   {!statistics && row.conversion_id && row.conversion_mode !== 'none' && <Tag color="blue">已赋分</Tag>}
-                                  {!statistics && <Tag color={row.frozen ? 'green' : row.reopened_at && row.published_at ? 'blue' : 'default'}>
-                                    {row.frozen ? '成绩已发布' : row.reopened_at && row.published_at ? '复核中' : '成绩未发布'}
-                                  </Tag>}
+                                  {statistics ? (
+                                    <Tag color={row.frozen ? 'green' : 'processing'}>
+                                      {row.frozen ? '收集已结束' : '收集中'}
+                                    </Tag>
+                                  ) : (
+                                    <Tag color={row.frozen ? 'green' : row.reopened_at && row.published_at ? 'blue' : 'default'}>
+                                      {row.frozen ? '成绩已发布' : row.reopened_at && row.published_at ? '复核中' : '成绩未发布'}
+                                    </Tag>
+                                  )}
                                 </div>
                                 <div className="exam-tree-card-actions">
                                   <Button type="link" size="small" onClick={() => go(cardLoc)}>
@@ -442,27 +448,23 @@ function ProjectCollapsibleTree({
   )
 }
 
-function ProjectStatistics({ project, subjects, groups, grades, reload }: {
+function ProjectStatistics({ project, go, reload }: {
   project: Row
-  subjects: Row[]
-  groups: Row[]
-  grades: Row[]
+  go: (value: ExamLocation) => void
   reload: () => Promise<unknown>
 }) {
-  const [groupId, setGroupId] = useState<string>()
-  const cards = groups.filter(g => g.template_id && subjects.some(s => s.id === g.subject_id && s.project_id === project.id))
-  const selected = cards.find(g => g.id === groupId) || cards[0]
-  if (!selected) return <Card><Empty description="发布题卡后可查看统计结果" /></Card>
-  return <Space direction="vertical" size={12} style={{ width: '100%' }}>
-    <Select aria-label="选择统计题卡" value={selected.id} onChange={setGroupId} style={{ minWidth: 240 }}
-      options={cards.map(g => {
-        const subject = subjects.find(s => s.id === g.subject_id)
-        const grade = grades.find(row => row.id === g.grade_id)
-        return { value: g.id, label: [subject?.name, grade?.name, cardName(g, subject)].filter(Boolean).join(' · ') }
-      })} />
-    <StatisticsResults key={selected.id} endpoint={'/projects/'+project.id+'/statistics'} groupId={selected.id}
-      name={selected.name} closed={!!selected.frozen} canChange={!project.scans_purged} onCollectionChange={reload} />
-  </Space>
+  return (
+    <StatisticsOverviewPanel
+      project={project}
+      onOpenCard={card => go({
+        projectId: project.id,
+        subjectId: card.subject_id,
+        gradeId: card.grade_id || unassignedGrade,
+        groupId: card.group_id,
+      })}
+      onReload={reload}
+    />
+  )
 }
 
 export function Exams({ location, navigate }: { location: ExamLocation; navigate: (path: string, replace?: boolean) => void }) {
@@ -625,7 +627,14 @@ export function Exams({ location, navigate }: { location: ExamLocation; navigate
     },
     { title: '版式', render: (_: unknown, row: Row) => (row.template_id ? '已发布' : '待设计') },
     { title: '应考名单', render: (_: unknown, row: Row) => (row.roster_mode === 'selected' ? '指定名单' : row.roster_mode === 'open' ? '开放扫入' : row.grade_id ? '年级全体' : '开放扫入') },
-    ...(!statistics ? [{
+    ...(statistics ? [{
+      title: '收集状态',
+      render: (_: unknown, row: Row) => (
+        <Tag color={row.frozen ? 'green' : 'processing'}>
+          {row.frozen ? '收集已结束' : '收集中'}
+        </Tag>
+      ),
+    }] : [{
       title: '赋分',
       render: (_: unknown, row: Row) =>
         row.conversion_id && row.conversion_mode !== 'none' ? <Tag color="blue">已启用</Tag> : <Tag>不赋分</Tag>,
@@ -637,7 +646,7 @@ export function Exams({ location, navigate }: { location: ExamLocation; navigate
           {row.frozen ? '已发布' : row.reopened_at && row.published_at ? '复核中' : '未发布'}
         </Tag>
       ),
-    }] : []),
+    }]),
     {
       title: '操作',
       className: 'row-actions',
@@ -877,7 +886,7 @@ export function Exams({ location, navigate }: { location: ExamLocation; navigate
           renderTemplateEditor={id => <TemplateEditor groupId={id} statistics={statistics} />}
         />
       ) : grade ? (
-        <ScopedWorkspace project={project} subject={subject!} gradeId={gradeId} section={scopedSection} onSection={setScopedSection}>
+        <ScopedWorkspace project={project} subject={subject!} gradeId={gradeId} section={scopedSection} onSection={setScopedSection} onReload={refresh}>
           {grade.id === unassignedGrade ? (
             <Card title="待设置年级的题卡">
               <Table
@@ -908,7 +917,7 @@ export function Exams({ location, navigate }: { location: ExamLocation; navigate
           )}
         </ScopedWorkspace>
       ) : subject ? (
-        <ScopedWorkspace project={project} subject={subject} section={scopedSection} onSection={setScopedSection}>
+        <ScopedWorkspace project={project} subject={subject} section={scopedSection} onSection={setScopedSection} onReload={refresh}>
           <SubjectGrades
             subject={subject}
             groups={groups.data}
@@ -938,8 +947,8 @@ export function Exams({ location, navigate }: { location: ExamLocation; navigate
               ),
             },
             { key: 'sheets', label: '答题卡查询', children: <SheetLookup key={project.id} projectId={project.id} /> },
-            ...(statistics ? [{ key: 'summary', label: '统计结果', children: <ProjectStatistics key={project.id} project={project}
-              subjects={subjects.data} groups={groups.data} grades={grades.data} reload={refresh} /> }]
+            ...(statistics ? [{ key: 'summary', label: '统计总览', children: <ProjectStatistics key={project.id} project={project}
+              go={go} reload={refresh} /> }]
               : [{ key: 'summary', label: '成绩总览', children: <Results key={project.id} admin projectId={project.id} /> },
             { key: 'conversions', label: '赋分方案', children: <Conversions projectId={project.id} /> }]),
             { key: 'storage', label: '存储设置', children: <ProjectStorage project={project} onSaved={refresh} /> },

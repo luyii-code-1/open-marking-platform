@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 
 from . import paper, statistics_sheet
-from .db import connect, find, get, put
+from .db import connect, find, get, objects, put
 from .dependencies import admin, require
 from .export_tables import ExportTable, FileFormat, table_response
 from .lifecycle import writable
@@ -173,10 +173,10 @@ def confirm(db, batch, template, page_sets, actor):
 
 
 def aggregate(template, responses):
-    questions = (template or {}).get('questions', [])
+    questions = sorted((template or {}).get('questions', []), key=lambda q: q['number'])
     total = len(responses)
     rows = []
-    for q in sorted(questions, key=lambda q: q['number']):
+    for q in questions:
         counts = dict.fromkeys(ascii_uppercase[:q['options']], 0)
         blank = invalid = 0
         for response in responses:
@@ -188,35 +188,268 @@ def aggregate(template, responses):
             else:
                 for letter in selected:
                     counts[letter] += 1
-        rows.append({'number': q['number'], 'title': q.get('title', ''), 'type': q['type'], 'counts': counts,
-                     'blank': blank, 'invalid': invalid})
+        rows.append({
+            'number': q['number'],
+            'title': q.get('title', ''),
+            'type': q['type'],
+            'options': q['options'],
+            'counts': counts,
+            'blank': blank,
+            'invalid': invalid,
+            'valid': max(0, total - blank - invalid),
+        })
     return {'total': total, 'rows': rows}
 
 
-def responses_for(db, group, template):
+def _detailed_responses(db, group, template):
     if not template:
         return []
     from .review import objective_selections
     if not statistics_sheet.uses_candidate_number(template):
-        responses = find(db, 'statistics-responses', group_id=group['id'], template_id=template['id'])
-        if statistics_sheet.enabled(template):
-            return responses
-        return [{'selections': objective_selections(db, response)} for response in responses]
-    return [{'selections': objective_selections(db, submission)}
-            for submission in find(db, 'submissions', group_id=group['id'])
-            if submission['template_id'] == template['id'] and submission['status'] != 'absent' and submission.get('pages')]
+        responses = sorted(
+            find(db, 'statistics-responses', group_id=group['id'], template_id=template['id']),
+            key=lambda item: item['id'],
+        )
+        items = []
+        for idx, response in enumerate(responses, 1):
+            selections = response.get('selections', {}) if statistics_sheet.enabled(template) else objective_selections(db, response)
+            items.append({
+                'id': response['id'],
+                'index': idx,
+                'candidate_number': '',
+                'student_name': '',
+                'class_id': '',
+                'class_name': '',
+                'grade_name': '',
+                'tags': [],
+                'selections': selections,
+            })
+        return items
+
+    students = {s['id']: s for s in objects(db, 'students')}
+    classes = {c['id']: c for c in objects(db, 'classes')}
+    grades = {g['id']: g for g in objects(db, 'grades')}
+    submissions = [
+        sub for sub in find(db, 'submissions', group_id=group['id'])
+        if sub['template_id'] == template['id'] and sub['status'] != 'absent' and sub.get('pages')
+    ]
+    items = []
+    for sub in submissions:
+        student = students.get(sub.get('student_id'), {})
+        cls = classes.get(student.get('class_id'), {})
+        grade = grades.get(cls.get('grade_id'), {})
+        items.append({
+            'id': sub['id'],
+            'candidate_number': str(student.get('candidate_number') or sub.get('candidate_number') or ''),
+            'student_name': str(student.get('name') or ''),
+            'class_id': str(cls.get('id') or ''),
+            'class_name': str(cls.get('name') or '未分班'),
+            'grade_name': str(grade.get('name') or ''),
+            'tags': list(cls.get('tags') or []),
+            'selections': objective_selections(db, sub),
+        })
+    items.sort(key=lambda item: (item['grade_name'], item['class_name'], item['candidate_number'], item['student_name'], item['id']))
+    for idx, item in enumerate(items, 1):
+        item['index'] = idx
+    return items
 
 
-def results(db, identifier, group_id=None):
+def responses_for(db, group, template):
+    return [{'selections': item['selections']} for item in _detailed_responses(db, group, template)]
+
+
+def _parse_csv(raw: str | None) -> set[str]:
+    if not raw:
+        return set()
+    return {part.strip() for part in raw.split(',') if part.strip()}
+
+
+def _classify_answer(question, selected_values):
+    valid_keys = set(ascii_uppercase[:question['options']])
+    chosen = sorted(set(selected_values))
+    if not chosen:
+        return 'blank', ''
+    if not set(chosen) <= valid_keys or (question['type'] == 'single' and len(chosen) > 1):
+        return 'invalid', ''.join(chosen)
+    return 'valid', ''.join(chosen)
+
+
+def _filter_detailed(items, template, class_ids=None, class_tags=None, q='', question_number=None, option=None):
+    wanted_classes = _parse_csv(class_ids)
+    wanted_tags = _parse_csv(class_tags)
+    term = (q or '').strip().casefold()
+    target_q = None
+    if question_number is not None and template:
+        target_q = next((item for item in template.get('questions', []) if item['number'] == question_number), None)
+    wanted_opt = (option or '').strip()
+    filtered = []
+    for item in items:
+        if wanted_classes and item['class_id'] not in wanted_classes:
+            continue
+        if wanted_tags and not (set(item['tags']) & wanted_tags):
+            continue
+        if term and not any(term in str(item.get(k, '')).casefold() for k in ('student_name', 'candidate_number', 'class_name', 'grade_name')):
+            continue
+        if target_q is not None and wanted_opt:
+            state, joined = _classify_answer(target_q, item['selections'].get(target_q['id'], []))
+            if wanted_opt == 'blank':
+                if state != 'blank':
+                    continue
+            elif wanted_opt == 'invalid':
+                if state != 'invalid':
+                    continue
+            else:
+                if state != 'valid' or wanted_opt.upper() not in set(joined):
+                    continue
+        filtered.append(item)
+    return filtered
+
+
+def results(db, identifier, group_id=None, class_ids=None, class_tags=None, q='', question_number=None, option=None):
     _, group, template = context(db, identifier, group_id)
-    return aggregate(template, responses_for(db, group, template))
+    uses_candidate = bool(template and statistics_sheet.uses_candidate_number(template))
+    all_items = _detailed_responses(db, group, template)
+    filtered_items = _filter_detailed(all_items, template, class_ids, class_tags, q, question_number, option)
+    summary = aggregate(template, filtered_items)
+
+    questions = sorted((template or {}).get('questions', []), key=lambda item: item['number'])
+    class_options_map = {}
+    all_tags = set()
+    for item in all_items:
+        for tag in item['tags']:
+            all_tags.add(tag)
+        if uses_candidate:
+            cid = item['class_id'] or '__none__'
+            entry = class_options_map.setdefault(cid, {
+                'id': item['class_id'],
+                'name': (f"{item['grade_name']} · {item['class_name']}" if item['grade_name'] else item['class_name']),
+                'class_name': item['class_name'],
+                'grade_name': item['grade_name'],
+                'tags': item['tags'],
+                'count': 0,
+            })
+            entry['count'] += 1
+
+    by_class = []
+    if uses_candidate:
+        grouped: dict[str, list] = {}
+        for item in filtered_items:
+            grouped.setdefault(item['class_id'] or '__none__', []).append(item)
+        for cid, bucket in sorted(grouped.items(), key=lambda kv: (kv[1][0]['grade_name'], kv[1][0]['class_name'])):
+            first = bucket[0]
+            agg = aggregate(template, bucket)
+            by_class.append({
+                'class_id': first['class_id'],
+                'class_name': first['class_name'],
+                'grade_name': first['grade_name'],
+                'tags': first['tags'],
+                'total': agg['total'],
+                'rows': agg['rows'],
+            })
+
+    records = []
+    for item in filtered_items:
+        answers = {}
+        has_blank = False
+        has_invalid = False
+        for question in questions:
+            state, text = _classify_answer(question, item['selections'].get(question['id'], []))
+            if state == 'blank':
+                has_blank = True
+                answers[str(question['number'])] = ''
+            elif state == 'invalid':
+                has_invalid = True
+                answers[str(question['number'])] = f'无效({text})'
+            else:
+                answers[str(question['number'])] = text
+        records.append({
+            'id': item['id'],
+            'index': item['index'],
+            'candidate_number': item['candidate_number'],
+            'student_name': item['student_name'],
+            'class_id': item['class_id'],
+            'class_name': item['class_name'],
+            'grade_name': item['grade_name'],
+            'tags': item['tags'],
+            'status': '含无效' if has_invalid else ('含空白' if has_blank else '完整有效'),
+            'answers': answers,
+        })
+
+    return {
+        **summary,
+        'unfiltered_total': len(all_items),
+        'uses_candidate': uses_candidate,
+        'classes': sorted(class_options_map.values(), key=lambda c: (c['grade_name'], c['class_name'])),
+        'class_tags': sorted(all_tags),
+        'by_class': by_class,
+        'records': records,
+    }
+
+
+@router.get('/{identifier}/statistics/overview')
+def statistics_overview(identifier: str, subject_id: str | None = None, grade_id: str | None = None, current=Depends(admin)):
+    with connect() as db:
+        db.execute('BEGIN')
+        project = require(db, identifier, 'projects')
+        if project.get('category') != 'statistics':
+            raise HTTPException(404, '请选择统计项目')
+        subjects = {s['id']: s for s in find(db, 'subjects', project_id=identifier) if not subject_id or s['id'] == subject_id}
+        grades = {g['id']: g for g in objects(db, 'grades')}
+        groups = [
+            g for g in objects(db, 'groups')
+            if g.get('subject_id') in subjects and (not grade_id or g.get('grade_id') == grade_id)
+        ]
+        groups.sort(key=lambda g: (subjects[g['subject_id']]['name'], grades.get(g.get('grade_id'), {}).get('name', ''), g['name']))
+        from .workflow import overview as group_workflow
+        cards = []
+        total_received = 0
+        for group in groups:
+            template = get(db, group.get('template_id'), 'templates')
+            uses_candidate = bool(template and statistics_sheet.uses_candidate_number(template))
+            items = _detailed_responses(db, group, template) if template else []
+            wf = group_workflow(db, group, current) if template else None
+            total_received += len(items)
+            cards.append({
+                'group_id': group['id'],
+                'group_name': group['name'],
+                'subject_id': group['subject_id'],
+                'subject_name': subjects[group['subject_id']]['name'],
+                'grade_id': group.get('grade_id') or '',
+                'grade_name': grades.get(group.get('grade_id'), {}).get('name', '未设年级'),
+                'template_id': template['id'] if template else None,
+                'template_name': template['name'] if template else '',
+                'uses_candidate': uses_candidate,
+                'question_count': len(template.get('questions', [])) if template else 0,
+                'closed': bool(group.get('frozen')),
+                'received': len(items),
+                'expected': wf['scan']['expected'] if wf and uses_candidate else None,
+                'open_exceptions': wf['open_exceptions'] if wf else 0,
+            })
+        return {
+            'project_id': project['id'],
+            'project_name': project['name'],
+            'card_count': len(cards),
+            'published_count': sum(1 for c in cards if c['template_id']),
+            'closed_count': sum(1 for c in cards if c['closed']),
+            'total_received': total_received,
+            'cards': cards,
+        }
 
 
 @router.get('/{identifier}/statistics/results')
-def statistics_results(identifier: str, group_id: str | None = None, current=Depends(admin)):
+def statistics_results(
+    identifier: str,
+    group_id: str | None = None,
+    class_ids: str | None = None,
+    class_tags: str | None = None,
+    q: str = '',
+    question_number: int | None = None,
+    option: str | None = None,
+    current=Depends(admin),
+):
     with connect() as db:
         db.execute('BEGIN')
-        return results(db, identifier, group_id)
+        return results(db, identifier, group_id, class_ids=class_ids, class_tags=class_tags, q=q, question_number=question_number, option=option)
 
 
 @router.get('/{identifier}/statistics/preview')
@@ -262,18 +495,68 @@ def statistics_paper_preview(identifier: str, body: dict, page: int = 1, current
 
 
 @router.get('/{identifier}/statistics/export')
-def statistics_export(identifier: str, format: FileFormat = 'xlsx', group_id: str | None = None, current=Depends(admin)):
+def statistics_export(
+    identifier: str,
+    format: FileFormat = 'xlsx',
+    group_id: str | None = None,
+    view: str = 'summary',
+    class_ids: str | None = None,
+    class_tags: str | None = None,
+    q: str = '',
+    question_number: int | None = None,
+    option: str | None = None,
+    current=Depends(admin),
+):
+    if view not in ('summary', 'records', 'classes'):
+        raise HTTPException(422, '导出视图无效')
     with connect() as db:
         db.execute('BEGIN')
-        data = results(db, identifier, group_id)
+        data = results(db, identifier, group_id, class_ids=class_ids, class_tags=class_tags, q=q, question_number=question_number, option=option)
     total = data['total']
     letters = ascii_uppercase[:max((len(row['counts']) for row in data['rows']), default=0)]
-    columns = ['题号', '题目', '题型', '确认份数', '空白份数', '无效份数']
+    if view == 'records':
+        q_nums = [row['number'] for row in data['rows']]
+        if data['uses_candidate']:
+            columns = ['序号', '准考证号', '姓名', '年级', '班级', '标签', '状态', *[f'第 {n} 题' for n in q_nums]]
+            rows = [
+                [
+                    rec['index'], rec['candidate_number'], rec['student_name'], rec['grade_name'],
+                    rec['class_name'], '、'.join(rec['tags']), rec['status'],
+                    *[rec['answers'].get(str(n), '') for n in q_nums],
+                ]
+                for rec in data['records']
+            ]
+        else:
+            columns = ['序号', '状态', *[f'第 {n} 题' for n in q_nums]]
+            rows = [
+                [rec['index'], rec['status'], *[rec['answers'].get(str(n), '') for n in q_nums]]
+                for rec in data['records']
+            ]
+        return table_response(ExportTable('作答明细', columns, rows), 'statistics-records', format)
+    if view == 'classes':
+        columns = ['年级', '班级', '标签', '题号', '题目', '题型', '入库份数', '有效份数', '空白份数', '无效份数']
+        for letter in letters:
+            columns.extend([f'{letter} 份数', f'{letter} 占比'])
+        rows = []
+        for cls in data['by_class']:
+            cls_total = cls['total']
+            for row in cls['rows']:
+                values = [
+                    cls['grade_name'], cls['class_name'], '、'.join(cls['tags']),
+                    row['number'], row['title'], '单选' if row['type'] == 'single' else '多选',
+                    cls_total, row['valid'], row['blank'], row['invalid'],
+                ]
+                for letter in letters:
+                    count = row['counts'].get(letter)
+                    values.extend([count, '' if count is None else f'{100 * count / cls_total:.1f}%' if cls_total else '0.0%'])
+                rows.append(values)
+        return table_response(ExportTable('分班统计', columns, rows), 'statistics-by-class', format)
+    columns = ['题号', '题目', '题型', '确认份数', '有效份数', '空白份数', '无效份数']
     for letter in letters:
         columns.extend([f'{letter} 份数', f'{letter} 占比'])
     rows = []
     for row in data['rows']:
-        values = [row['number'], row['title'], '单选' if row['type'] == 'single' else '多选', total, row['blank'], row['invalid']]
+        values = [row['number'], row['title'], '单选' if row['type'] == 'single' else '多选', total, row['valid'], row['blank'], row['invalid']]
         for letter in letters:
             count = row['counts'].get(letter)
             values.extend([count, '' if count is None else f'{100 * count / total:.1f}%' if total else '0.0%'])
