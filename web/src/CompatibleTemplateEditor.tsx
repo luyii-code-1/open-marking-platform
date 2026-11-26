@@ -459,6 +459,27 @@ export function CompatibleTemplateEditor({ value, disabled, readOnly, change, fl
   }
 
   async function tryScan(file: Blob) {
+    if (image && !readOnly && face.anchors.length >= 4) {
+      const avoid: ImageBox[] = [
+        ...(face.candidate?.length ? [enclosing(face.candidate.flat())] : []),
+        ...(face.absent ? [face.absent] : []),
+        ...pageQuestions.flatMap(q => q.regions.filter(r => r.page === page).map(({ x, y, width: w, height: h }) => ({ x, y, width: w, height: h }))),
+      ]
+      const blob = await (await fetch(image)).blob()
+      const checkBody = new FormData()
+      checkBody.append('file', blob, 'page.png')
+      checkBody.append('paper', value.paper)
+      checkBody.append('tighten', 'false')
+      checkBody.append('lenient', 'true')
+      checkBody.append('ensure_distinctive', 'true')
+      checkBody.append('avoid_boxes', JSON.stringify(avoid))
+      checkBody.append('boxes', JSON.stringify(face.anchors.map(({ x, y, width: w, height: h }) => ({ x, y, width: w, height: h }))))
+      const ensured = await request<{ anchors: ExternalAnchor[]; distinctive_added?: boolean }>(endpoint + '/reextract-anchors', { method: 'POST', body: checkBody })
+      if (ensured.distinctive_added) {
+        change({ external_sheet: { ...profile, pages: { ...profile.pages, [page]: { ...face, anchors: ensured.anchors } } } })
+        setNotice('已自动补充 1 处辨别版式与方向的固定印刷参照')
+      }
+    }
     const saved = await flush()
     const body = new FormData()
     body.append('file', file, file instanceof File ? file.name : 'sample.jpg')
@@ -540,34 +561,39 @@ export function CompatibleTemplateEditor({ value, disabled, readOnly, change, fl
     const summary: string[] = []
     const extraNotes: string[] = []
 
-    if (scopeSet.has('anchors') && layout.anchors.length > 0) {
-      if (image) {
-        const blob = await (await fetch(image)).blob()
-        const body = new FormData()
-        body.append('file', blob, 'page.png')
-        body.append('paper', value.paper)
-        body.append('tighten', 'true')
-        body.append('lenient', 'true')
-        body.append('boxes', JSON.stringify(layout.anchors))
-        const sampled = await request<{ anchors: ExternalAnchor[]; skipped?: number }>(endpoint + '/reextract-anchors', { method: 'POST', body })
-        if (sampled.anchors.length > 0) {
-          nextFace = {
-            ...nextFace,
-            anchors: aiImportMode === 'replace' ? sampled.anchors : [...nextFace.anchors, ...sampled.anchors].slice(0, 8),
-          }
-          summary.push(`定位块 ${sampled.anchors.length} 个`)
-        }
-        if (sampled.skipped) {
-          extraNotes.push(`${sampled.skipped} 个空白或重复定位框已自动忽略`)
-        }
-      } else {
-        extraNotes.push('尚未导入校正底图，已先导入题目与考号，定位块将在导入底图后自动补齐')
-      }
-    }
+    const avoidBoxes: ImageBox[] = [
+      ...(layout.candidate?.length ? [enclosing(layout.candidate.flat())] : (face.candidate?.length ? [enclosing(face.candidate.flat())] : [])),
+      ...(layout.absent ? [layout.absent] : (face.absent ? [face.absent] : [])),
+      ...layout.choices.map(c => c.region),
+      ...layout.subjective.flatMap(s => s.regions),
+    ]
 
-    if (nextFace.anchors.length < 4 && (reference?.anchors?.length ?? 0) >= 4) {
-      nextFace = { ...nextFace, anchors: reference!.anchors }
-      summary.push(`自动定位块 ${reference!.anchors.length} 个`)
+    if (image) {
+      const candidateAnchors = scopeSet.has('anchors') && layout.anchors.length > 0
+        ? (aiImportMode === 'replace' ? layout.anchors : [...face.anchors.map(({ x, y, width: w, height: h }) => ({ x, y, width: w, height: h })), ...layout.anchors].slice(0, 8))
+        : face.anchors.map(({ x, y, width: w, height: h }) => ({ x, y, width: w, height: h }))
+      const blob = await (await fetch(image)).blob()
+      const body = new FormData()
+      body.append('file', blob, 'page.png')
+      body.append('paper', value.paper)
+      body.append('tighten', String(scopeSet.has('anchors') && layout.anchors.length > 0))
+      body.append('lenient', 'true')
+      body.append('ensure_distinctive', 'true')
+      body.append('avoid_boxes', JSON.stringify(avoidBoxes))
+      body.append('boxes', JSON.stringify(candidateAnchors))
+      const sampled = await request<{ anchors: ExternalAnchor[]; skipped?: number; distinctive_added?: boolean }>(endpoint + '/reextract-anchors', { method: 'POST', body })
+      if (sampled.anchors.length > 0) {
+        nextFace = { ...nextFace, anchors: sampled.anchors }
+        summary.push(`定位块 ${sampled.anchors.length} 个`)
+      }
+      if (sampled.distinctive_added) {
+        extraNotes.push('已自动添加 1 处辨别版式与方向的固定印刷参照')
+      }
+      if (sampled.skipped) {
+        extraNotes.push(`${sampled.skipped} 个空白或重复定位框已自动忽略`)
+      }
+    } else if (scopeSet.has('anchors') && layout.anchors.length > 0) {
+      extraNotes.push('尚未导入校正底图，已先导入题目与考号，定位块将在导入底图后自动补齐')
     }
 
     if (scopeSet.has('candidate') && !anonymous && page === 1 && layout.candidate?.length) {

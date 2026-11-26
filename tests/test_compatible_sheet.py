@@ -280,6 +280,14 @@ def test_external_tight_anchor_excludes_dashed_line_and_rectifies_by_anchors():
     snapped_anchor = external.make_anchor(external.grayscale(page), drifted_ai, tighten=True, snap_nearby=True)
     assert abs((snapped_anchor['x'] + snapped_anchor['width'] / 2) * 4 - 46) < 4, snapped_anchor
 
+    # Four plain solid corner squares automatically get a 5th distinctive directional printed reference added.
+    from server.compatible_templates import ensure_distinctive_anchor
+    plain_four = [external.make_anchor(external.grayscale(page), box((cx - 4) / 4, (cy - 4) / 4, 5.0, 5.0), tighten=True) for cx, cy in corners_px]
+    assert not any(external.distinctive(external.patch_data(a)) for a in plain_four)
+    enriched, added = ensure_distinctive_anchor(external.grayscale(page), plain_four)
+    assert added is True and len(enriched) == 5
+    assert any(external.distinctive(external.patch_data(a)) for a in enriched)
+
     # Warp the page with trapezoid perspective distortion + uneven shading, then rectify via the 4 skewed anchors.
     src_q = np.float32([[0, 0], [width - 1, 0], [width - 1, height - 1], [0, height - 1]])
     dst_q = np.float32([[14, 18], [width - 26, 8], [width - 8, height - 20], [22, height - 10]])

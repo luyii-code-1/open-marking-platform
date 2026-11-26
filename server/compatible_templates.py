@@ -80,6 +80,80 @@ def box_from_pixels(x, y, w, h):
     return dict(zip(('x', 'y', 'width', 'height'), (v / omr.SCALE for v in (x, y, w, h))))
 
 
+def _boxes_overlap(a, b, pad=0.0):
+    return (
+        a['x'] - pad < b['x'] + b['width']
+        and a['x'] + a['width'] + pad > b['x']
+        and a['y'] - pad < b['y'] + b['height']
+        and a['y'] + a['height'] + pad > b['y']
+    )
+
+
+def _orientation_distinctiveness(pattern):
+    """Score how well a patch distinguishes both layout and 180-degree rotation."""
+    f = np.float32(pattern)
+    detail = float(cv2.cornerMinEigenVal(f, 3).sum())
+    if detail <= 0:
+        return 0.0
+    rotated = np.rot90(f, 2)
+    diff_ratio = float(np.mean(np.abs(f - rotated)))
+    density = float(f.mean())
+    # Favor rich printed text/titles (10%-45% ink) that look clearly different when flipped 180 deg.
+    density_weight = 1.0 if 0.08 <= density <= 0.48 else 0.55
+    return detail * (0.25 + diff_ratio) * density_weight
+
+
+def ensure_distinctive_anchor(page, anchors, avoid_boxes=None):
+    """Guarantee at least one fixed printed reference that distinguishes layout and orientation."""
+    anchors = list(anchors or [])
+    if any(omr.distinctive(omr.patch_data(a)) for a in anchors):
+        return anchors, False
+    height, width = page.shape
+    avoid = [b for b in (avoid_boxes or []) if isinstance(b, dict) and all(k in b for k in ('x', 'y', 'width', 'height'))]
+
+    def search(y_values, x_step, sizes, check_avoid):
+        best = None
+        for pw, ph in sizes:
+            if pw >= width - 48 or ph >= height - 48:
+                continue
+            for y in y_values:
+                if y + ph > height - 16:
+                    continue
+                for x in range(44, width - pw - 44, x_step):
+                    box = box_from_pixels(x, y, pw, ph)
+                    if any(_boxes_overlap(box, a, pad=3.0) for a in anchors):
+                        continue
+                    if check_avoid and any(_boxes_overlap(box, b, pad=1.5) for b in avoid):
+                        continue
+                    try:
+                        candidate = omr.make_anchor(page, box, tighten=False)
+                    except ValueError:
+                        continue
+                    pattern = omr.patch_data(candidate)
+                    if not omr.distinctive(pattern):
+                        continue
+                    score = _orientation_distinctiveness(pattern)
+                    if best is None or score > best[0]:
+                        best = (score, candidate)
+        return best[1] if best else None
+
+    top_ys = list(range(20, max(44, int(height * 0.24)), 24))
+    rest_ys = list(range(max(44, int(height * 0.24)), max(64, height - 64), 40))
+    sizes = ((96, 44), (80, 40), (64, 36))
+    chosen = (
+        search(top_ys, 48, sizes, check_avoid=True)
+        or search(rest_ys, 64, sizes, check_avoid=True)
+        or search(top_ys + rest_ys, 64, sizes, check_avoid=False)
+    )
+    if not chosen:
+        return anchors, False
+    if len(anchors) >= 8:
+        anchors = [*anchors[:7], chosen]
+    else:
+        anchors = [*anchors, chosen]
+    return anchors, True
+
+
 def suggest_anchors(page):
     height, width = page.shape
     mask = np.uint8(page < 155)
@@ -103,7 +177,7 @@ def suggest_anchors(page):
                         continue
                     pattern = omr.patch_data(anchor)
                     if omr.distinctive(pattern):
-                        detail = cv2.cornerMinEigenVal(np.float32(pattern), 3).sum()
+                        detail = _orientation_distinctiveness(pattern)
                         proposals.append((detail, anchor))
             if proposals:
                 anchors.append(max(proposals, key=lambda item: item[0])[1])
@@ -122,19 +196,7 @@ def suggest_anchors(page):
             top = max(0, min(height - 12, int(cy - 6)))
             bottom = top + 12
         anchors.append(omr.make_anchor(page, box_from_pixels(left, top, right - left, bottom - top), tighten=True))
-    if len(anchors) == 4:
-        for y in (56, 92, 132):
-            for x in range(90, width - 160, 76):
-                box = box_from_pixels(x, y, 96, 44)
-                if any(box['x'] < a['x'] + a['width'] and box['x'] + box['width'] > a['x']
-                       and box['y'] < a['y'] + a['height'] and box['y'] + box['height'] > a['y'] for a in anchors):
-                    continue
-                try:
-                    anchor = omr.make_anchor(page, box)
-                except ValueError:
-                    continue
-                if omr.distinctive(omr.patch_data(anchor)):
-                    return [*anchors, anchor]
+    anchors, _ = ensure_distinctive_anchor(page, anchors)
     return anchors
 
 
@@ -302,14 +364,15 @@ def anchor(group_id: str, file: UploadFile = File(), box: str = Form(), paper: s
 
 @router.post('/groups/{group_id}/compatible/reextract-anchors')
 def reextract_anchors(group_id: str, file: UploadFile = File(), boxes: str = Form(), paper: str = Form(),
-                      tighten: bool = Form(True), lenient: bool = Form(False), current=Depends(admin)):
+                      tighten: bool = Form(True), lenient: bool = Form(False),
+                      ensure_distinctive: bool = Form(True), avoid_boxes: str = Form(''), current=Depends(admin)):
     with connect() as db:
         draft_in_group(db, group_id, current)
     try:
         width, height = prep_dimensions(paper)
         normalized = _decode_page_for_anchor(read_file(file), width, height)
         raw_boxes = json.loads(boxes)
-        if not isinstance(raw_boxes, list) or not 1 <= len(raw_boxes) <= 8:
+        if not isinstance(raw_boxes, list) or len(raw_boxes) > 8 or (not lenient and len(raw_boxes) < 1):
             raise ValueError('定位参照数量应为 1 至 8 个')
         anchors = []
         skipped = 0
@@ -328,7 +391,19 @@ def reextract_anchors(group_id: str, file: UploadFile = File(), boxes: str = For
                 skipped += 1
                 continue
             anchors.append(sampled)
-        return {'anchors': anchors, 'skipped': skipped}
+        if lenient and len(anchors) < 4:
+            auto = suggest_anchors(normalized)
+            for cand in auto:
+                cx, cy = cand['x'] + cand['width'] / 2, cand['y'] + cand['height'] / 2
+                if not any(abs((a['x'] + a['width'] / 2) - cx) < 6 and abs((a['y'] + a['height'] / 2) - cy) < 6 for a in anchors):
+                    anchors.append(cand)
+                if len(anchors) >= 5:
+                    break
+        distinctive_added = False
+        if ensure_distinctive and anchors:
+            avoid = json.loads(avoid_boxes) if avoid_boxes else []
+            anchors, distinctive_added = ensure_distinctive_anchor(normalized, anchors, avoid_boxes=avoid)
+        return {'anchors': anchors, 'skipped': skipped, 'distinctive_added': distinctive_added}
     except (ValueError, KeyError, TypeError, cv2.error) as error:
         raise HTTPException(422, str(error)) from error
 
@@ -366,6 +441,7 @@ def rectify(group_id: str, file: UploadFile = File(), paper: str = Form(),
             cleaned, mapped_boxes = omr.rectify_by_anchors(page, raw_anchors, apply_grayscale=apply_grayscale)
             normalized = cleaned if apply_grayscale else omr.grayscale(cleaned)
             found_anchors = [omr.make_anchor(normalized, box, tighten=True, snap_nearby=True) for box in mapped_boxes]
+            found_anchors, _ = ensure_distinctive_anchor(normalized, found_anchors)
         elif already_rectified:
             page = _decode_page_for_anchor(raw_content, width, height, apply_grayscale=False)
             cleaned = omr.grayscale(page) if apply_grayscale else page
