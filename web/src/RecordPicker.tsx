@@ -29,7 +29,9 @@ export function RecordPicker<T extends object>({open,onClose,title,records,colum
       </Space>
       {!!checked.length&&<div className="record-picker-selected" aria-label="已选记录">{checked.map(id=>{const row=byId.get(id);return <Tag key={id} closable onClose={()=>remove(id)}>{row?(label?.(row)||String((row as Record<string,unknown>).name||id)):id}</Tag>})}</div>}
       {error&&<Alert type="error" showIcon message={error}/>}
-      <Table<T> query="" rowKey={rowKey} dataSource={rows} columns={columns} loading={loading||importing} pagination={{defaultPageSize:50,showSizeChanger:true,pageSizeOptions:[15,30,50,100]}} scroll={{x:'max-content',y:'55vh'}} rowSelection={{type:multiple?'checkbox':'radio',selectedRowKeys:checked,preserveSelectedRowKeys:true,onChange:keys=>setChecked(keys.map(String))}}/>
+      <Table<T> query="" rowKey={rowKey} dataSource={rows} columns={columns} loading={loading||importing} pagination={{defaultPageSize:50,showSizeChanger:true,pageSizeOptions:[15,30,50,100]}} scroll={{x:'max-content',y:'55vh'}}
+        onRow={record=>({onClick:()=>{const id=key(record);setChecked(current=>multiple?(current.includes(id)?current.filter(v=>v!==id):[...current,id]):[id])},style:{cursor:'pointer'}})}
+        rowSelection={{type:multiple?'checkbox':'radio',selectedRowKeys:checked,preserveSelectedRowKeys:true,onChange:keys=>setChecked(keys.map(String))}}/>
     </Space>
   </Modal>
 }

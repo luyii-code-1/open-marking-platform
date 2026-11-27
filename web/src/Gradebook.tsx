@@ -1,10 +1,10 @@
 import { useMemo, useState } from 'react'
 import { ArrowRightOutlined } from '@ant-design/icons'
-import { Card, Empty, Input, Segmented, Space, Tabs, Tag, Typography } from 'antd'
+import { Card, Empty, Input, Segmented, Select, Space, Tabs, Tag, Typography } from 'antd'
 import { Table } from './DataTable'
 import { Button } from './Button'
 import { ErrorNotice } from './EntityTable'
-import { MultipleRecordSelect, RecordSelect } from './RecordSelect'
+import { MultipleRecordSelect } from './RecordSelect'
 import { ExportPreviewModal, FilterSummaryBar, type FilterChip, type ReportColumn } from './ReportToolkit'
 import { ClassTags, DEFAULT_CLASS_TAGS, gradeColor } from './SchoolTags'
 import { MultiTagPicker } from './TagPicker'
@@ -79,14 +79,28 @@ function formatCell(value: unknown, row: Row, key: string, metric: string, showC
 export function Gradebook({ projectId, subjectId, gradeId, groupId }: Scope) {
   const projects = useResource<Row[]>(projectId ? null : '/projects', [])
   const [chosen, setChosen] = useState('')
-  const project = projectId || chosen
+  const selectable = projects.data.filter(p => p.category !== 'statistics')
+  const project = projectId || chosen || selectable[0]?.id || ''
   return (
     <Space direction="vertical" size={12} style={{ width: '100%' }}>
       {!projectId && (
-        <Card>
+        <Card size="small">
           <Space direction="vertical" size={8} style={{ width: '100%' }}>
             <ErrorNotice error={projects.error} retry={projects.reload} />
-            <RecordSelect title="考试项目" records={projects.data.filter(p => p.category !== 'statistics')} value={chosen} onChange={setChosen} />
+            <Space wrap>
+              <span>考试项目</span>
+              <Select
+                aria-label="选择考试项目"
+                showSearch
+                optionFilterProp="label"
+                placeholder="选择考试项目"
+                loading={projects.loading}
+                value={project || undefined}
+                options={selectable.map(p => ({ label: p.name, value: p.id }))}
+                onChange={setChosen}
+                style={{ minWidth: 260, maxWidth: 'min(420px, 85vw)' }}
+              />
+            </Space>
           </Space>
         </Card>
       )}
@@ -100,7 +114,7 @@ export function Gradebook({ projectId, subjectId, gradeId, groupId }: Scope) {
         />
       ) : (
         <Card>
-          <Empty description="选择考试项目查看或导出成绩" />
+          <Empty description={projects.loading ? '正在加载考试项目…' : '暂无可查看或导出的考试成绩'} />
         </Card>
       )}
     </Space>
