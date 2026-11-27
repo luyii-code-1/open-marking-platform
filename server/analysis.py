@@ -157,7 +157,7 @@ def overview_rows(db,current,project_id=None,group_id=None,detail_id=None):
     projects={p['id']:p for p in objects(db,'projects')}
     subjects={s['id']:s for s in objects(db,'subjects')}
     grades={g['id']:g for g in objects(db,'grades')}
-    groups=[g for g in objects(db,'groups') if g.get('template_id') and g.get('frozen') and g.get('subject_id') in subjects]
+    groups=[g for g in objects(db,'groups') if g.get('template_id') and g.get('frozen') and g.get('subject_id') in subjects and projects.get(subjects[g['subject_id']].get('project_id'),{}).get('category')!='statistics']
     if group_id:
         groups=[g for g in groups if g['id']==group_id]
     if project_id:

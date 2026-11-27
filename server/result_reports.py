@@ -44,6 +44,7 @@ def class_catalog(current=Depends(user)):
             cards.append({'id':card['id'],'name':card['name'],'subject':subject['name'],'project_id':subject['project_id'],'grade':grades.get(card.get('grade_id'),''),'class_ids':sorted(ids),'conversion_enabled':bool(card.get('conversion_id')),'published':bool(card.get('frozen'))})
         projects=[]
         for project in reversed(objects(db,'projects')):
+            if project.get('category')=='statistics':continue
             selected=[c for c in cards if c['project_id']==project['id']]
             if not selected:continue
             ids=set().union(*(set(c['class_ids']) for c in selected))
