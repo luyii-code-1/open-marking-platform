@@ -346,3 +346,35 @@ def test_statistics_reuses_exam_roster_and_scanner(monkeypatch, tmp_path, mode, 
         assert client.get(stats+'/export', params=scope).raise_for_status().content.startswith(b'PK')
         assert client.put(stats+'/collection', params=scope, json={'closed': True}).raise_for_status().json() == {'closed': True}
         assert client.post('/api/v1/results/publish', json={'group_id': group['id']}).status_code == 404
+
+
+def test_data_import_statistics_includes_answers_without_scan_images(monkeypatch, tmp_path):
+    from server import db
+    from server.statistics_projects import results
+    from server.workflow import overview
+
+    monkeypatch.setattr(db, 'ROOT', tmp_path)
+    db.initialize()
+    with db.connect() as conn:
+        project = db.put(conn, 'projects', {'name': '数据录入', 'category': 'statistics'})
+        subject = db.put(conn, 'subjects', {'name': '统计', 'project_id': project['id']})
+        group = db.put(conn, 'groups', {'name': '统计', 'subject_id': subject['id'], 'roster_mode': 'open'})
+        question = {'id': str(uuid4()), 'number': 1, 'type': 'single', 'options': 4}
+        template = db.put(conn, 'templates', {
+            'group_id': group['id'], 'name': '统计', 'status': 'published',
+            'statistics_mode': True, 'candidate_enabled': True, 'questions': [question],
+        })
+        group = db.put(conn, 'groups', {**group, 'template_id': template['id']})
+        classroom = db.put(conn, 'classes', {'name': '数据导入测试班'})
+        student = db.put(conn, 'students', {'name': '模拟学生', 'candidate_number': '990000001', 'class_id': classroom['id']})
+        sub = {'group_id': group['id'], 'template_id': template['id'], 'student_id': student['id'],
+               'candidate_number': student['candidate_number'], 'status': 'ready', 'pages': [],
+               'objective_overrides': {question['id']: ['B']}}
+        stored = db.put(conn, 'submissions', sub)
+        assert results(conn, project['id'], group['id'])['total'] == 0
+        db.put(conn, 'submissions', {**stored, 'answer_source': 'data_import'})
+        data = results(conn, project['id'], group['id'])
+        assert data['total'] == data['rows'][0]['counts']['B'] == 1
+        assert data['by_class'][0]['total'] == 1
+        assert overview(conn, group, {'id': 'admin', 'role': 'admin'})['scan']['received'] == 1
+        assert db.objects(conn, 'pages') == []

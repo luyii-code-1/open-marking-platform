@@ -201,6 +201,12 @@ def aggregate(template, responses):
     return {'total': total, 'rows': rows}
 
 
+def has_recorded_answers(submission):
+    return bool(submission.get('pages') or (
+        submission.get('answer_source') == 'data_import' and submission.get('objective_overrides')
+    ))
+
+
 def _detailed_responses(db, group, template):
     if not template:
         return []
@@ -231,7 +237,7 @@ def _detailed_responses(db, group, template):
     grades = {g['id']: g for g in objects(db, 'grades')}
     submissions = [
         sub for sub in find(db, 'submissions', group_id=group['id'])
-        if sub['template_id'] == template['id'] and sub['status'] != 'absent' and sub.get('pages')
+        if sub['template_id'] == template['id'] and sub['status'] != 'absent' and has_recorded_answers(sub)
     ]
     items = []
     for sub in submissions:

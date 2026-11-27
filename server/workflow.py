@@ -44,7 +44,7 @@ def overview(db,group,current):
     batches=find(db,'scan-batches',group_id=group['id'])
     from .room_tags import exception_source,progress
     exceptions=[e for e in objects(db,'exceptions') if e.get('status')=='open' and e.get('kind')!='excellent' and (e.get('group_id')==group['id'] or exception_source(db,e).get('group_id')==group['id'])]
-    from .statistics_projects import is_statistics_group
+    from .statistics_projects import has_recorded_answers, is_statistics_group
     statistics=is_statistics_group(db,group)
     rooms=[] if statistics else [{**r,**progress(db,r)} for r in find(db,'room-tags',group_id=group['id']) if not r.get('archived')]
     from .review import results_for
@@ -76,7 +76,7 @@ def overview(db,group,current):
         anonymous=not uses_candidate_number(template)
         response_count=len(find(db,'statistics-responses',group_id=group['id'],template_id=template['id'])) if anonymous else 0
         expected=response_count if anonymous else len(roster['students']) if roster['configured'] else len(submissions)
-        present_ids={s['student_id'] for s in submissions if s.get('pages') and s['status']!='absent'}
+        present_ids={s['student_id'] for s in submissions if s['status']!='absent' and has_recorded_answers(s)}
         absent_ids={s['student_id'] for s in submissions if s['status']=='absent'}
         pending=max(0,expected-(response_count if anonymous else len(present_ids | absent_ids)))
         state['scanned']=response_count if anonymous else len(present_ids)
