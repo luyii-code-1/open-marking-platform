@@ -67,10 +67,7 @@
 :root[data-theme='dark'] .selection-action-bar,
 :root[data-theme='dark'] .tag-picker-group,
 :root[data-theme='dark'] .filter-panel,
-:root[data-theme='dark'] .result-summary-card,
-:root[data-theme='dark'] .lesson-card,
-:root[data-theme='dark'] .lesson-panel,
-:root[data-theme='dark'] .lesson-toolbar {
+:root[data-theme='dark'] .result-summary-card {
   background: var(--surface);
   border-color: var(--border-subtle);
   color: var(--text-primary);

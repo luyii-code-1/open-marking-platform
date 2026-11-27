@@ -32,7 +32,7 @@
 .workspace-heading-title{margin:0!important;font-size:18px!important;line-height:24px!important;font-weight:600!important}
 .workspace-heading-meta{font-size:13px;color:#667085}
 .workspace-heading .ant-space{gap:8px!important}.workspace-loading{min-height:240px;display:grid;place-items:center}
-.entity-toolbar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:12px}.entity-search{width:min(100%,300px)}.table-name-link{height:auto;padding:0;font-size:14px}
+.entity-toolbar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px 12px;margin-bottom:12px}.entity-toolbar>.ant-space{flex-wrap:wrap;row-gap:8px}.entity-search{width:min(100%,300px)}.table-name-link{height:auto;padding:0;font-size:14px}
 .result-toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:12px 24px}
 .result-toolbar>.ant-space:last-child{margin-inline-start:auto}
 .result-export-form{padding-top:12px}

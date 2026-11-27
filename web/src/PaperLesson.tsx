@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react'
 import { Alert, Empty, Input, Segmented, Select, Space, Spin, Tabs } from 'antd'
 import {
   ArrowLeftOutlined,
-  BarChartOutlined,
   EyeInvisibleOutlined,
   EyeOutlined,
   LeftOutlined,
@@ -194,20 +193,6 @@ function LessonContent({
             >
               {classroom ? '退出课堂讲解' : '课堂讲解'}
             </Button>
-            {!classroom &&
-              (tab === 'questions' ? (
-                <Button
-                  icon={<BarChartOutlined />}
-                  onClick={() => {
-                    setMetric(current.id)
-                    setTab('compare')
-                  }}
-                >
-                  对比本题均分
-                </Button>
-              ) : (
-                <Button onClick={() => setTab('questions')}>返回逐题讲评</Button>
-              ))}
           </Space>
         </div>
 
@@ -248,8 +233,8 @@ function LessonContent({
               <QuestionResult key={current.id} q={current} gradeWide={comparison.grade_wide} />
             ) : (
               <div>
-                <Space wrap style={{ marginBottom: 12 }}>
-                  <span>对比指标</span>
+                <div className="lesson-compare-bar">
+                  <span className="lesson-compare-label">对比指标</span>
                   <Select
                     aria-label="均分对比项目"
                     showSearch
@@ -262,7 +247,12 @@ function LessonContent({
                     ]}
                     onChange={setMetric}
                   />
-                </Space>
+                  {metric !== current.id && (
+                    <Button size="small" onClick={() => setMetric(current.id)}>
+                      查看第 {current.number} 题
+                    </Button>
+                  )}
+                </div>
                 <ClassChart
                   comparison={comparison}
                   metric={metric}
@@ -335,62 +325,70 @@ export function PaperLesson({
     <section className="class-results">
       <div className="lesson-header-bar">
         {onBack && (
-          <Button icon={<ArrowLeftOutlined />} onClick={onBack}>
+          <Button className="lesson-back-btn" icon={<ArrowLeftOutlined />} onClick={onBack}>
             返回班级成绩
           </Button>
         )}
         <div className="lesson-selectors">
-          <label>
-            考试
-            <Select
-              aria-label="讲评考试"
-              showSearch
-              optionFilterProp="label"
-              value={project.id}
-              options={projects.map(p => ({ label: p.name, value: p.id }))}
-              onChange={id => setChoice({ project: id })}
-            />
-          </label>
-          <label>
-            年级
-            {grades.size <= 8 ? (
-              <TagPicker
-                compact
-                aria-label="讲评年级标签"
-                value={grade}
-                options={[...grades].map(([value, label]) => ({ label, value, color: gradeColor(label) }))}
-                onChange={g => g && setChoice({ project: project.id, grade: g })}
-              />
-            ) : (
+          <label className="lesson-selector-field">
+            <span>考试</span>
+            <div className="lesson-selector-control">
               <Select
-                aria-label="讲评年级标签"
-                value={grade}
-                options={[...grades].map(([value, label]) => ({ label, value }))}
-                onChange={g => setChoice({ project: project.id, grade: g })}
+                aria-label="讲评考试"
+                showSearch
+                optionFilterProp="label"
+                value={project.id}
+                options={projects.map(p => ({ label: p.name, value: p.id }))}
+                onChange={id => setChoice({ project: id })}
               />
-            )}
+            </div>
           </label>
-          <label>
-            班级
-            <Select
-              aria-label="讲评班级"
-              showSearch
-              optionFilterProp="label"
-              value={cls.id}
-              options={gradeClasses.map(c => ({ label: c.name, value: c.id }))}
-              onChange={id => setChoice({ project: project.id, grade, cls: id, card: card?.id })}
-            />
+          <label className="lesson-selector-field">
+            <span>年级</span>
+            <div className="lesson-selector-control">
+              {grades.size <= 8 ? (
+                <TagPicker
+                  compact
+                  aria-label="讲评年级标签"
+                  value={grade}
+                  options={[...grades].map(([value, label]) => ({ label, value, color: gradeColor(label) }))}
+                  onChange={g => g && setChoice({ project: project.id, grade: g })}
+                />
+              ) : (
+                <Select
+                  aria-label="讲评年级标签"
+                  value={grade}
+                  options={[...grades].map(([value, label]) => ({ label, value }))}
+                  onChange={g => setChoice({ project: project.id, grade: g })}
+                />
+              )}
+            </div>
           </label>
-          <label>
-            科目题卡
-            <Select
-              aria-label="讲评题卡"
-              showSearch
-              optionFilterProp="label"
-              value={card?.id}
-              options={cards.map(c => ({ label: `${c.subject} · ${c.name}`, value: c.id }))}
-              onChange={id => setChoice({ project: project.id, grade, cls: cls.id, card: id })}
-            />
+          <label className="lesson-selector-field">
+            <span>班级</span>
+            <div className="lesson-selector-control">
+              <Select
+                aria-label="讲评班级"
+                showSearch
+                optionFilterProp="label"
+                value={cls.id}
+                options={gradeClasses.map(c => ({ label: c.name, value: c.id }))}
+                onChange={id => setChoice({ project: project.id, grade, cls: id, card: card?.id })}
+              />
+            </div>
+          </label>
+          <label className="lesson-selector-field">
+            <span>科目题卡</span>
+            <div className="lesson-selector-control">
+              <Select
+                aria-label="讲评题卡"
+                showSearch
+                optionFilterProp="label"
+                value={card?.id}
+                options={cards.map(c => ({ label: `${c.subject} · ${c.name}`, value: c.id }))}
+                onChange={id => setChoice({ project: project.id, grade, cls: cls.id, card: id })}
+              />
+            </div>
           </label>
         </div>
       </div>
