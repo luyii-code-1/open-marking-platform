@@ -90,7 +90,7 @@ export function ClassResults({admin,projectId,groupId,initialProject,refreshKey,
     <div className="class-results-heading">
       {!projectId&&!groupId&&<Select aria-label="成绩考试" showSearch optionFilterProp="label" value={project?.id} placeholder="选择考试" options={projects.map(p=>({label:p.name,value:p.id}))} onChange={id=>{setChoice(id);setClass('');setCard('');setManaging(false);onProjectChange?.(id)}}/>}
       {cls&&<><Button type="text" icon={<ArrowLeftOutlined/>} onClick={()=>{if(card&&!groupId)setCard('');else{setClass('');setCard('')}setManaging(false)}}>{card&&!groupId?'班级总表':'班级列表'}</Button><strong>{[cls.grade,cls.name,card?.subject].filter(Boolean).join(' / ')}</strong></>}
-      {onLesson&&cls&&card?.published&&project&&<Button type="primary" icon={<ReadOutlined/>} onClick={()=>onLesson({project:project.id,cls:cls.id,card:card.id})}>讲评试卷</Button>}
+      {onLesson&&cls&&project&&(card?.published||cards.some(c=>c.published))&&<Button type="primary" icon={<ReadOutlined/>} onClick={()=>onLesson({project:project.id,cls:cls.id,card:(card?.published?card.id:cards.find(c=>c.published)?.id)})}>讲评试卷</Button>}
       {admin&&managementCard&&<Button className="class-management" onClick={()=>setManaging(true)}>成绩管理</Button>}
     </div>
     {!project?<Empty description={admin?'暂无可查看的考试成绩，请先在考试项目中发布题卡并配置应考名单或扫描答卷':'暂无已发布的任教班级成绩'}/>:!cls?<ClassDirectory key={project.id} classes={classes} onSelect={id=>{setClass(id);setCard('')}}/>:card?<ClassCardReports key={card.id+cls.id} project={project} card={card} cls={cls}/>:<ClassTotals key={project.id+cls.id} project={project} cls={cls} cards={cards} onCard={chooseCard}/>}

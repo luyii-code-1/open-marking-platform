@@ -60,7 +60,7 @@ export function markingPath(projectId?: string, templateId?: string, questionId?
   if (templateId && questionId) path += '/review/' + encodeURIComponent(templateId) + '/' + encodeURIComponent(questionId)
   return path
 }
-const pages = new Set(['dashboard', 'scanner', 'subject-catalog', 'electives', 'exams', 'teacher-templates', 'marking', 'exceptions', 'results', 'people', 'conversions', 'settings', 'account', 'login', 'archives', 'http-guard'])
+const pages = new Set(['dashboard', 'scanner', 'subject-catalog', 'electives', 'exams', 'teacher-templates', 'marking', 'exceptions', 'results', 'lesson', 'people', 'conversions', 'settings', 'account', 'login', 'archives', 'http-guard'])
 export const guardViews = ['overview', 'traffic', 'events', 'policies', 'performance'] as const
 export type GuardView = typeof guardViews[number]
 export function guardView(section?: string): GuardView {

@@ -38,10 +38,13 @@ export function Dashboard({ onNavigate, admin }: { onNavigate: (value: string) =
         ['scanner', '打开扫描台', '设备配对、扫描记录与补扫'],
         ['exceptions', '核查异常', '待处理记录与原卷'],
         ['results', '成绩总览', '多次对比与成绩导出'],
+        ['lesson', '讲评试卷', '按班逐题讲评已发布题卡与课堂模式'],
       ]
     : [
         ['marking', '阅卷中心', '按考试领取主观题评阅与仲裁任务'],
+        ['lesson', '讲评试卷', '按班逐题查看得分率、选项分布与课堂讲解'],
         ['results', '成绩总览', '查看和导出已授权的发布成绩'],
+        ['teacher-templates', '制卡中心', '独立设计或导入答题卡并提交审核'],
       ]
   const inProgressExams = exams.filter(e => e.exam_status !== 'completed')
   return (

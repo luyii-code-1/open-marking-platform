@@ -2,7 +2,7 @@ import { WorkspaceNotificationButton, WorkspaceNotificationsProvider } from './W
 import { useState } from 'react'
 import { Alert, App as AntApp, Avatar, ConfigProvider, Dropdown, Layout, Menu, Space, Tag, Typography } from 'antd'
 import zhCN from 'antd/locale/zh_CN'
-import { ScanOutlined, ApartmentOutlined, AuditOutlined, BookOutlined, FileSearchOutlined, LogoutOutlined, ReadOutlined, SettingOutlined, TeamOutlined, MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons'
+import { ScanOutlined, ApartmentOutlined, AuditOutlined, BarChartOutlined, BookOutlined, FileSearchOutlined, LogoutOutlined, ReadOutlined, SettingOutlined, TeamOutlined, MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons'
 import { Button } from './Button'
 import { Brand } from './Brand'
 import { request, type User } from './api'
@@ -28,6 +28,7 @@ const Marking = loadPage(() => import('./Marking').then(module => ({ default: mo
 const ReviewTasks = loadPage(() => import('./ReviewTasks').then(module => ({ default: module.ReviewTasks })))
 const Exceptions = loadPage(() => import('./Exceptions').then(module => ({ default: module.Exceptions })))
 const Results = loadPage(() => import('./Results').then(module => ({ default: module.Results })))
+const PaperLesson = loadPage(() => import('./PaperLesson').then(module => ({ default: module.PaperLesson })))
 const Conversions = loadPage(() => import('./Conversions').then(module => ({ default: module.Conversions })))
 const ArchiveManager = loadPage(() => import('./ArchiveManager').then(module => ({ default: module.ArchiveManager })))
 const Personnel = loadPage(() => import('./Personnel').then(module => ({ default: module.Personnel })))
@@ -61,9 +62,10 @@ function Workspace({ user, authToken, offlineAccess, management, page, location,
     { key: 'dashboard', icon: <ApartmentOutlined />, label: '工作概览' },
     { type: 'group' as const, key: 'work', label: '考试工作', children: [
       ...(management ? [{key:'scanner',icon:<ScanOutlined/>,label:'扫描台'},{ key: 'exams', icon: <BookOutlined />, label: '考试项目' },{ key: 'teacher-templates', icon: <BookOutlined />, label: '教师制卡审核' },{key:'subject-catalog',icon:<BookOutlined/>,label:'科目管理'}] : []),
-      ...(!management ? [{ key: 'marking', icon: <AuditOutlined />, label: '阅卷中心' },{ key: 'teacher-templates', icon: <BookOutlined />, label: '制卡中心' }] : []),
+      ...(!management ? [{ key: 'marking', icon: <AuditOutlined />, label: '阅卷中心' },{ key: 'lesson', icon: <ReadOutlined />, label: '讲评试卷' },{ key: 'teacher-templates', icon: <BookOutlined />, label: '制卡中心' }] : []),
       ...(management ? [{ key: 'exceptions', icon: <FileSearchOutlined />, label: '异常总览' }] : []),
-      { key: 'results', icon: <ReadOutlined />, label: '成绩总览' },
+      { key: 'results', icon: <BarChartOutlined />, label: '成绩总览' },
+      ...(management ? [{ key: 'lesson', icon: <ReadOutlined />, label: '讲评试卷' }] : []),
       ...(management && user.role==='admin' ? [{key:'conversions',icon:<ReadOutlined/>,label:'赋分方案'}] : []),
     ] },
     ...(management ? [{ type: 'group' as const, key: 'management', label: '基础管理', children: [
@@ -91,6 +93,7 @@ function Workspace({ user, authToken, offlineAccess, management, page, location,
           onProject={id=>navigate(markingPath(id))} onOpen={(tid,qid)=>navigate(markingPath(location.projectId,tid,qid))}/>}
         {page === 'exceptions' && <Exceptions />}
         {page === 'results' && <Results admin={management} />}
+        {page === 'lesson' && <PaperLesson initial={{}} />}
         {page === 'conversions' && management && user.role==='admin' && <Conversions/>}
         {page === 'archives' && <ArchiveManager/>}
         {page === 'people' && <Personnel systemAdmin={user.role==='admin'} tab={location.section||'users'} onTab={key=>navigate('#/people/'+key)}/>}
