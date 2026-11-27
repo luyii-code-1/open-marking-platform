@@ -26,4 +26,5 @@
 .exam-tree-card-link:hover{color:#1677ff}
 .exam-tree-card-actions{display:flex;align-items:center;flex-wrap:wrap;gap:2px}
 .exam-tree-card-actions .ant-btn-link{padding-inline:6px;height:26px}
+.exam-tree-subject-title .ant-tag,.exam-tree-grade-title .ant-tag,.exam-tree-card-main .ant-tag{margin-inline-end:0}
 .exam-tree-empty-hint{padding:10px 14px;color:#667085;font-size:13px;display:flex;align-items:center;justify-content:space-between;gap:8px}

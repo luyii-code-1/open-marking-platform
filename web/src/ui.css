@@ -2,7 +2,7 @@
 @import "./fluent-icons.css";
 @import './dark.css';
 .ant-btn{white-space:nowrap;display:inline-flex;align-items:center;justify-content:center}
-.ant-btn .ant-tag{margin-inline-end:0}
+.ant-btn .ant-tag,.ant-space .ant-tag{margin-inline-end:0}
 .ant-space:not(.ant-space-vertical):not(.ant-space-align-start):not(.ant-space-align-end):not(.ant-space-align-baseline){align-items:center}
 .ant-card-head-wrapper{flex-wrap:wrap;gap:8px 12px}
 .ant-card-extra{max-width:100%}

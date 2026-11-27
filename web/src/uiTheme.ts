@@ -9,6 +9,8 @@ export function getUiTheme(resolved: ResolvedTheme = 'light'): ThemeConfig {
       colorPrimary: dark ? '#3b82f6' : '#0866ff',
       colorInfo: dark ? '#3b82f6' : '#0866ff',
       colorSuccess: dark ? '#22c55e' : '#218755',
+      colorSuccessBg: dark ? 'rgba(34, 197, 94, 0.14)' : '#eef9f2',
+      colorSuccessBorder: dark ? 'rgba(34, 197, 94, 0.35)' : '#b7e3c7',
       ...(dark
         ? {
             colorBgBase: '#0f141c',

@@ -358,7 +358,7 @@ function ProjectCollapsibleTree({
                                   >
                                     {cardName(row, subject)}
                                   </a>
-                                  <Tag color={row.template_id ? 'success' : 'default'}>
+                                  <Tag color={row.template_id ? 'green' : 'default'}>
                                     {row.template_id ? '版式已发布' : '版式待设计'}
                                   </Tag>
                                   <Tag>{rosterText}</Tag>
