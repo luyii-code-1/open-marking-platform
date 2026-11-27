@@ -34,7 +34,7 @@ function ClassDirectory({classes,onSelect}:{classes:Row[];onSelect:(id:string)=>
   </div>
 }
 
-function ClassTotals({project,cls,cards,onCard}:{project:Row;cls:Row;cards:Row[];onCard:(id:string)=>void}){
+function ClassTotals({admin,project,cls,cards,onCard}:{admin:boolean;project:Row;cls:Row;cards:Row[];onCard:(id:string)=>void}){
   const query=new URLSearchParams({project_id:project.id,class_ids:cls.id})
   query.set('group_ids',cards.map(card=>card.id).join(','))
   const data=useResource<any>('/analysis/project/class-summary?'+query,null)
@@ -50,7 +50,7 @@ function ClassTotals({project,cls,cards,onCard}:{project:Row;cls:Row;cards:Row[]
   return <section className="class-report-panel">
     <div className="class-report-heading"><h3>班级成绩总表</h3><ResultExport scope={{kind:'project',id:project.id,query,cardCount:cards.length}} parts={[project.name,cls.grade,cls.name]} disabled={!data.data||!!data.error} initialReport="class-summary" quickReport="class-summary"/></div>
     {cards.length>0&&<Space wrap size={[8,8]} style={{marginBottom:12}}>
-      <Typography.Text type="secondary">单科成绩与复核：</Typography.Text>
+      <Typography.Text type="secondary">{admin ? '单科成绩与复核：' : '单科明细：'}</Typography.Text>
       {cards.map(c=><Button key={c.id} size="small" onClick={()=>onCard(c.id)}>{cardTitle(c)} <Tag color={c.published?'green':undefined} style={{marginInlineStart:4,marginInlineEnd:0}}>{c.published?'已发布':'未发布'}</Tag></Button>)}
     </Space>}
     {data.error&&<Alert type="error" message={data.error} action={<Button onClick={data.reload}>重试</Button>}/>}
@@ -93,7 +93,7 @@ export function ClassResults({admin,projectId,groupId,initialProject,refreshKey,
       {onLesson&&cls&&project&&(card?.published||cards.some(c=>c.published))&&<Button type="primary" icon={<ReadOutlined/>} onClick={()=>onLesson({project:project.id,cls:cls.id,card:(card?.published?card.id:cards.find(c=>c.published)?.id)})}>讲评试卷</Button>}
       {admin&&managementCard&&<Button className="class-management" onClick={()=>setManaging(true)}>成绩管理</Button>}
     </div>
-    {!project?<Empty description={admin?'暂无可查看的考试成绩，请先在考试项目中发布题卡并配置应考名单或扫描答卷':'暂无已发布的任教班级成绩'}/>:!cls?<ClassDirectory key={project.id} classes={classes} onSelect={id=>{setClass(id);setCard('')}}/>:card?<ClassCardReports key={card.id+cls.id} project={project} card={card} cls={cls}/>:<ClassTotals key={project.id+cls.id} project={project} cls={cls} cards={cards} onCard={chooseCard}/>}
+    {!project?<Empty description={admin?'暂无可查看的考试成绩，请先在考试项目中发布题卡并配置应考名单或扫描答卷':'暂无已发布的任教班级成绩'}/>:!cls?<ClassDirectory key={project.id} classes={classes} onSelect={id=>{setClass(id);setCard('')}}/>:card?<ClassCardReports key={card.id+cls.id} project={project} card={card} cls={cls}/>:<ClassTotals key={project.id+cls.id} admin={admin} project={project} cls={cls} cards={cards} onCard={chooseCard}/>}
     {admin&&managementCard&&<Drawer title={`题卡成绩管理 · ${[project?.name,managementCard.grade,cardTitle(managementCard)].filter(Boolean).join(' / ')}`} width={720} open={managing} onClose={()=>setManaging(false)}><CardWorkflow key={managementCard.id} groupId={managementCard.id} onSaved={catalog.reload}/></Drawer>}
   </section>
 }

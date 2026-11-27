@@ -83,6 +83,30 @@ function LessonContent({
     }
   }, [orderedQuestions, activeId])
 
+  useEffect(() => {
+    if (!orderedQuestions.length) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
+      const target = event.target as HTMLElement | null
+      if (target && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))) return
+      const index = orderedQuestions.findIndex(q => q.id === activeId)
+      if (index < 0) return
+      if (event.key === 'ArrowLeft' && index > 0) {
+        event.preventDefault()
+        setActiveId(orderedQuestions[index - 1].id)
+        setTab('questions')
+        setRevealed(false)
+      } else if (event.key === 'ArrowRight' && index < orderedQuestions.length - 1) {
+        event.preventDefault()
+        setActiveId(orderedQuestions[index + 1].id)
+        setTab('questions')
+        setRevealed(false)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [orderedQuestions, activeId])
+
   if (data.error) {
     return (
       <Alert

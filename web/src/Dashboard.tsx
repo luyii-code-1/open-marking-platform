@@ -47,6 +47,27 @@ export function Dashboard({ onNavigate, admin }: { onNavigate: (value: string) =
         ['teacher-templates', '制卡中心', '独立设计或导入答题卡并提交审核'],
       ]
   const inProgressExams = exams.filter(e => e.exam_status !== 'completed')
+  const quickActionsCard = (
+    <Card title="快捷操作" extra={<Button onClick={resource.reload} loading={resource.loading}>刷新</Button>}>
+      <div className="workflow-grid">
+        {shortcuts.map(([key, label, detail]) => (
+          <button type="button" className="workflow-item" key={key} onClick={() => onNavigate(key)}>
+            <strong>{label}</strong>
+            <span className="help-text" style={{ marginTop: 0 }}>{detail}</span>
+          </button>
+        ))}
+      </div>
+    </Card>
+  )
+  const statGrid = (
+    <div className="stat-grid">
+      {[['projects', '考试项目'], ['groups', '题卡'], ['students', '学生'], ['pending_tasks', '待评作答'], ['exceptions', '待处理异常']].map(([key, label]) => (
+        <Card key={key}>
+          <Statistic loading={resource.loading} title={label} value={resource.data[key] ?? '—'} />
+        </Card>
+      ))}
+    </div>
+  )
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
       <ErrorNotice error={resource.error} retry={resource.reload} />
@@ -63,23 +84,9 @@ export function Dashboard({ onNavigate, admin }: { onNavigate: (value: string) =
           }
         />
       )}
-      <div className="stat-grid">
-        {[['projects', '考试项目'], ['groups', '题卡'], ['students', '学生'], ['pending_tasks', '待评作答'], ['exceptions', '待处理异常']].map(([key, label]) => (
-          <Card key={key}>
-            <Statistic loading={resource.loading} title={label} value={resource.data[key] ?? '—'} />
-          </Card>
-        ))}
-      </div>
-      <Card title="快捷操作" extra={<Button onClick={resource.reload} loading={resource.loading}>刷新</Button>}>
-        <div className="workflow-grid">
-          {shortcuts.map(([key, label, detail]) => (
-            <button type="button" className="workflow-item" key={key} onClick={() => onNavigate(key)}>
-              <strong>{label}</strong>
-              <span className="help-text" style={{ marginTop: 0 }}>{detail}</span>
-            </button>
-          ))}
-        </div>
-      </Card>
+      {!admin && quickActionsCard}
+      {statGrid}
+      {admin && quickActionsCard}
       {canViewActivity && (
         <>
           <ErrorNotice error={activityError} retry={reloadActivity} />
