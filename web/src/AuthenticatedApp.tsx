@@ -7,7 +7,7 @@ import { Button } from './Button'
 import { Brand } from './Brand'
 import { request, type User } from './api'
 import { confirmLeaving, type useNavigation } from './useNavigation'
-import { guardView, markingPath } from './examNavigation'
+import { guardView, lessonPath, markingPath } from './examNavigation'
 import { ReviewWorkspace } from './ReviewWorkspace'
 import { RealtimeStatus } from './RealtimeStatus'
 import { SessionActivity } from './SessionActivity'
@@ -94,8 +94,8 @@ function Workspace({ user, authToken, offlineAccess, management, page, location,
         {page === 'marking' && <ReviewTasks projectId={location.projectId} filter={reviewFilter} onFilter={setReviewFilter}
           onProject={id=>navigate(markingPath(id))} onOpen={(tid,qid)=>navigate(markingPath(location.projectId,tid,qid))}/>}
         {page === 'exceptions' && <Exceptions />}
-        {page === 'results' && <Results admin={management} />}
-        {page === 'lesson' && <PaperLesson initial={{}} />}
+        {page === 'results' && <Results admin={management} navigation={{location, navigate}} />}
+        {page === 'lesson' && <PaperLesson initial={location.lessonScope ?? {}} onScopeChange={scope => navigate(lessonPath(scope), true)} />}
         {page === 'conversions' && management && user.role==='admin' && <Conversions/>}
         {page === 'archives' && <ArchiveManager/>}
         {page === 'people' && <Personnel systemAdmin={user.role==='admin'} tab={location.section||'users'} onTab={key=>navigate('#/people/'+key)}/>}

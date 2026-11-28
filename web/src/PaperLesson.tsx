@@ -1,21 +1,24 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Alert, Empty, Input, Segmented, Select, Space, Spin, Tabs } from 'antd'
+import { Alert, Drawer, Empty, Input, Segmented, Select, Space, Spin, Tabs } from 'antd'
 import {
   ArrowLeftOutlined,
+  DownOutlined,
   EyeInvisibleOutlined,
   EyeOutlined,
   LeftOutlined,
   RightOutlined,
   SearchOutlined,
+  UnorderedListOutlined,
 } from '@ant-design/icons'
 import { Button } from './Button'
 import { ClassChart, DifficultyTag, QuestionResult, type Comparison, type Question } from './LessonStatistics'
 import { gradeColor } from './SchoolTags'
 import { TagPicker } from './TagPicker'
 import { useResource, type Row } from './api'
+import type { LessonScope } from './examNavigation'
 import './paper-lesson.css'
 
-export type LessonScope = { project?: string; grade?: string; cls?: string; card?: string }
+export type { LessonScope } from './examNavigation'
 
 type Lesson = {
   group_id: string
@@ -32,13 +35,33 @@ const order = (a: string, b: string) => a.localeCompare(b, 'zh-CN', { numeric: t
 const gradeKey = (cls: Row) => (cls.grade_id ? `id:${cls.grade_id}` : `legacy:${cls.grade || ''}`)
 const gradeLabel = (cls: Row) => cls.grade || '未设置年级'
 
+function useCompactViewport(enabled: boolean) {
+  const [compact, setCompact] = useState(() => (typeof window !== 'undefined' ? window.innerWidth < 820 : enabled))
+  useEffect(() => {
+    if (!enabled) return
+    const sync = () => setCompact(window.innerWidth < 820)
+    sync()
+    window.addEventListener('resize', sync)
+    window.addEventListener('orientationchange', sync)
+    return () => {
+      window.removeEventListener('resize', sync)
+      window.removeEventListener('orientationchange', sync)
+    }
+  }, [enabled])
+  return enabled && compact
+}
+
 function LessonContent({
   card,
   cls,
+  mobile = false,
+  compactNav = false,
   onCatalogStale,
 }: {
   card: Row
   cls: Row
+  mobile?: boolean
+  compactNav?: boolean
   onCatalogStale: () => void
 }) {
   const params = new URLSearchParams({ group_id: card.id, class_id: cls.id })
@@ -51,6 +74,7 @@ function LessonContent({
   const [revealed, setRevealed] = useState(false)
   const [showDist, setShowDist] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
+  const [navOpen, setNavOpen] = useState(false)
 
   const stale = !!data.data && (data.data.group_id !== card.id || data.data.class_id !== cls.id)
   const questions = !stale && data.data ? data.data.questions : []
@@ -139,6 +163,7 @@ function LessonContent({
     setActiveId(id)
     setTab('questions')
     setRevealed(false)
+    setNavOpen(false)
   }
 
   function toggleClassroom() {
@@ -151,54 +176,62 @@ function LessonContent({
     })
   }
 
+  const questionNavigator = (
+    <>
+      <Segmented<SortMode>
+        block
+        size={mobile ? 'middle' : 'small'}
+        value={sort}
+        onChange={next => {
+          setSort(next)
+          setActiveId(current.id)
+        }}
+        options={[
+          { value: 'paper', label: '原卷顺序' },
+          { value: 'weak', label: '低得分率优先' },
+        ]}
+      />
+      <Input
+        size={mobile ? 'middle' : 'small'}
+        allowClear
+        prefix={<SearchOutlined />}
+        placeholder="按题号定位"
+        aria-label="按题号定位"
+        value={searchTerm}
+        onChange={e => setSearchTerm(e.target.value)}
+      />
+      <nav className="lesson-question-list">
+        {filteredNav.map(q => (
+          <button
+            type="button"
+            key={q.id}
+            aria-current={q.id === current.id ? 'true' : undefined}
+            className="lesson-q-btn"
+            onClick={() => selectQuestion(q.id)}
+          >
+            <span className="lesson-q-num">第 {q.number} 题</span>
+            <span className="lesson-q-type">{q.type === 'subjective' ? '主观' : q.type === 'multiple' ? '多选' : '单选'}</span>
+            <span className="lesson-q-rate">{q.score_rate != null ? `${q.score_rate}%` : '—'}</span>
+            <span className={`lesson-diff-dot is-${q.difficulty || 'none'}`} aria-hidden="true" />
+          </button>
+        ))}
+        {!filteredNav.length && <div className="lesson-nav-empty">无匹配题号</div>}
+      </nav>
+      <p className="lesson-sidebar-foot">百分比为本班单题得分率（困难 &lt;60%、较难 &lt;70%、一般 &lt;85%）</p>
+    </>
+  )
+
   return (
-    <div className="lesson-workbench">
-      <aside className="lesson-sidebar" aria-label="全卷题目导航">
-        <div className="lesson-sidebar-head">
-          <h3>全卷题目</h3>
-          <span>{orderedQuestions.length} 项</span>
-        </div>
-        <Segmented<SortMode>
-          block
-          size="small"
-          value={sort}
-          onChange={next => {
-            setSort(next)
-            setActiveId(current.id)
-          }}
-          options={[
-            { value: 'paper', label: '原卷顺序' },
-            { value: 'weak', label: '低得分率优先' },
-          ]}
-        />
-        <Input
-          size="small"
-          allowClear
-          prefix={<SearchOutlined />}
-          placeholder="按题号定位"
-          aria-label="按题号定位"
-          value={searchTerm}
-          onChange={e => setSearchTerm(e.target.value)}
-        />
-        <nav className="lesson-question-list">
-          {filteredNav.map(q => (
-            <button
-              type="button"
-              key={q.id}
-              aria-current={q.id === current.id ? 'true' : undefined}
-              className="lesson-q-btn"
-              onClick={() => selectQuestion(q.id)}
-            >
-              <span className="lesson-q-num">第 {q.number} 题</span>
-              <span className="lesson-q-type">{q.type === 'subjective' ? '主观' : q.type === 'multiple' ? '多选' : '单选'}</span>
-              <span className="lesson-q-rate">{q.score_rate != null ? `${q.score_rate}%` : '—'}</span>
-              <span className={`lesson-diff-dot is-${q.difficulty || 'none'}`} aria-hidden="true" />
-            </button>
-          ))}
-          {!filteredNav.length && <div className="lesson-nav-empty">无匹配题号</div>}
-        </nav>
-        <p className="lesson-sidebar-foot">百分比为本班单题得分率（困难 &lt;60%、较难 &lt;70%、一般 &lt;85%）</p>
-      </aside>
+    <div className={`lesson-workbench${compactNav ? ' is-compact-nav' : ''}`}>
+      {!compactNav && (
+        <aside className="lesson-sidebar" aria-label="全卷题目导航">
+          <div className="lesson-sidebar-head">
+            <h3>全卷题目</h3>
+            <span>{orderedQuestions.length} 项</span>
+          </div>
+          {questionNavigator}
+        </aside>
+      )}
 
       <article className="lesson-main">
         <div className="lesson-main-head">
@@ -209,7 +242,13 @@ function LessonContent({
             </span>
             <DifficultyTag difficulty={current.difficulty} />
           </Space>
-          <Space wrap size={8}>
+          <Space wrap size={8} className="lesson-main-actions">
+            {compactNav && (
+              <Button icon={<UnorderedListOutlined />} onClick={() => setNavOpen(true)}>
+                题单 {pos + 1}/{orderedQuestions.length}
+                {sort === 'weak' ? ' · 低分' : ''}
+              </Button>
+            )}
             <Button
               type={classroom ? 'primary' : 'default'}
               icon={classroom ? <EyeInvisibleOutlined /> : <EyeOutlined />}
@@ -292,9 +331,16 @@ function LessonContent({
           <Button icon={<LeftOutlined />} disabled={pos <= 0} onClick={() => selectQuestion(orderedQuestions[pos - 1].id)}>
             上一题
           </Button>
-          <span>
-            {pos + 1} / {orderedQuestions.length} 个评分项{sort === 'weak' ? ' · 按低得分率优先' : ''}
-          </span>
+          {compactNav ? (
+            <button type="button" className="lesson-footer-index-btn" onClick={() => setNavOpen(true)}>
+              {pos + 1} / {orderedQuestions.length}
+              {sort === 'weak' ? ' · 低分优先' : ''}
+            </button>
+          ) : (
+            <span>
+              {pos + 1} / {orderedQuestions.length} 个评分项{sort === 'weak' ? ' · 按低得分率优先' : ''}
+            </span>
+          )}
           <Button
             icon={<RightOutlined />}
             iconPosition="end"
@@ -305,6 +351,19 @@ function LessonContent({
           </Button>
         </footer>
       </article>
+
+      {compactNav && (
+        <Drawer
+          title={`全卷题目（${orderedQuestions.length} 项）`}
+          placement="bottom"
+          height="78dvh"
+          open={navOpen}
+          onClose={() => setNavOpen(false)}
+          className="lesson-mobile-drawer"
+        >
+          <div className="lesson-drawer-nav">{questionNavigator}</div>
+        </Drawer>
+      )}
     </div>
   )
 }
@@ -312,111 +371,258 @@ function LessonContent({
 export function PaperLesson({
   initial,
   onBack,
+  mobile = false,
+  onScopeChange,
 }: {
   initial: LessonScope
   onBack?: () => void
+  mobile?: boolean
+  onScopeChange?: (scope: LessonScope) => void
 }) {
   const catalog = useResource<{ projects: Row[] }>('/analysis/class-catalog', { projects: [] })
-  const [choice, setChoice] = useState(initial)
+  const [localChoice, setChoice] = useState(initial)
+  const choice = onScopeChange ? initial : localChoice
+  const [scopeOpen, setScopeOpen] = useState(false)
+  const compactNav = useCompactViewport(mobile)
   useEffect(() => {
     setChoice(initial)
   }, [initial.project, initial.grade, initial.cls, initial.card])
 
-  if (catalog.error) return <Alert type="error" message={catalog.error} action={<Button onClick={catalog.reload}>重试</Button>} />
+  function updateChoice(next: LessonScope) {
+    setChoice(next)
+    onScopeChange?.(next)
+  }
+
+  if (catalog.error) return <Alert type="error" message={catalog.error} action={<Space wrap>
+    <Button onClick={catalog.reload}>重试</Button>
+    {onBack && <Button onClick={onBack}>返回班级成绩</Button>}
+  </Space>} />
   if (!catalog.loaded) return <Spin />
 
-  const projects = catalog.data.projects.filter(p => p.cards.some((c: Row) => c.published && c.class_ids.length))
-  const project = projects.find(p => p.id === choice.project) || projects[0]
-  if (!project) {
+  const projects = (catalog.data.projects || []).filter(p => {
+    const classIds = new Set((p.classes || []).map((c: Row) => c.id))
+    return (p.cards || []).some((c: Row) => c.published && Array.isArray(c.class_ids) && c.class_ids.some((id: string) => classIds.has(id)))
+  })
+  if (!projects.length) {
     return (
       <Empty description="暂无可讲评的已发布题卡">
-        {onBack && <Button onClick={onBack}>返回班级成绩</Button>}
+        <Space wrap>
+          <Button onClick={catalog.reload}>刷新目录</Button>
+          {onBack && <Button onClick={onBack}>返回班级成绩</Button>}
+        </Space>
       </Empty>
     )
   }
 
-  const published: Row[] = project.cards.filter((c: Row) => c.published)
-  const classes: Row[] = project.classes.filter((c: Row) => published.some(card => card.class_ids.includes(c.id)))
+  const matchedProject = choice.project ? projects.find(p => p.id === choice.project) : projects[0]
+  if (!matchedProject) {
+    return (
+      <Empty description="当前考试暂无你可讲评的已发布题卡">
+        <Space wrap>
+          <Button type="primary" onClick={() => updateChoice({})}>查看可讲评目录</Button>
+          <Button onClick={catalog.reload}>刷新范围</Button>
+          {onBack && <Button onClick={onBack}>返回</Button>}
+        </Space>
+      </Empty>
+    )
+  }
+
+  const project = matchedProject
+  const allClassIds = new Set((project.classes || []).map((c: Row) => c.id))
+  const published: Row[] = (project.cards || []).filter(
+    (c: Row) => c.published && Array.isArray(c.class_ids) && c.class_ids.some((id: string) => allClassIds.has(id)),
+  )
+  const classes: Row[] = (project.classes || []).filter((c: Row) => published.some(card => card.class_ids.includes(c.id)))
+  if (!classes.length || !published.length) {
+    return (
+      <Empty description="当前考试暂无可讲评的班级与题卡">
+        <Space wrap>
+          {projects.length > 1 && <Button type="primary" onClick={() => updateChoice({})}>查看可讲评目录</Button>}
+          <Button onClick={catalog.reload}>刷新范围</Button>
+          {onBack && <Button onClick={onBack}>返回</Button>}
+        </Space>
+      </Empty>
+    )
+  }
+
   const grades = new Map(classes.map(c => [gradeKey(c), gradeLabel(c)]))
-  const requested = classes.find(c => c.id === choice.cls)
-  const grade = choice.grade && grades.has(choice.grade) ? choice.grade : gradeKey(requested || classes[0])
+  const requested = choice.cls ? classes.find(c => c.id === choice.cls) : undefined
+  if (choice.cls && !requested) {
+    return (
+      <Empty description="当前班级暂无你可讲评的已发布题卡">
+        <Space wrap>
+          <Button type="primary" onClick={() => updateChoice({ project: project.id })}>查看本场可讲评班级</Button>
+          <Button onClick={() => updateChoice({})}>查看全部可讲评目录</Button>
+          {onBack && <Button onClick={onBack}>返回</Button>}
+        </Space>
+      </Empty>
+    )
+  }
+
+  const grade = choice.grade ?? gradeKey(requested || classes[0])
   const gradeClasses = classes.filter(c => gradeKey(c) === grade).sort((a, b) => order(a.name, b.name))
-  const cls = gradeClasses.find(c => c.id === choice.cls) || gradeClasses[0]
+  const cls = choice.cls ? gradeClasses.find(c => c.id === choice.cls) : gradeClasses[0]
+  if (!cls) {
+    return (
+      <Empty description="当前年级暂无可讲评的班级">
+        <Space wrap>
+          <Button type="primary" onClick={() => updateChoice({ project: project.id })}>查看本场可讲评目录</Button>
+          {onBack && <Button onClick={onBack}>返回</Button>}
+        </Space>
+      </Empty>
+    )
+  }
+
   const cards = published.filter(c => c.class_ids.includes(cls.id))
-  const card = cards.find(c => c.id === choice.card) || cards[0]
+  const card = choice.card ? cards.find(c => c.id === choice.card) : cards[0]
+  if (!card) {
+    return (
+      <Empty description="当前题卡未发布或不在你的讲评授权范围内">
+        <Space wrap>
+          <Button type="primary" onClick={() => updateChoice({ project: project.id, grade, cls: cls.id })}>
+            查看该班可讲评题卡
+          </Button>
+          <Button onClick={() => updateChoice({})}>查看全部可讲评目录</Button>
+          {onBack && <Button onClick={onBack}>返回</Button>}
+        </Space>
+      </Empty>
+    )
+  }
+
+  const selectors = (
+    <div className={`lesson-selectors${mobile ? ' is-mobile-stack' : ''}`}>
+      <label className="lesson-selector-field">
+        <span>考试</span>
+        <div className="lesson-selector-control">
+          <Select
+            aria-label="讲评考试"
+            showSearch
+            optionFilterProp="label"
+            value={project.id}
+            options={projects.map(p => ({ label: p.name, value: p.id }))}
+            onChange={id => updateChoice({ project: id })}
+          />
+        </div>
+      </label>
+      <label className="lesson-selector-field">
+        <span>年级</span>
+        <div className="lesson-selector-control">
+          {grades.size <= 8 ? (
+            <TagPicker
+              compact
+              aria-label="讲评年级标签"
+              value={grade}
+              options={[...grades].map(([value, label]) => ({ label, value, color: gradeColor(label) }))}
+              onChange={g => g && updateChoice({ project: project.id, grade: g })}
+            />
+          ) : (
+            <Select
+              aria-label="讲评年级标签"
+              value={grade}
+              options={[...grades].map(([value, label]) => ({ label, value }))}
+              onChange={g => updateChoice({ project: project.id, grade: g })}
+            />
+          )}
+        </div>
+      </label>
+      <label className="lesson-selector-field">
+        <span>班级</span>
+        <div className="lesson-selector-control">
+          <Select
+            aria-label="讲评班级"
+            showSearch
+            optionFilterProp="label"
+            value={cls.id}
+            options={gradeClasses.map(c => ({ label: c.name, value: c.id }))}
+            onChange={id => {
+              const nextCards = published.filter(c => c.class_ids.includes(id))
+              const keptCard = nextCards.some(c => c.id === card.id) ? card.id : undefined
+              updateChoice({ project: project.id, grade, cls: id, card: keptCard })
+            }}
+          />
+        </div>
+      </label>
+      <label className="lesson-selector-field">
+        <span>科目题卡</span>
+        <div className="lesson-selector-control">
+          <Select
+            aria-label="讲评题卡"
+            showSearch
+            optionFilterProp="label"
+            value={card.id}
+            options={cards.map(c => ({ label: `${c.subject} · ${c.name}`, value: c.id }))}
+            onChange={id => updateChoice({ project: project.id, grade, cls: cls.id, card: id })}
+          />
+        </div>
+      </label>
+    </div>
+  )
 
   return (
-    <section className="class-results">
-      <div className="lesson-header-bar">
-        {onBack && (
-          <Button className="lesson-back-btn" icon={<ArrowLeftOutlined />} onClick={onBack}>
-            返回班级成绩
-          </Button>
-        )}
-        <div className="lesson-selectors">
-          <label className="lesson-selector-field">
-            <span>考试</span>
-            <div className="lesson-selector-control">
-              <Select
-                aria-label="讲评考试"
-                showSearch
-                optionFilterProp="label"
-                value={project.id}
-                options={projects.map(p => ({ label: p.name, value: p.id }))}
-                onChange={id => setChoice({ project: id })}
-              />
+    <section className={`class-results lesson-shell${mobile ? ' is-mobile' : ''}`}>
+      {mobile ? (
+        <>
+          <div className="lesson-mobile-scope-bar">
+            {onBack && (
+              <button type="button" className="lesson-mobile-back" aria-label="返回班级成绩" onClick={onBack}>
+                <ArrowLeftOutlined />
+              </button>
+            )}
+            <button
+              type="button"
+              className="lesson-mobile-scope-btn"
+              aria-expanded={scopeOpen}
+              onClick={() => setScopeOpen(true)}
+            >
+              <div className="lesson-mobile-scope-text">
+                <strong>
+                  {cls.name} · {card ? `${card.subject}${card.name && card.name !== 'Default' ? `（${card.name}）` : ''}` : '选择题卡'}
+                </strong>
+                <small>
+                  {project.name} · {grades.get(grade)}
+                </small>
+              </div>
+              <span className="lesson-mobile-scope-trigger">
+                切换 <DownOutlined />
+              </span>
+            </button>
+          </div>
+          <Drawer
+            title="选择讲评范围"
+            placement="bottom"
+            height="auto"
+            open={scopeOpen}
+            onClose={() => setScopeOpen(false)}
+            className="lesson-mobile-drawer"
+          >
+            <div className="lesson-drawer-selectors">
+              {selectors}
+              <Button type="primary" block size="large" onClick={() => setScopeOpen(false)}>
+                完成
+              </Button>
             </div>
-          </label>
-          <label className="lesson-selector-field">
-            <span>年级</span>
-            <div className="lesson-selector-control">
-              {grades.size <= 8 ? (
-                <TagPicker
-                  compact
-                  aria-label="讲评年级标签"
-                  value={grade}
-                  options={[...grades].map(([value, label]) => ({ label, value, color: gradeColor(label) }))}
-                  onChange={g => g && setChoice({ project: project.id, grade: g })}
-                />
-              ) : (
-                <Select
-                  aria-label="讲评年级标签"
-                  value={grade}
-                  options={[...grades].map(([value, label]) => ({ label, value }))}
-                  onChange={g => setChoice({ project: project.id, grade: g })}
-                />
-              )}
-            </div>
-          </label>
-          <label className="lesson-selector-field">
-            <span>班级</span>
-            <div className="lesson-selector-control">
-              <Select
-                aria-label="讲评班级"
-                showSearch
-                optionFilterProp="label"
-                value={cls.id}
-                options={gradeClasses.map(c => ({ label: c.name, value: c.id }))}
-                onChange={id => setChoice({ project: project.id, grade, cls: id, card: card?.id })}
-              />
-            </div>
-          </label>
-          <label className="lesson-selector-field">
-            <span>科目题卡</span>
-            <div className="lesson-selector-control">
-              <Select
-                aria-label="讲评题卡"
-                showSearch
-                optionFilterProp="label"
-                value={card?.id}
-                options={cards.map(c => ({ label: `${c.subject} · ${c.name}`, value: c.id }))}
-                onChange={id => setChoice({ project: project.id, grade, cls: cls.id, card: id })}
-              />
-            </div>
-          </label>
+          </Drawer>
+        </>
+      ) : (
+        <div className="lesson-header-bar">
+          {onBack && (
+            <Button className="lesson-back-btn" icon={<ArrowLeftOutlined />} onClick={onBack}>
+              返回班级成绩
+            </Button>
+          )}
+          {selectors}
         </div>
-      </div>
-      {card && <LessonContent key={`${card.id}:${cls.id}`} card={card} cls={cls} onCatalogStale={() => void catalog.reload()} />}
+      )}
+      {card && (
+        <LessonContent
+          key={`${card.id}:${cls.id}`}
+          card={card}
+          cls={cls}
+          mobile={mobile}
+          compactNav={compactNav}
+          onCatalogStale={() => void catalog.reload()}
+        />
+      )}
     </section>
   )
 }

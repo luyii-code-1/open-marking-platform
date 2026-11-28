@@ -65,7 +65,8 @@ export function App() {
     }
   },[user,offlineAccess,location.page,location.section,portal,platform])
   const guardPage = location.page === 'http-guard'
-  const loginPortal = guardPage ? 'admin' : location.page === 'marking' ? 'marking' : location.page === 'login' && (location.section === 'admin' || location.section === 'marking') ? location.section : undefined
+  const isTeacherLink = location.page === 'marking' || (platform === 'mobile' && ['lesson', 'results'].includes(location.page))
+  const loginPortal = guardPage ? 'admin' : isTeacherLink ? 'marking' : location.page === 'login' && (location.section === 'admin' || location.section === 'marking') ? location.section : undefined
   const admin = user?.role==='admin'||user?.role==='manager', management = admin && (user.role==='admin'||(portal==='admin'&&location.page!=='marking'))&&!offlineAccess
   const page = management&&location.page==='marking'?'dashboard':offlineAccess?'marking':location.page==='settings'&&user?.role==='manager'?'dashboard':management || ['dashboard','marking','lesson','teacher-templates','results','account'].includes(location.page) ? location.page : 'dashboard'
   const waiting = checking || !!user && verifiedToken !== authToken

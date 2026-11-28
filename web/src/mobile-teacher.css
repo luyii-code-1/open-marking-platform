@@ -61,6 +61,50 @@
   gap: 16px;
 }
 
+.m-lesson-page {
+  max-width: 1080px;
+  min-width: 0;
+  gap: 10px;
+}
+
+.m-lesson-links {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.m-lesson-return {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  margin-right: auto;
+  background: transparent;
+  border: none;
+  color: var(--m-brand);
+  cursor: pointer;
+}
+
+.m-lesson-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  min-height: 46px;
+  background: var(--m-surface);
+  border: 1px solid var(--m-line);
+  border-radius: 12px;
+  color: var(--m-ink);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.m-lesson-link .anticon { color: var(--m-brand); }
+.m-lesson-link .m-chevron { margin-left: auto; }
+.m-lesson-link:active { background: var(--m-tint); }
+
 .m-home-head {
   display: flex;
   align-items: flex-end;
@@ -444,7 +488,8 @@
   bottom: 0;
   z-index: 40;
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
   background: var(--m-surface);
   border-top: 1px solid var(--m-line);
   padding: 6px calc(12px + env(safe-area-inset-right, 0px))

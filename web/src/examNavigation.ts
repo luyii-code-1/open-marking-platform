@@ -53,7 +53,24 @@ export function subjectGrades(subject:Row,groups:Row[],grades:Row[]=[]):Row[]{
   const ids=[...new Set([...(subject.grade_ids||[]),...children.map(g=>g.grade_id||unassignedGrade)])] as string[]
   return ids.map(id=>({id,name:id===unassignedGrade?'待设置年级':grades.find(g=>g.id===id)?.name||children.find(g=>g.grade_id===id)?.grade_name||'年级',count:children.filter(g=>(g.grade_id||unassignedGrade)===id).length}))
 }
-export type Location = ExamLocation & { page: string; templateId?: string; questionId?: string }
+const lessonScopeKeys = ['project', 'grade', 'cls', 'card'] as const
+export type LessonScope = Partial<Record<typeof lessonScopeKeys[number], string>>
+export type Location = ExamLocation & { page: string; templateId?: string; questionId?: string; lessonScope?: LessonScope; lessonCard?: string; reviewProject?: string }
+function scopedPath(page: 'lesson' | 'results', scope: LessonScope, context?: string) {
+  const params = new URLSearchParams()
+  for (const key of lessonScopeKeys) {
+    const value = scope[key]
+    if (value) params.set(key, value)
+  }
+  if (context) params.set(page === 'lesson' ? 'reviewProject' : 'lessonCard', context)
+  return '#/' + page + (params.size ? '?' + params.toString() : '')
+}
+export function lessonPath(scope: LessonScope = {}, reviewProject?: string) {
+  return scopedPath('lesson', scope, reviewProject)
+}
+export function classResultsPath(scope: LessonScope = {}, lessonCard?: string) {
+  return scopedPath('results', scope, lessonCard)
+}
 export function markingPath(projectId?: string, templateId?: string, questionId?: string) {
   let path = '#/marking'
   if (projectId) path += '/projects/' + encodeURIComponent(projectId)
@@ -94,6 +111,16 @@ export function readLocation(hash: string): Location {
     const parts = route.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent)
     const page = parts[0] || 'dashboard'
     if (!pages.has(page)) return { page: 'dashboard' }
+    if ((page === 'lesson' || page === 'results') && query) {
+      const params = new URLSearchParams(query), lessonScope: LessonScope = {}
+      for (const key of lessonScopeKeys) {
+        const id = params.get(key)
+        if (id) lessonScope[key] = id
+      }
+      const contextKey = page === 'lesson' ? 'reviewProject' : 'lessonCard'
+      const context = params.get(contextKey)
+      return context ? { page, lessonScope, [contextKey]: context } : { page, lessonScope }
+    }
     if (page === 'login') return { page, section: ['admin', 'marking'].includes(parts[1]) ? parts[1] : undefined }
     if (page === 'marking' && parts[1] === 'review' && parts[2] && parts[3]) return { page, templateId: parts[2], questionId: parts[3] }
     if (page === 'marking' && parts[1] === 'projects' && parts[2]) {

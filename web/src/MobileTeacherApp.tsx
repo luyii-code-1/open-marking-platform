@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import { App as AntApp, ConfigProvider, Tag } from 'antd'
 import zhCN from 'antd/locale/zh_CN'
-import { ArrowLeftOutlined, AuditOutlined, DesktopOutlined, LogoutOutlined, ReloadOutlined, UserOutlined } from '@ant-design/icons'
+import { ArrowLeftOutlined, AuditOutlined, DesktopOutlined, LogoutOutlined, ReadOutlined, ReloadOutlined, UserOutlined } from '@ant-design/icons'
 import { request, useResource, watchChanges, type User } from './api'
-import { markingPath } from './examNavigation'
+import { lessonPath, markingPath } from './examNavigation'
+import { loadPage } from './loadPage'
 import type { Portal } from './Login'
 import { MobileMarking } from './MobileMarking'
 import { readMobileTask, type Platform } from './mobilePlatform'
@@ -16,6 +17,9 @@ import { THEME_MODE_LABELS, useThemeMode, type ThemeMode } from './themeMode'
 import { getUiTheme } from './uiTheme'
 import { confirmLeaving, type useNavigation } from './useNavigation'
 import './mobile-teacher.css'
+
+const PaperLesson = loadPage(() => import('./PaperLesson').then(module => ({ default: module.PaperLesson })))
+const MobileClassResults = loadPage(() => import('./MobileClassResults'))
 
 type Props = ReturnType<typeof useNavigation> & {
   user: User
@@ -59,88 +63,115 @@ function useMobileReviewList<T>(path: string | null, changes: string[], interval
 
 export default function MobileTeacherApp(props: Props) {
   const { resolved } = useThemeMode()
+  const { user, authToken, offlineAccess, acceptUser, endSession } = props
   return (
     <ConfigProvider locale={zhCN} theme={getUiTheme(resolved)}>
       <AntApp>
-        <MobileWorkspace {...props} />
+        <SessionActivity token={authToken} />
+        <RealtimeStatus key={authToken} user={user} onProfile={acceptUser} onExpired={endSession} />
+        <ReviewWorkspace key={`${user.id}:${authToken}`} user={user} offline={offlineAccess} onVerified={acceptUser} onLoginRequired={endSession}>
+          <MobileWorkspace {...props} />
+        </ReviewWorkspace>
       </AntApp>
     </ConfigProvider>
   )
 }
 
-function MobileWorkspace({ user, authToken, offlineAccess, page, location, navigate, setPortal, acceptUser, endSession, onSwitchPlatform }: Props) {
+function MobileWorkspace({ user, authToken, page, location, navigate, setPortal, endSession, onSwitchPlatform }: Props) {
   const [filter, setFilter] = useState<ProjectFilter>('in_progress')
+  const { offline } = useReviewWorkspace()
+  const isLessonSection = location.page === 'lesson' || location.page === 'results'
   const isFullscreenMarking = page === 'marking' && !!location.templateId && !!location.questionId
+  useEffect(() => {
+    if (offline && isLessonSection) navigate(markingPath(), true)
+  }, [offline, isLessonSection, navigate])
+
+  if (isFullscreenMarking) {
+    return (
+      <MobileMarking
+        key={`${location.templateId}:${location.questionId}`}
+        initialProjectId={location.projectId}
+        initialTemplateId={location.templateId!}
+        initialQuestionId={location.questionId!}
+        onBack={projectId => navigate(markingPath(projectId || location.projectId))}
+        onSwitchDesktop={() => onSwitchPlatform('desktop')}
+      />
+    )
+  }
 
   return (
-    <>
-      <SessionActivity token={authToken} />
-      <RealtimeStatus key={authToken} user={user} onProfile={acceptUser} onExpired={endSession} />
-      <ReviewWorkspace key={`${user.id}:${authToken}`} user={user} offline={offlineAccess} onVerified={acceptUser} onLoginRequired={endSession}>
-        {isFullscreenMarking ? (
-          <MobileMarking
-            key={`${location.templateId}:${location.questionId}`}
-            initialProjectId={location.projectId}
-            initialTemplateId={location.templateId!}
-            initialQuestionId={location.questionId!}
-            onBack={projectId => navigate(markingPath(projectId || location.projectId))}
-            onSwitchDesktop={() => onSwitchPlatform('desktop')}
-          />
-        ) : (
-          <div className="m-shell">
-            {page === 'account' ? (
-              <MobileAccount
-                user={user}
-                authToken={authToken}
-                onSwitchDesktop={() => onSwitchPlatform('desktop')}
-                onEnterManagement={() => {
-                  if (!confirmLeaving()) return
-                  setPortal('admin')
-                  sessionStorage.setItem('omp-portal', 'admin')
-                  onSwitchPlatform('desktop')
-                  navigate('#/dashboard')
-                }}
-                onLogout={endSession}
-              />
-            ) : page === 'dashboard' || page === 'marking' ? (
-              <MobileHome
-                projectId={location.projectId}
-                filter={filter}
-                onFilter={setFilter}
-                onProject={id => navigate(markingPath(id))}
-                onOpen={(projectId, templateId, questionId) => navigate(markingPath(projectId, templateId, questionId))}
-                onSwitchDesktop={() => onSwitchPlatform('desktop')}
-              />
-            ) : (
-              <MobileDesktopHandoff
-                page={page}
-                onSwitchDesktop={() => onSwitchPlatform('desktop')}
-                onBackHome={() => navigate('#/marking')}
-              />
+    <div className="m-shell">
+      {page === 'account' ? (
+        <MobileAccount
+          user={user}
+          authToken={authToken}
+          onSwitchDesktop={() => onSwitchPlatform('desktop')}
+          onEnterManagement={() => {
+            if (!confirmLeaving()) return
+            setPortal('admin')
+            sessionStorage.setItem('omp-portal', 'admin')
+            onSwitchPlatform('desktop')
+            navigate('#/dashboard')
+          }}
+          onLogout={endSession}
+        />
+      ) : page === 'lesson' && !offline ? (
+        <main className="m-page m-lesson-page">
+          <div className="m-lesson-links">
+            {location.reviewProject && (
+              <button type="button" className="m-lesson-return" onClick={() => navigate(markingPath(location.reviewProject))}>
+                <ArrowLeftOutlined /> 返回考试
+              </button>
             )}
-
-            <nav className="m-bottom-nav" aria-label="手机教师端导航">
-              <button
-                type="button"
-                aria-current={page === 'dashboard' || page === 'marking' ? 'page' : undefined}
-                onClick={() => navigate('#/marking')}
-              >
-                <AuditOutlined />
-                <span>我的阅卷</span>
-              </button>
-              <button
-                type="button"
-                aria-current={page === 'account' ? 'page' : undefined}
-                onClick={() => navigate('#/account')}
-              >
-                <UserOutlined />
-                <span>个人账号</span>
-              </button>
-            </nav>
+            <button type="button" className="m-icon-btn" onClick={() => navigate('#/results')}>班级成绩</button>
           </div>
+          <PaperLesson initial={location.lessonScope ?? {}} mobile
+            onScopeChange={scope => navigate(lessonPath(scope, location.reviewProject), true)} />
+        </main>
+      ) : page === 'results' && !offline ? (
+        <MobileClassResults location={location} navigate={navigate} onSwitchDesktop={() => onSwitchPlatform('desktop')} />
+      ) : page === 'dashboard' || page === 'marking' || (isLessonSection && offline) ? (
+        <MobileHome
+          projectId={location.projectId}
+          filter={filter}
+          onFilter={setFilter}
+          onProject={id => navigate(markingPath(id))}
+          onOpen={(projectId, templateId, questionId) => navigate(markingPath(projectId, templateId, questionId))}
+          onLesson={project => navigate(lessonPath({ project }, project))}
+          onSwitchDesktop={() => onSwitchPlatform('desktop')}
+        />
+      ) : (
+        <MobileDesktopHandoff
+          page={page}
+          onSwitchDesktop={() => onSwitchPlatform('desktop')}
+          onBackHome={() => navigate('#/marking')}
+        />
+      )}
+
+      <nav className="m-bottom-nav" aria-label="手机教师端导航">
+        <button
+          type="button"
+          aria-current={page === 'dashboard' || page === 'marking' ? 'page' : undefined}
+          onClick={() => navigate('#/marking')}
+        >
+          <AuditOutlined />
+          <span>我的阅卷</span>
+        </button>
+        {!offline && (
+          <button type="button" aria-current={isLessonSection ? 'page' : undefined} onClick={() => navigate(lessonPath())}>
+            <ReadOutlined /><span>试卷讲评</span>
+          </button>
         )}
-      </ReviewWorkspace>
-    </>
+        <button
+          type="button"
+          aria-current={page === 'account' ? 'page' : undefined}
+          onClick={() => navigate('#/account')}
+        >
+          <UserOutlined />
+          <span>个人账号</span>
+        </button>
+      </nav>
+    </div>
   )
 }
 
@@ -156,6 +187,7 @@ function MobileHome({
   onFilter,
   onProject,
   onOpen,
+  onLesson,
   onSwitchDesktop,
 }: {
   projectId?: string
@@ -163,6 +195,7 @@ function MobileHome({
   onFilter: (filter: ProjectFilter) => void
   onProject: (id?: string) => void
   onOpen: (projectId: string | undefined, templateId: string, questionId: string) => void
+  onLesson: (project?: string) => void
   onSwitchDesktop: () => void
 }) {
   const workspace = useReviewWorkspace()
@@ -189,6 +222,7 @@ function MobileHome({
         catalogError={catalog.error}
         onBack={() => onProject()}
         onOpen={(templateId, questionId) => onOpen(projectId, templateId, questionId)}
+        onLesson={() => onLesson(projectId)}
       />
     )
   }
@@ -276,6 +310,12 @@ function MobileHome({
         </section>
       )}
 
+      {!workspace.offline && (
+        <button type="button" className="m-lesson-link" onClick={() => onLesson()}>
+          <ReadOutlined /><span>试卷讲评</span><span className="m-chevron" aria-hidden="true">›</span>
+        </button>
+      )}
+
       <section className="m-section" aria-label="分配的考试">
         <div className="m-section-head">
           <h3>{filter === 'in_progress' ? '进行中的考试' : filter === 'completed' ? '已结束的考试' : '全部考试'}</h3>
@@ -339,6 +379,7 @@ function MobileProjectQuestions({
   catalogError,
   onBack,
   onOpen,
+  onLesson,
 }: {
   projectId: string
   project?: ReviewProject
@@ -347,6 +388,7 @@ function MobileProjectQuestions({
   catalogError: string
   onBack: () => void
   onOpen: (templateId: string, questionId: string) => void
+  onLesson: () => void
 }) {
   const workspace = useReviewWorkspace()
   const path = workspace.offline || projectId === localProjectId
@@ -374,6 +416,11 @@ function MobileProjectQuestions({
       </header>
 
       {(progress.error || catalogError) && <div className="m-banner error" role="alert">{progress.error || catalogError}</div>}
+      {!workspace.offline && project && project.id !== localProjectId && (
+        <button type="button" className="m-lesson-link" onClick={onLesson}>
+          <ReadOutlined /><span>本场试卷讲评</span><span className="m-chevron" aria-hidden="true">›</span>
+        </button>
+      )}
       {pendingArbitration > 0 && <div className="m-banner warn">本场有 {pendingArbitration} 份答卷待你仲裁，请优先处理。</div>}
 
       {catalogPending || (!progress.loaded && progress.loading) ? (
@@ -504,8 +551,6 @@ function MobileAccount({
 }
 
 const DESKTOP_PAGE_LABELS: Record<string, string> = {
-  results: '成绩总览',
-  lesson: '讲评试卷',
   'teacher-templates': '制卡中心',
 }
 
@@ -523,9 +568,6 @@ function MobileDesktopHandoff({
     <main className="m-page" style={{ justifyContent: 'center' }}>
       <section className="m-card" style={{ textAlign: 'center', alignItems: 'center', padding: 24 }}>
         <strong style={{ fontSize: 18 }}>{label}</strong>
-        <p className="m-list-sub" style={{ margin: 0 }}>
-          手机端首版聚焦在线阅卷与回评。你可以在桌面版继续打开当前页面，或返回手机端我的阅卷。
-        </p>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, width: '100%', marginTop: 8 }}>
           <button type="button" className="m-primary-btn" onClick={onSwitchDesktop}>
             <DesktopOutlined /> 在桌面版打开「{label}」

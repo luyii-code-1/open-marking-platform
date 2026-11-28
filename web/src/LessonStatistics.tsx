@@ -134,35 +134,37 @@ export function QuestionResult({
         ) : !q.count ? (
           <div className="lesson-hidden-note">暂无已评分样本。未评分与缺考/未扫描答卷不计入分布或零分。</div>
         ) : (
-          <table className="lesson-bands">
-            <thead>
-              <tr>
-                <th>得分区间</th>
-                <th>分布</th>
-                <th>人数</th>
-                <th>占比</th>
-              </tr>
-            </thead>
-            <tbody>
-              {q.bands?.map(b => {
-                const ratio = q.count ? (100 * b.count) / q.count : 0
-                return (
-                  <tr key={b.lower}>
-                    <td>
-                      {b.lower} ≤ 得分 {b.inclusive ? '≤' : '<'} {b.upper}
-                    </td>
-                    <td className="lesson-band-bar-cell">
-                      <div className="lesson-opt-track">
-                        <div className="lesson-opt-fill is-neutral" style={{ width: `${(100 * b.count) / bandMax}%` }} />
-                      </div>
-                    </td>
-                    <td>{b.count} 人</td>
-                    <td>{q.count ? `${ratio.toFixed(1)}%` : '—'}</td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+          <div className="lesson-bands-wrap">
+            <table className="lesson-bands">
+              <thead>
+                <tr>
+                  <th>得分区间</th>
+                  <th>分布</th>
+                  <th>人数</th>
+                  <th>占比</th>
+                </tr>
+              </thead>
+              <tbody>
+                {q.bands?.map(b => {
+                  const ratio = q.count ? (100 * b.count) / q.count : 0
+                  return (
+                    <tr key={b.lower}>
+                      <td>
+                        {b.lower} ≤ 得分 {b.inclusive ? '≤' : '<'} {b.upper}
+                      </td>
+                      <td className="lesson-band-bar-cell">
+                        <div className="lesson-opt-track">
+                          <div className="lesson-opt-fill is-neutral" style={{ width: `${(100 * b.count) / bandMax}%` }} />
+                        </div>
+                      </td>
+                      <td>{b.count} 人</td>
+                      <td>{q.count ? `${ratio.toFixed(1)}%` : '—'}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
         {incomparableNote}
       </div>

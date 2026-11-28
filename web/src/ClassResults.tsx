@@ -1,18 +1,53 @@
-import {useEffect,useState} from 'react'
+import {useEffect,useRef,useState} from 'react'
 import {Alert,Drawer,Empty,Input,Select,Space,Spin,Tag,Typography} from 'antd'
 import {ArrowLeftOutlined,ReadOutlined} from '@ant-design/icons'
 import {Button} from './Button'
 import {Table} from './DataTable'
 import {useResource,type Row} from './api'
 import {ResultExport} from './ResultExport'
-import type {LessonScope} from './PaperLesson'
+import {PaperLesson,type LessonScope} from './PaperLesson'
+import type {useNavigation} from './useNavigation'
 import {ClassCardReports} from './ResultReports'
 import {CardWorkflow} from './CardWorkflow'
-import {cardName,rememberExamContext} from './examNavigation'
+import {cardName,classResultsPath,rememberExamContext} from './examNavigation'
 import {resultState} from './resultFilterParams'
 import './class-results.css'
 
 const display=(value:unknown)=>value==null?'—':String(value)
+
+type ClassRoute = { lessonScope?: LessonScope; lessonCard?: string }
+export type ClassNavigation = Pick<ReturnType<typeof useNavigation>, 'location' | 'navigate'>
+
+export function ClassLessonReports({admin, mobile = false, navigation}: {
+  admin: boolean
+  mobile?: boolean
+  navigation?: ClassNavigation
+}) {
+  const [local, setLocal] = useState<ClassRoute>({})
+  const {lessonScope, lessonCard} = navigation?.location ?? local
+  const scope = lessonScope ?? {}
+  const [refresh, setRefresh] = useState(0)
+  const previousLesson = useRef(lessonCard)
+  useEffect(() => {
+    if (previousLesson.current && !lessonCard) setRefresh(n => n + 1)
+    previousLesson.current = lessonCard
+  }, [lessonCard])
+
+  function show(next: LessonScope, card?: string, replace = false) {
+    if (navigation) navigation.navigate(classResultsPath(next, card), replace)
+    else setLocal({lessonScope: next, lessonCard: card})
+  }
+
+  return <>
+    <div hidden={!!lessonCard}>
+      <ClassResults admin={admin} scope={scope} refreshKey={refresh}
+        onScopeChange={next => show(next, undefined, true)}
+        onLesson={target => show({...scope, project: target.project, cls: target.cls}, target.card)}/>
+    </div>
+    {lessonCard && <PaperLesson mobile={mobile} initial={{...scope, card: lessonCard}} onBack={() => show(scope, undefined, true)}/>}
+  </>
+}
+
 const cardTitle=(card:Row)=>{
   const label=cardName(card,{id:card.subject,name:card.subject})
   return label===card.subject||label===card.subject+'题卡'?card.subject:`${card.subject} · ${label}`
@@ -64,13 +99,16 @@ function ClassTotals({admin,project,cls,cards,onCard}:{admin:boolean;project:Row
   </section>
 }
 
-export function ClassResults({admin,projectId,groupId,initialProject,refreshKey,onProjectChange,onCardChange,onLesson}:{onLesson?:(scope:LessonScope)=>void;admin:boolean;projectId?:string;groupId?:string;initialProject?:string;refreshKey?:number;onProjectChange?:(id:string)=>void;onCardChange?:(id:string)=>void}){
+export function ClassResults({admin,projectId,groupId,initialProject,refreshKey,onProjectChange,onCardChange,onLesson,scope,onScopeChange}:{onLesson?:(scope:LessonScope)=>void;admin:boolean;projectId?:string;groupId?:string;initialProject?:string;refreshKey?:number;onProjectChange?:(id:string)=>void;onCardChange?:(id:string)=>void;scope?:LessonScope;onScopeChange?:(scope:LessonScope)=>void}){
   const catalog=useResource<{projects:Row[]}>('/analysis/class-catalog',{projects:[]})
-  const [choice,setChoice]=useState(initialProject||''),[classId,setClass]=useState(''),[cardId,setCard]=useState(''),[managing,setManaging]=useState(false)
-  useEffect(()=>{if(initialProject&&initialProject!==choice)setChoice(initialProject)},[initialProject])
+  const [localScope,setLocalScope]=useState<LessonScope>({project:initialProject})
+  const [managing,setManaging]=useState(false)
+  const {project:choice,cls:classId='',card:cardId}=scope ?? localScope
+  const selectScope=onScopeChange ?? setLocalScope
+  useEffect(()=>{if(initialProject)setLocalScope({project:initialProject})},[initialProject])
   useEffect(()=>{if(refreshKey)void catalog.reload()},[refreshKey])
   const projects=catalog.data.projects
-  const project=projectId?projects.find(p=>p.id===projectId):groupId?projects.find(p=>p.cards.some((g:Row)=>g.id===groupId)):projects.find(p=>p.id===choice)||projects[0]
+  const project=projectId?projects.find(p=>p.id===projectId):groupId?projects.find(p=>p.cards.some((g:Row)=>g.id===groupId)):choice?projects.find(p=>p.id===choice):projects[0]
   const fixed=groupId?project?.cards.find((c:Row)=>c.id===groupId):undefined
   const classes:Row[]=(project?.classes||[]).filter((c:Row)=>!groupId||fixed?.class_ids.includes(c.id))
   const cls=classes.find(c=>c.id===classId)
@@ -78,7 +116,7 @@ export function ClassResults({admin,projectId,groupId,initialProject,refreshKey,
   const card=cards.find(c=>c.id===(groupId||cardId))
   const managementCard=groupId?undefined:(card||(cls&&cards.length===1?cards[0]:undefined))
   function chooseCard(id:string){
-    setCard(id)
+    selectScope({project:project?.id,cls:classId,card:id})
     if(id){
       if(admin)rememberExamContext({projectId:project?.id,groupId:id})
       onCardChange?.(id)
@@ -88,12 +126,12 @@ export function ClassResults({admin,projectId,groupId,initialProject,refreshKey,
   if(!catalog.loaded)return <Spin/>
   return <section className="class-results">
     <div className="class-results-heading">
-      {!projectId&&!groupId&&<Select aria-label="成绩考试" showSearch optionFilterProp="label" value={project?.id} placeholder="选择考试" options={projects.map(p=>({label:p.name,value:p.id}))} onChange={id=>{setChoice(id);setClass('');setCard('');setManaging(false);onProjectChange?.(id)}}/>}
-      {cls&&<><Button type="text" icon={<ArrowLeftOutlined/>} onClick={()=>{if(card&&!groupId)setCard('');else{setClass('');setCard('')}setManaging(false)}}>{card&&!groupId?'班级总表':'班级列表'}</Button><strong>{[cls.grade,cls.name,card?.subject].filter(Boolean).join(' / ')}</strong></>}
-      {onLesson&&cls&&project&&(card?.published||cards.some(c=>c.published))&&<Button type="primary" icon={<ReadOutlined/>} onClick={()=>onLesson({project:project.id,cls:cls.id,card:(card?.published?card.id:cards.find(c=>c.published)?.id)})}>讲评试卷</Button>}
+      {!projectId&&!groupId&&<Select aria-label="成绩考试" showSearch optionFilterProp="label" value={project?.id} placeholder="选择考试" options={projects.map(p=>({label:p.name,value:p.id}))} onChange={id=>{selectScope({project:id});setManaging(false);onProjectChange?.(id)}}/>}
+      {cls&&<><Button type="text" icon={<ArrowLeftOutlined/>} onClick={()=>{selectScope({project:project?.id,cls:card&&!groupId?cls.id:undefined});setManaging(false)}}>{card&&!groupId?'班级总表':'班级列表'}</Button><strong>{[cls.grade,cls.name,card?.subject].filter(Boolean).join(' / ')}</strong></>}
+      {onLesson&&cls&&project&&(card?card.published:cards.some(c=>c.published))&&<Button type="primary" icon={<ReadOutlined/>} onClick={()=>onLesson({project:project.id,cls:cls.id,card:card?.id||cards.find(c=>c.published)?.id})}>讲评试卷</Button>}
       {admin&&managementCard&&<Button className="class-management" onClick={()=>setManaging(true)}>成绩管理</Button>}
     </div>
-    {!project?<Empty description={admin?'暂无可查看的考试成绩，请先在考试项目中发布题卡并配置应考名单或扫描答卷':'暂无已发布的任教班级成绩'}/>:!cls?<ClassDirectory key={project.id} classes={classes} onSelect={id=>{setClass(id);setCard('')}}/>:card?<ClassCardReports key={card.id+cls.id} project={project} card={card} cls={cls}/>:<ClassTotals key={project.id+cls.id} admin={admin} project={project} cls={cls} cards={cards} onCard={chooseCard}/>}
+    {!project?<Empty description={admin?'暂无可查看的考试成绩，请先在考试项目中发布题卡并配置应考名单或扫描答卷':'暂无已发布的任教班级成绩'}/>:!cls?<ClassDirectory key={project.id} classes={classes} onSelect={id=>selectScope({project:project.id,cls:id})}/>:card?<ClassCardReports key={card.id+cls.id} project={project} card={card} cls={cls}/>:<ClassTotals key={project.id+cls.id} admin={admin} project={project} cls={cls} cards={cards} onCard={chooseCard}/>}
     {admin&&managementCard&&<Drawer title={`题卡成绩管理 · ${[project?.name,managementCard.grade,cardTitle(managementCard)].filter(Boolean).join(' / ')}`} width={720} open={managing} onClose={()=>setManaging(false)}><CardWorkflow key={managementCard.id} groupId={managementCard.id} onSaved={catalog.reload}/></Drawer>}
   </section>
 }
