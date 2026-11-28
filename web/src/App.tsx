@@ -6,25 +6,33 @@ import { usePageViews } from './usePageViews'
 import { Login, type Portal } from './Login'
 import { cachedReviewUser, rememberReviewUser } from './reviewStore'
 import { loadPage, PageLoading } from './loadPage'
+import { resolvePostLoginHash, usePlatform } from './mobilePlatform'
 
 const AuthenticatedApp = loadPage(() => import('./AuthenticatedApp'))
+const MobileTeacherApp = loadPage(() => import('./MobileTeacherApp'))
 export function App() {
   const [user, setUser] = useState<User | null>(null), [checking, setChecking] = useState(() => !!currentToken()), [portal,setPortal] = useState<Portal>(()=>sessionStorage.getItem('omp-portal')==='marking'?'marking':'admin')
   const [offlineAccess,setOfflineAccess]=useState(false),[authToken,setAuthToken]=useState(currentToken),[verifiedToken,setVerifiedToken]=useState('')
   const [sessionNotice,setSessionNoticeState]=useState(currentSessionNotice)
   const { location, navigate } = useNavigation()
+  const { platform, setPlatform } = usePlatform()
   function endSession(){if(!clearSession(authToken)&&currentToken())return;sessionStorage.removeItem('omp-review-user');setExamContextOwner('');setUser(null);setOfflineAccess(false)}
   function acceptUser(person:User,expected=authToken){if(currentToken()!==expected)return;setExamContextOwner(person.id);setUser(person);setVerifiedToken(expected);setOfflineAccess(false);void rememberReviewUser(person).catch(()=>{})}
   useEffect(()=>watchSession(value=>setAuthToken(value?.token||'')),[])
   useEffect(()=>watchSessionNotice(setSessionNoticeState),[])
   useEffect(()=>{
+    if (!authToken) return
+    if (platform === 'mobile') void import('./MobileTeacherApp')
+    else {
+      void import('./AuthenticatedApp')
+      const initialPage = readLocation(window.location.hash).page
+      if (!initialPage || initialPage === 'dashboard') void import('./Dashboard')
+      else if (initialPage === 'exams') void import('./Exams')
+    }
+  }, [authToken, platform])
+  useEffect(()=>{
     let active=true
     if(!authToken){setExamContextOwner('');setUser(null);setOfflineAccess(false);setChecking(false);return}
-    // Preload authenticated shell and landing page in parallel with session verification.
-    void import('./AuthenticatedApp')
-    const initialPage = readLocation(window.location.hash).page
-    if (!initialPage || initialPage === 'dashboard') void import('./Dashboard')
-    else if (initialPage === 'exams') void import('./Exams')
     setChecking(true);setUser(null);setOfflineAccess(false)
     void (async()=>{
       try{
@@ -52,11 +60,12 @@ export function App() {
     }
     if(location.page==='login'){
       const next:Portal=user.role==='admin'||location.section==='admin'&&user.role==='manager'?'admin':'marking'
-      setPortal(next);sessionStorage.setItem('omp-portal',next);navigate('#/dashboard',true)
+      setPortal(next);sessionStorage.setItem('omp-portal',next)
+      navigate(platform==='mobile'&&next==='marking'?'#/marking':'#/dashboard',true)
     }
-  },[user,offlineAccess,location.page,location.section,portal])
+  },[user,offlineAccess,location.page,location.section,portal,platform])
   const guardPage = location.page === 'http-guard'
-  const loginPortal = guardPage ? 'admin' : location.page === 'login' && (location.section === 'admin' || location.section === 'marking') ? location.section : undefined
+  const loginPortal = guardPage ? 'admin' : location.page === 'marking' ? 'marking' : location.page === 'login' && (location.section === 'admin' || location.section === 'marking') ? location.section : undefined
   const admin = user?.role==='admin'||user?.role==='manager', management = admin && (user.role==='admin'||(portal==='admin'&&location.page!=='marking'))&&!offlineAccess
   const page = management&&location.page==='marking'?'dashboard':offlineAccess?'marking':location.page==='settings'&&user?.role==='manager'?'dashboard':management || ['dashboard','marking','lesson','teacher-templates','results','account'].includes(location.page) ? location.page : 'dashboard'
   const waiting = checking || !!user && verifiedToken !== authToken
@@ -65,13 +74,20 @@ export function App() {
     : page === 'login' ? null : page
   usePageViews(waiting ? null : displayed, guardPage ? guardView(location.section) : window.location.hash)
   if (waiting) return <div className="screen-center"><PageLoading/></div>
-  if (!user) return <Login portal={loginPortal} sessionNotice={sessionNotice} onDismissSessionNotice={clearSessionNotice} onPortal={value=>navigate(value?'#/login/'+value:'#/')} onLogin={(person,selected)=>{
+  if (!user) return <Login portal={loginPortal} sessionNotice={sessionNotice} onDismissSessionNotice={clearSessionNotice} onPortal={value=>{
+    if (location.page === 'login') navigate(value ? '#/login/' + value : '#/')
+  }} onLogin={(person,selected)=>{
     clearSessionNotice()
-    const next:Portal=person.role==='admin'?'admin':selected
+    const next:Portal=person.role==='admin'?'admin':(location.page==='marking'?'marking':selected)
     setPortal(next);sessionStorage.setItem('omp-portal',next);acceptUser(person,currentToken())
-    navigate(guardPage ? window.location.hash : '#/dashboard',true)
+    navigate(resolvePostLoginHash(window.location.hash, person.role, next, platform), true)
   }} />
+  if (platform === 'mobile' && !management) {
+    return <MobileTeacherApp key={`mobile:${user.id}:${authToken}`} user={user} authToken={authToken} offlineAccess={offlineAccess}
+      page={page} location={location} navigate={navigate} setPortal={setPortal}
+      acceptUser={acceptUser} endSession={endSession} onSwitchPlatform={setPlatform} />
+  }
   return <AuthenticatedApp key={user.id + ':' + authToken} user={user} authToken={authToken} offlineAccess={offlineAccess}
     management={management} page={page} location={location} navigate={navigate} setPortal={setPortal}
-    acceptUser={acceptUser} endSession={endSession} />
+    acceptUser={acceptUser} endSession={endSession} onSwitchPlatform={setPlatform} />
 }

@@ -34,6 +34,7 @@ function dynamicEntry(parent,name) {
 }
 const loginEntry=dynamicEntry('index.html','main')
 const workspace=dynamicEntry(loginEntry,'AuthenticatedApp')
+const mobileWorkspace=dynamicEntry(loginEntry,'MobileTeacherApp')
 const startup=staticAssets([loginEntry])
 const index=path.join(root,'index.html'),html=await readFile(index,'utf8')
 const original=html.replace(/<!--app-preload-->[\s\S]*?<!--\/app-preload-->/,'<!--app-preload--><!--/app-preload-->')
@@ -44,7 +45,7 @@ const hints=startup.filter(url=>!original.includes('"'+url+'"')).map(url=>{
 }).join('\n')
 await writeFile(index,html.replace(/<!--app-preload-->[\s\S]*?<!--\/app-preload-->/,'<!--app-preload-->'+hints+'<!--/app-preload-->'))
 const core=[...new Set(['/index.html','/scanner.html','/branding/omp-logo.svg',...staticAssets(['index.html']),...startup])]
-const review=staticAssets([workspace,dynamicEntry(workspace,'ReviewTasks'),dynamicEntry(workspace,'Marking')]).concat('/branding/omp-mark.svg')
+const review=staticAssets([workspace,mobileWorkspace,dynamicEntry(workspace,'ReviewTasks'),dynamicEntry(workspace,'Marking')]).concat('/branding/omp-mark.svg')
 const paths=(await files(root)).sort(),hash=createHash('sha256')
 for(const file of paths){hash.update(path.relative(root,file));const data=await readFile(file);hash.update(file.endsWith('.html')?data.toString().replace(/<meta name="omp-build" content="[^"]*">\s*/g,''):data)}
 const version=hash.digest('hex').slice(0,16)

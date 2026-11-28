@@ -53,7 +53,7 @@ function checkHints(key){
 }
 entrypoints.forEach(checkHints)
 const assetFor=name=>'/'+Object.values(manifest).find(chunk=>chunk.name===name&&chunk.isDynamicEntry).file
-const reviewAssets=['AuthenticatedApp','ReviewTasks','Marking'].map(assetFor)
+const reviewAssets=['AuthenticatedApp','ReviewTasks','Marking','MobileTeacherApp'].map(assetFor)
 const adminAsset=assetFor('HttpGuard')
 for(const url of [...reviewAssets,adminAsset])assert.ok(!stores.get(current).has(url),'Anonymous install fetched '+url)
 await event('activate')

@@ -120,7 +120,12 @@ const navigationUrl='data:text/javascript,export const hasUnsavedChanges=()=>glo
 globalThis.testDirty=()=>dirty
 const policyUrl=await sourceUrl('updatePolicy.ts'),policy=await import(policyUrl)
 let clock=Date.now();const realNow=Date.now;Date.now=()=>clock
-await import(await sourceUrl('pwaCoordinator.ts',{"'./reviewStore'":JSON.stringify(storeUrl),"'./useNavigation'":JSON.stringify(navigationUrl),"'./updatePolicy'":JSON.stringify(policyUrl)}))
+await import(await sourceUrl('pwaCoordinator.ts',{
+  "'./buildVersion'":JSON.stringify(await sourceUrl('buildVersion.ts')),
+  "'./reviewStore'":JSON.stringify(storeUrl),
+  "'./useNavigation'":JSON.stringify(navigationUrl),
+  "'./updatePolicy'":JSON.stringify(policyUrl),
+}))
 clock+=16000
 const source={postMessage(value){replies.push(value)}}
 function message(data){const event=new Event('message');event.data=data;event.source=source;workerEvents.dispatchEvent(event)}

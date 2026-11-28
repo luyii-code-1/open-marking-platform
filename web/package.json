@@ -9,6 +9,7 @@
     "preview": "vite preview --host 127.0.0.1",
     "test:pwa": "node tools/test-worker.mjs",
     "test:navigation": "node tools/test-exam-navigation.mjs",
+    "test:mobile-platform": "node tools/test-mobile-platform.mjs",
     "test:http-guard": "node tools/test-http-guard.mjs",
     "test:objective": "node tools/test-objective-layout.mjs",
     "test:review-interaction": "node tools/test-review-interaction.mjs",
