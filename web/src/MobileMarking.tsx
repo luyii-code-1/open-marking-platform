@@ -1,8 +1,25 @@
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
-import { Alert, App, Drawer, Input, InputNumber, Modal, Progress, Space, Switch, Tag, Typography } from 'antd'
-import { ArrowLeftOutlined, DesktopOutlined, HistoryOutlined, ReloadOutlined, SettingOutlined } from '@ant-design/icons'
+import { App } from 'antd'
+import {
+  ActionSheet,
+  Button,
+  Dialog,
+  Empty,
+  ErrorBlock,
+  List,
+  NavBar,
+  NoticeBar,
+  Popup,
+  ProgressBar,
+  Selector,
+  Space,
+  Stepper,
+  Switch,
+  Tag,
+  TextArea,
+} from 'antd-mobile'
+import { DesktopOutlined, MoreOutlined, ReloadOutlined } from '@ant-design/icons'
 import { ApiError, request, send, useResource, watchChanges, type Row, type Template } from './api'
-import { Button } from './Button'
 import { questionLabel } from './mergeQuestions'
 import { isMobileWideLayout, rememberMobileTask } from './mobilePlatform'
 import {
@@ -73,6 +90,7 @@ export function MobileMarking({ initialProjectId, initialTemplateId, initialQues
   const [count, setCount] = useState(0)
   const [seconds, setSeconds] = useState(0)
   const [saveState, setSaveState] = useState('')
+  const [moreOpen, setMoreOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [progressOpen, setProgressOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -116,7 +134,6 @@ export function MobileMarking({ initialProjectId, initialTemplateId, initialQues
   const locked = busy || workspace.updateLocked || !!workspace.storageError
   const editable = record?.status === 'draft' && !locked && !published
 
-  // Track visualViewport height (soft keyboard) and orientation without remounting component
   useLayoutEffect(() => {
     const syncViewport = () => {
       const vh = window.visualViewport?.height ?? window.innerHeight
@@ -135,7 +152,6 @@ export function MobileMarking({ initialProjectId, initialTemplateId, initialQues
     }
   }, [])
 
-  // Refresh progress & sync on foreground resume
   useEffect(() => {
     const resume = () => {
       if (document.visibilityState === 'hidden') return
@@ -153,7 +169,6 @@ export function MobileMarking({ initialProjectId, initialTemplateId, initialQues
     }
   }, [templateId, questionId, workspace.offline, workspace.sync])
 
-  // Measure reading viewport width so SVG & img scale accurately without expanding layout
   useLayoutEffect(() => {
     const el = readingRef.current
     if (!el) return
@@ -170,7 +185,6 @@ export function MobileMarking({ initialProjectId, initialTemplateId, initialQues
     }
   }, [task?.id, wide])
 
-  // Prevent browser pinch-zoom hijack inside the answer reading canvas while allowing 1-finger scroll
   useEffect(() => {
     const el = readingRef.current
     if (!el) return
@@ -185,7 +199,6 @@ export function MobileMarking({ initialProjectId, initialTemplateId, initialQues
     }
   }, [task?.id])
 
-  // Reset transient gesture pointers on orientation change
   useEffect(() => {
     pointers.current.clear()
     pinchStart.current = null
@@ -194,7 +207,7 @@ export function MobileMarking({ initialProjectId, initialTemplateId, initialQues
     setPinching(false)
   }, [wide])
 
-  // Remember last active task for "继续阅卷" only after confirming it is a valid authorized task
+  // Remember last active task only after confirming it is authorized & valid
   useEffect(() => {
     if (!templateId || !questionId || !question) return
     const authorized = !!record || !!task || (templateResource.loaded && !!template && progress.loaded && !progress.error)
@@ -301,7 +314,6 @@ export function MobileMarking({ initialProjectId, initialTemplateId, initialQues
     return row.regrading ? { ...saved, task: { ...saved.task, regrading: true } } : saved
   }
 
-  // Prefetch next task while grading
   useEffect(() => {
     if (published || !task || !record || record.status !== 'draft' || !automatic || workspace.offline || workspace.updateLocked || (task.status !== 'claimed' && !task.regrading)) return
     const from = task.id
@@ -343,7 +355,6 @@ export function MobileMarking({ initialProjectId, initialTemplateId, initialQues
     })
   }
 
-  // Initial entry: restore cached draft or claim first task
   useEffect(() => {
     if (!initialTemplateId || !initialQuestionId || !workspace.ready || entered.current) return
     const local = workspace.records.filter(r => r.template.id === initialTemplateId && r.question.id === initialQuestionId)
@@ -433,7 +444,10 @@ export function MobileMarking({ initialProjectId, initialTemplateId, initialQues
       setFeedback('再次点击「跳过」可跳过当前作答')
       return
     }
-    if (value !== null && !window.confirm('当前分数尚未提交，确认跳过这份作答？')) return
+    if (value !== null) {
+      const ok = await Dialog.confirm({ content: '当前分数尚未提交，确认跳过这份作答？', confirmText: '跳过', cancelText: '取消' })
+      if (!ok) return
+    }
     await action.run('skip', async () => {
       try {
         await settleReviewWrites()
@@ -488,7 +502,10 @@ export function MobileMarking({ initialProjectId, initialTemplateId, initialQues
       message.warning('成绩已锁定，不可回评')
       return
     }
-    if (record?.status === 'draft' && value !== null && record.task.id !== row.id && !window.confirm('当前给分尚未提交，确认先回评历史作答？本地草稿会保留。')) return
+    if (record?.status === 'draft' && value !== null && record.task.id !== row.id) {
+      const ok = await Dialog.confirm({ content: '当前给分尚未提交，确认先回评历史作答？本地草稿会保留。', confirmText: '去回评', cancelText: '取消' })
+      if (!ok) return
+    }
     await action.run(`history:${row.id}`, async () => {
       try {
         await openTask(await request<Row>(`/tasks/${row.id}`))
@@ -504,7 +521,10 @@ export function MobileMarking({ initialProjectId, initialTemplateId, initialQues
       message.warning('成绩已锁定，不可回评上一份')
       return
     }
-    if (record?.status === 'draft' && value !== null && !window.confirm('当前给分尚未提交，确认回评上一份？本地草稿会保留。')) return
+    if (record?.status === 'draft' && value !== null) {
+      const ok = await Dialog.confirm({ content: '当前给分尚未提交，确认回评上一份？本地草稿会保留。', confirmText: '回评上一份', cancelText: '取消' })
+      if (!ok) return
+    }
     await action.run('previous', async () => {
       try {
         const rows = await loadHistory()
@@ -533,13 +553,29 @@ export function MobileMarking({ initialProjectId, initialTemplateId, initialQues
         message.success(`已加入 ${result.queued} 份重阅任务`)
         ahead.current = null
         void progress.reload()
-        // Fetch the first queued regrade even when an ordinary task was prefetched.
         const first = await availableTask(undefined, true)
         if (first) showRecord(first)
       } catch (e) {
         message.error((e as Error).message)
       }
     })
+  }
+
+  async function reportCurrent(kind: 'exception' | 'excellent') {
+    if (!task || published || workspace.offline || locked) return
+    const ok = await Dialog.confirm({
+      title: kind === 'exception' ? '报告异常卷' : '标记优秀卷',
+      content: '将当前作答交由管理员查看。',
+      confirmText: '确认提交',
+      cancelText: '取消',
+    })
+    if (!ok) return
+    try {
+      await send(`/tasks/${task.id}/report`, { kind, reason: '' })
+      message.success('已报告')
+    } catch (e) {
+      message.error((e as Error).message)
+    }
   }
 
   function resetZoomAndScroll() {
@@ -653,7 +689,6 @@ export function MobileMarking({ initialProjectId, initialTemplateId, initialQues
   const queueStatus = record?.status === 'queued' ? '评分已保存，等待服务器确认'
     : record?.status === 'conflict' ? record.error || '评分需要核对'
     : record?.status === 'failed' ? '评分待上传，请重试' : ''
-
   const roomTagLabels = Array.isArray(task?.room_tags)
     ? task.room_tags.map((t: Row) => t.label || t.name).filter(Boolean)
     : []
@@ -668,35 +703,46 @@ export function MobileMarking({ initialProjectId, initialTemplateId, initialQues
     ? { width: `${computeStagePixelWidth(viewportWidth, zoom)}px` }
     : { width: `${Math.round(zoom * 100)}%` }
 
+  const moreActions = [
+    { key: 'history', text: published ? '我的评分记录' : '评分历史与回评', disabled: !question || workspace.offline || locked, onClick: openHistory },
+    { key: 'progress', text: '任务详情与评阅进度', onClick: () => setProgressOpen(true) },
+    { key: 'settings', text: '阅卷设置', onClick: () => setSettingsOpen(true) },
+    ...(workspace.pendingCount > 0 ? [{ key: 'queue', text: `本地待传记录（${workspace.pendingCount}）`, onClick: workspace.openQueueModal }] : []),
+    ...(task && question && !published && !workspace.offline ? [
+      { key: 'exception', text: '报告异常卷', onClick: () => void reportCurrent('exception') },
+      { key: 'excellent', text: '标记优秀卷', onClick: () => void reportCurrent('excellent') },
+    ] : []),
+    { key: 'desktop', text: '切换到桌面版阅卷台', onClick: onSwitchDesktop },
+  ]
+
   return (
     <section ref={rootRef} className={`m-marking${wide ? ' is-landscape' : ''}`} aria-label="手机阅卷工作台">
-      <header className="m-bar">
-        <button type="button" className="m-bar-back" aria-label="返回我的阅卷" onClick={leave}>
-          <ArrowLeftOutlined />
-        </button>
-        <button type="button" className="m-bar-title" onClick={() => setProgressOpen(true)} aria-label="查看题目详情与评阅进度">
+      <NavBar
+        back="返回"
+        onBack={() => void leave()}
+        right={
+          <div className="m-adm-nav-right">
+            <WorkspaceNotificationButton compact onlyWhenActive />
+            <button type="button" className="m-progress-pill" onClick={() => setProgressOpen(true)} aria-label="查看评阅进度">
+              {progress.error ? '进度异常' : <><b>{myCompleted}</b>/{myTotal}</>}
+            </button>
+            <button type="button" className="m-adm-nav-btn" aria-label="更多操作" onClick={() => setMoreOpen(true)}>
+              <MoreOutlined style={{ fontSize: 20 }} />
+            </button>
+          </div>
+        }
+      >
+        <button type="button" className="m-adm-title-btn" onClick={() => setProgressOpen(true)} aria-label="查看题目上下文与进度">
           <strong>{heading}</strong>
           <small>{projectName}{task?.grade_name ? ` · ${task.grade_name}` : ''}</small>
         </button>
-        <div className="m-bar-right">
-          <WorkspaceNotificationButton compact onlyWhenActive />
-          <button type="button" className="m-progress-pill" onClick={() => setProgressOpen(true)} aria-label="查看评阅进度">
-            {progress.error ? '进度异常' : <>已评 <b>{myCompleted}</b> / {myTotal}</>}
-          </button>
-          <button type="button" className="m-bar-action" aria-label={published ? '评分记录' : '历史与回评'} disabled={!question || workspace.offline || locked} onClick={openHistory}>
-            <HistoryOutlined />
-          </button>
-          <button type="button" className="m-bar-action" aria-label="阅卷设置" onClick={() => setSettingsOpen(true)}>
-            <SettingOutlined />
-          </button>
-        </div>
-      </header>
+      </NavBar>
 
       <div className="m-notices">
-        {(error || workspace.storageError) && <div className="m-banner error" role="alert">{error || workspace.storageError}</div>}
-        {published && <div className="m-banner warn">成绩已锁定：题卡已发布，仅可查看历史记录，不可改分或回评。</div>}
-        {reopened && <div className="m-banner info">复核中 · 可回评：当前可继续评分、回评或从指定份起顺序重阅。</div>}
-        {workspace.offline && <div className="m-banner info">离线评阅：评分保存在本机，联网后自动补传。</div>}
+        {(error || workspace.storageError) && <NoticeBar color="error" wrap content={error || workspace.storageError} />}
+        {published && <NoticeBar color="alert" wrap content="成绩已锁定：题卡已发布，仅可查看历史记录，不可改分或回评。" />}
+        {reopened && <NoticeBar color="info" wrap content="复核中 · 可回评：当前可继续评分、回评或从指定份起顺序重阅。" />}
+        {workspace.offline && <NoticeBar color="info" wrap content="离线评阅：评分保存在本机，联网后自动补传。" />}
         <div ref={workspace.setQueueTarget} className="m-queue-slot" />
       </div>
 
@@ -716,7 +762,7 @@ export function MobileMarking({ initialProjectId, initialTemplateId, initialQues
                 {record ? (
                   <ReviewImage sheet={record.sheet} image={record.image} style={{ filter: `contrast(${contrast})` }} />
                 ) : (
-                  <div className="m-empty">正在准备题图…</div>
+                  <Empty description="正在准备题图…" />
                 )}
               </div>
             </div>
@@ -759,10 +805,10 @@ export function MobileMarking({ initialProjectId, initialTemplateId, initialQues
             <div className="m-deck-top">
               <div className="m-deck-badges">
                 <span>本题给分</span>
-                {question.review_mode === 'double' && <Tag style={{ margin: 0 }}>双评</Tag>}
-                {task.review_role === 'arbitration' && <Tag color="orange" style={{ margin: 0 }}>仲裁</Tag>}
-                {task.regrading && <Tag color="orange" style={{ margin: 0 }}>重阅</Tag>}
-                {published && <Tag color="red" style={{ margin: 0 }}>已锁定</Tag>}
+                {question.review_mode === 'double' && <Tag fill="outline">双评</Tag>}
+                {task.review_role === 'arbitration' && <Tag color="warning">仲裁</Tag>}
+                {task.regrading && <Tag color="warning">重阅</Tag>}
+                {published && <Tag color="danger">已锁定</Tag>}
               </div>
               <button
                 type="button"
@@ -775,18 +821,17 @@ export function MobileMarking({ initialProjectId, initialTemplateId, initialQues
             </div>
 
             {presetsOpen && (
-              <div className="m-presets" aria-label="常用分值">
-                {presets.map(n => (
-                  <button
-                    key={n}
-                    type="button"
-                    aria-pressed={value === n}
-                    disabled={!editable}
-                    onClick={() => editScore(String(n))}
-                  >
-                    {n}
-                  </button>
-                ))}
+              <div className="m-adm-presets-wrap" aria-label="常用分值">
+                <Selector
+                  columns={wide ? 2 : 4}
+                  disabled={!editable}
+                  showCheckMark={false}
+                  value={value !== null ? [String(value)] : []}
+                  options={presets.map(n => ({ label: String(n), value: String(n) }))}
+                  onChange={arr => {
+                    if (arr[0] !== undefined) editScore(arr[0])
+                  }}
+                />
               </div>
             )}
 
@@ -810,14 +855,16 @@ export function MobileMarking({ initialProjectId, initialTemplateId, initialQues
                 />
                 <span>/ {question.points}</span>
               </label>
-              <button
-                type="button"
-                className="m-primary-btn m-send-btn"
+              <Button
+                color="primary"
+                size="large"
+                className="m-send-btn"
                 disabled={!canSubmit || action.pending === 'score'}
+                loading={action.pending === 'score'}
                 onClick={() => void submit()}
               >
-                {action.pending === 'score' ? '提交中…' : automatic ? '提交并下一份' : '提交评分'}
-              </button>
+                {automatic ? '提交并下一份' : '提交评分'}
+              </Button>
             </div>
 
             <div className="m-deck-foot">
@@ -844,224 +891,224 @@ export function MobileMarking({ initialProjectId, initialTemplateId, initialQues
           </aside>
         </div>
       ) : (
-        <div className="m-page" style={{ justifyContent: 'center' }}>
-          <div className="m-empty">
-            <strong>
-              {published
+        <div className="m-adm-body" style={{ justifyContent: 'center' }}>
+          <Empty
+            description={
+              published
                 ? '成绩已锁定，不可继续评分或回评'
                 : busy || templateResource.loading
                   ? '正在加载作答…'
                   : reopened
                     ? '复核中：当前没有待领作答，可从历史进入回评'
-                    : '当前没有可领取的作答'}
-            </strong>
-            <Space wrap>
-              <Button disabled={!question || locked || workspace.offline} onClick={openHistory}>
-                {published ? '查看记录' : reopened ? '复核回评' : '历史与回评'}
+                    : '当前没有可领取的作答'
+            }
+          />
+          <Space justify="center" wrap block>
+            <Button size="small" disabled={!question || locked || workspace.offline} onClick={openHistory}>
+              {published ? '查看记录' : reopened ? '复核回评' : '历史与回评'}
+            </Button>
+            {!published && (
+              <Button size="small" color="primary" disabled={!question || locked || workspace.offline} loading={action.pending === 'claim'} onClick={() => void next()}>
+                重新领取
               </Button>
-              {!published && (
-                <Button type="primary" disabled={!question || locked || workspace.offline} loading={action.pending === 'claim'} onClick={next}>
-                  重新领取
-                </Button>
-              )}
-              <Button onClick={leave}>返回列表</Button>
-            </Space>
-          </div>
+            )}
+            <Button size="small" onClick={() => void leave()}>返回列表</Button>
+          </Space>
         </div>
       )}
 
       {osd && <div className="m-osd" role="status">{osd.text}</div>}
 
-      <Drawer
-        title={published ? '我的评分记录（已锁定）' : reopened ? '历史与回评（复核中）' : '评分历史与回评'}
-        placement={wide ? 'right' : 'bottom'}
-        width={wide ? 420 : undefined}
-        height={wide ? undefined : '74dvh'}
-        open={historyOpen}
-        onClose={() => setHistoryOpen(false)}
-        extra={<Button size="small" icon={<ReloadOutlined />} loading={historyLoading} disabled={workspace.offline} onClick={() => void loadHistory()}>刷新</Button>}
-      >
-        {historyError && (
-          <Alert
-            type="error"
-            showIcon
-            style={{ marginBottom: 12 }}
-            message="历史评分加载失败"
-            description={historyError}
-            action={<Button size="small" onClick={() => void loadHistory()}>重试</Button>}
-          />
-        )}
-        {published && <Alert type="warning" showIcon style={{ marginBottom: 12 }} message="成绩已锁定" description="题卡成绩已发布，教师端不可改分或回评。" />}
-        {reopened && <Alert type="info" showIcon style={{ marginBottom: 12 }} message="复核中 · 可回评" description="管理员已发起成绩复核，当前可回评历史作答或从指定份起顺序重阅。" />}
-        {historyLoading && history.length === 0 ? (
-          <div className="m-empty">正在加载评分历史…</div>
-        ) : !historyError && history.length === 0 ? (
-          <div className="m-empty">暂无历史评分记录</div>
-        ) : (
-          history.map(row => (
-            <div key={row.id} className="m-history-item">
-              <div className="m-history-meta">
-                <strong>
-                  我的给分：{row.score} 分 · 最终：{row.final_score != null ? `${row.final_score} 分` : '待汇总'}
-                </strong>
-                <small title={String(row.id)}>
-                  作答 #{String(row.id).slice(0, 8)} · {new Date(row.created_at * 1000).toLocaleString()}
-                </small>
-              </div>
-              {published ? (
-                <Tag color="red">已锁定</Tag>
-              ) : (
-                <Space size={6} wrap>
-                  <Button
-                    size="small"
-                    type="primary"
-                    disabled={workspace.offline || locked || record?.status === 'queued' || record?.status === 'conflict'}
-                    loading={action.pending === `history:${row.id}`}
-                    onClick={() => void reviewHistory(row)}
-                  >
-                    回评
-                  </Button>
-                  <Button
-                    size="small"
-                    disabled={workspace.offline || locked}
-                    onClick={() => { setRegradeStart(row); setRegradeReason('') }}
-                  >
-                    从此重阅
-                  </Button>
-                </Space>
-              )}
-            </div>
-          ))
-        )}
-      </Drawer>
-
-      <Modal
-        title="从这份评分起顺序重阅"
-        open={!!regradeStart}
-        okText="加入重阅"
+      <ActionSheet
+        visible={moreOpen}
         cancelText="取消"
-        okButtonProps={{ disabled: !regradeReason.trim() || action.pending === 'regrade', loading: action.pending === 'regrade' }}
-        onOk={() => void regradeFrom()}
-        onCancel={() => setRegradeStart(null)}
+        actions={moreActions}
+        onClose={() => setMoreOpen(false)}
+      />
+
+      <Popup
+        visible={historyOpen}
+        onMaskClick={() => setHistoryOpen(false)}
+        position={wide ? 'right' : 'bottom'}
+        bodyStyle={wide ? { width: 'min(420px, 85vw)', height: '100%', display: 'flex', flexDirection: 'column' } : { borderTopLeftRadius: 16, borderTopRightRadius: 16, height: '76dvh', display: 'flex', flexDirection: 'column' }}
       >
-        <Space direction="vertical" style={{ width: '100%' }}>
-          <Typography.Text>
+        <div className="m-adm-popup-head">
+          <strong>{published ? '我的评分记录（已锁定）' : reopened ? '历史与回评（复核中）' : '评分历史与回评'}</strong>
+          <Space style={{ '--gap': '8px' }}>
+            <Button size="mini" fill="outline" loading={historyLoading} disabled={workspace.offline} onClick={() => void loadHistory()}>
+              <ReloadOutlined /> 刷新
+            </Button>
+            <Button size="mini" fill="none" onClick={() => setHistoryOpen(false)}>关闭</Button>
+          </Space>
+        </div>
+        <div className="m-adm-popup-body" style={{ flex: 1 }}>
+          {historyError && (
+            <ErrorBlock status="default" title="历史评分加载失败" description={historyError}>
+              <Button size="small" color="primary" onClick={() => void loadHistory()}>重试</Button>
+            </ErrorBlock>
+          )}
+          {published && <NoticeBar color="alert" wrap content="成绩已锁定：题卡已发布，教师端不可改分或回评。" />}
+          {reopened && <NoticeBar color="info" wrap content="复核中 · 可回评：当前可回评历史作答或从指定份起顺序重阅。" />}
+          {historyLoading && history.length === 0 ? (
+            <Empty description="正在加载评分历史…" />
+          ) : !historyError && history.length === 0 ? (
+            <Empty description="暂无历史评分记录" />
+          ) : (
+            <List>
+              {history.map(row => (
+                <List.Item
+                  key={row.id}
+                  title={`我的给分：${row.score} 分 · 最终：${row.final_score != null ? `${row.final_score} 分` : '待汇总'}`}
+                  description={`作答 #${String(row.id).slice(0, 8)} · ${new Date(row.created_at * 1000).toLocaleString()}`}
+                  extra={
+                    published ? (
+                      <Tag color="danger">已锁定</Tag>
+                    ) : (
+                      <Space style={{ '--gap': '6px' }}>
+                        <Button
+                          size="mini"
+                          color="primary"
+                          disabled={workspace.offline || locked || record?.status === 'queued' || record?.status === 'conflict'}
+                          loading={action.pending === `history:${row.id}`}
+                          onClick={() => void reviewHistory(row)}
+                        >
+                          回评
+                        </Button>
+                        <Button
+                          size="mini"
+                          fill="outline"
+                          disabled={workspace.offline || locked}
+                          onClick={() => { setRegradeStart(row); setRegradeReason('') }}
+                        >
+                          从此重阅
+                        </Button>
+                      </Space>
+                    )
+                  }
+                />
+              ))}
+            </List>
+          )}
+        </div>
+      </Popup>
+
+      <Popup
+        visible={!!regradeStart}
+        onMaskClick={() => setRegradeStart(null)}
+        position="bottom"
+        bodyStyle={{ borderTopLeftRadius: 16, borderTopRightRadius: 16 }}
+      >
+        <div className="m-adm-popup-head">
+          <strong>从这份评分起顺序重阅</strong>
+          <Button size="mini" fill="none" onClick={() => setRegradeStart(null)}>取消</Button>
+        </div>
+        <div className="m-adm-popup-body">
+          <div style={{ fontSize: 13, color: 'var(--adm-color-text-secondary)', lineHeight: 1.55 }}>
             按评分历史的时间顺序，将这份（作答 #{String(regradeStart?.id || '').slice(0, 8)}）及之后本题的本人评分加入重阅。提交新评分前保留原分，全部重阅完成后才能发布成绩。
-          </Typography.Text>
-          <Input.TextArea
+          </div>
+          <TextArea
             placeholder="请填写重阅原因"
             rows={3}
             value={regradeReason}
-            onChange={e => setRegradeReason(e.target.value)}
+            onChange={setRegradeReason}
+            style={{ border: '1px solid var(--adm-color-border)', borderRadius: 8, padding: 8 }}
           />
-        </Space>
-      </Modal>
+          <Button
+            block
+            color="primary"
+            size="large"
+            disabled={!regradeReason.trim() || action.pending === 'regrade'}
+            loading={action.pending === 'regrade'}
+            onClick={() => void regradeFrom()}
+          >
+            确认加入重阅
+          </Button>
+        </div>
+      </Popup>
 
-      <Drawer
-        title="任务详情与评阅进度"
-        placement={wide ? 'right' : 'bottom'}
-        width={wide ? 380 : undefined}
-        height={wide ? undefined : '64dvh'}
-        open={progressOpen}
-        onClose={() => setProgressOpen(false)}
+      <Popup
+        visible={progressOpen}
+        onMaskClick={() => setProgressOpen(false)}
+        position={wide ? 'right' : 'bottom'}
+        bodyStyle={wide ? { width: 'min(380px, 85vw)', height: '100%', display: 'flex', flexDirection: 'column' } : { borderTopLeftRadius: 16, borderTopRightRadius: 16, maxHeight: '72dvh', display: 'flex', flexDirection: 'column' }}
       >
-        <Space direction="vertical" size={14} style={{ width: '100%' }}>
+        <div className="m-adm-popup-head">
+          <strong>任务详情与评阅进度</strong>
+          <Button size="mini" fill="none" onClick={() => setProgressOpen(false)}>关闭</Button>
+        </div>
+        <div className="m-adm-popup-body">
           <div className="m-context-card">
             <strong>{fullContextLabel || projectName}</strong>
-            <div>
-              {question ? `第 ${questionLabel(question)} 题 · 满分 ${question.points} 分 · ${question.review_mode === 'double' ? '双评盲评' : '单评'}` : ''}
-            </div>
+            <div>{question ? `第 ${questionLabel(question)} 题 · 满分 ${question.points} 分 · ${question.review_mode === 'double' ? '双评盲评' : '单评'}` : ''}</div>
             {roomTagLabels.length > 0 && <div>考场标签：{roomTagLabels.join('、')}</div>}
           </div>
           {progress.error ? (
-            <Alert
-              type="error"
-              showIcon
-              message="评阅进度加载失败"
-              description={progress.error}
-              action={<Button size="small" onClick={() => void progress.reload()}>重试</Button>}
-            />
+            <ErrorBlock status="default" title="评阅进度加载失败" description={progress.error}>
+              <Button size="small" color="primary" onClick={() => void progress.reload()}>重试</Button>
+            </ErrorBlock>
           ) : !progress.loaded && progress.loading ? (
-            <div className="m-empty">正在加载评阅进度…</div>
+            <Empty description="正在加载评阅进度…" />
           ) : (
-            <>
-              <div>我的任务：<strong>{myCompleted} / {myTotal}</strong> 份（本次完成 {count} 份{count ? `，平均 ${(seconds / count).toFixed(1)} 秒/份` : ''}）</div>
-              <div>
-                正在评阅 {progress.data.my_in_progress || 0} · 待重阅 {progress.data.my_regrade_pending || 0}
-                {(progress.data.my_arbitration_pending || 0) > 0 ? ` · 待仲裁 ${progress.data.my_arbitration_pending}` : ''}
-                {' · '}本题总作答 {progress.data.total_submissions || 0}
-              </div>
-              <div>
-                <small>我的进度</small>
-                <Progress percent={Math.round(Number(progress.data.my_progress || 0))} />
-              </div>
-              <div>
-                <small>本题全员进度</small>
-                <Progress percent={Math.round(Number(progress.data.question_progress || 0))} />
-              </div>
-              <div>
-                <small>本卷全员进度</small>
-                <Progress percent={Math.round(Number(progress.data.paper_progress || 0))} />
-              </div>
-            </>
+            <List>
+              <List.Item title="我的任务" extra={<strong>{myCompleted} / {myTotal} 份</strong>} description={`本次完成 ${count} 份${count ? ` · 平均 ${(seconds / count).toFixed(1)} 秒/份` : ''}`} />
+              <List.Item
+                title="待处理与总量"
+                description={`正在评阅 ${progress.data.my_in_progress || 0} · 待重阅 ${progress.data.my_regrade_pending || 0}${(progress.data.my_arbitration_pending || 0) > 0 ? ` · 待仲裁 ${progress.data.my_arbitration_pending}` : ''} · 本题总作答 ${progress.data.total_submissions || 0}`}
+              />
+              <List.Item title="我的进度" extra={`${Math.round(Number(progress.data.my_progress || 0))}%`} description={<ProgressBar percent={Math.round(Number(progress.data.my_progress || 0))} style={{ marginTop: 6 }} />} />
+              <List.Item title="本题全员进度" extra={`${Math.round(Number(progress.data.question_progress || 0))}%`} description={<ProgressBar percent={Math.round(Number(progress.data.question_progress || 0))} style={{ marginTop: 6 }} />} />
+              <List.Item title="本卷全员进度" extra={`${Math.round(Number(progress.data.paper_progress || 0))}%`} description={<ProgressBar percent={Math.round(Number(progress.data.paper_progress || 0))} style={{ marginTop: 6 }} />} />
+            </List>
           )}
-          <Button icon={<ReloadOutlined />} loading={progress.loading} disabled={!question || workspace.offline} onClick={progress.reload}>
-            刷新进度
+          <Button block fill="outline" loading={progress.loading} disabled={!question || workspace.offline} onClick={() => void progress.reload()}>
+            <ReloadOutlined /> 刷新进度
           </Button>
-        </Space>
-      </Drawer>
+        </div>
+      </Popup>
 
-      <Drawer
-        title="阅卷设置"
-        placement={wide ? 'right' : 'bottom'}
-        width={wide ? 360 : undefined}
-        height={wide ? undefined : '64dvh'}
-        open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
+      <Popup
+        visible={settingsOpen}
+        onMaskClick={() => setSettingsOpen(false)}
+        position={wide ? 'right' : 'bottom'}
+        bodyStyle={wide ? { width: 'min(360px, 85vw)', height: '100%', display: 'flex', flexDirection: 'column' } : { borderTopLeftRadius: 16, borderTopRightRadius: 16, maxHeight: '72dvh', display: 'flex', flexDirection: 'column' }}
       >
-        <Space direction="vertical" size={18} style={{ width: '100%' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span>预设分值步进</span>
-            <InputNumber aria-label="评分步进" min={0.01} max={10} step={0.5} value={step} onChange={n => setStep(n || 0.5)} />
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span>服务端确认后自动下一份</span>
-            <Switch checked={automatic} onChange={setAutomatic} />
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span>题图高对比度显示</span>
-            <Switch checked={contrast > 1} onChange={v => setContrast(v ? 1.45 : 1)} />
-          </div>
-          {workspace.pendingCount > 0 && (
-            <Button block onClick={() => { setSettingsOpen(false); workspace.openQueueModal() }}>
-              查看本地待传记录（{workspace.pendingCount}）
-            </Button>
-          )}
-          {task && question && (
-            <Space wrap>
-              {(['exception', 'excellent'] as const).map(kind => (
-                <Button
-                  key={kind}
-                  disabled={published || workspace.offline || locked}
-                  onClick={() => Modal.confirm({
-                    title: kind === 'exception' ? '报告异常卷' : '标记优秀卷',
-                    content: '将当前作答交由管理员查看。',
-                    onOk: async () => {
-                      await send(`/tasks/${task.id}/report`, { kind, reason: '' })
-                      message.success('已报告')
-                    },
-                  })}
-                >
-                  {kind === 'exception' ? '报告异常卷' : '标记优秀卷'}
-                </Button>
-              ))}
+        <div className="m-adm-popup-head">
+          <strong>阅卷设置</strong>
+          <Button size="mini" fill="none" onClick={() => setSettingsOpen(false)}>关闭</Button>
+        </div>
+        <div className="m-adm-popup-body">
+          <List>
+            <List.Item
+              title="预设分值步进"
+              extra={<Stepper min={0.5} max={10} step={0.5} value={step} onChange={n => setStep(n || 0.5)} />}
+            />
+            <List.Item
+              title="服务端确认后自动下一份"
+              extra={<Switch checked={automatic} onChange={setAutomatic} />}
+            />
+            <List.Item
+              title="题图高对比度显示"
+              extra={<Switch checked={contrast > 1} onChange={v => setContrast(v ? 1.45 : 1)} />}
+            />
+            {workspace.pendingCount > 0 && (
+              <List.Item
+                title={`本地待传记录（${workspace.pendingCount}）`}
+                arrow
+                onClick={() => { setSettingsOpen(false); workspace.openQueueModal() }}
+              />
+            )}
+          </List>
+          {task && question && !published && !workspace.offline && (
+            <Space wrap block>
+              <Button size="small" fill="outline" disabled={locked} onClick={() => { setSettingsOpen(false); void reportCurrent('exception') }}>报告异常卷</Button>
+              <Button size="small" fill="outline" disabled={locked} onClick={() => { setSettingsOpen(false); void reportCurrent('excellent') }}>标记优秀卷</Button>
             </Space>
           )}
-          <Button icon={<DesktopOutlined />} block onClick={() => { setSettingsOpen(false); onSwitchDesktop() }}>
-            切换到桌面版阅卷台
+          <Button block fill="outline" onClick={() => { setSettingsOpen(false); onSwitchDesktop() }}>
+            <DesktopOutlined /> 切换到桌面版阅卷台
           </Button>
-        </Space>
-      </Drawer>
+        </div>
+      </Popup>
     </section>
   )
 }

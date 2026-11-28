@@ -13,7 +13,20 @@ type Workspace={user:User;offline:boolean;records:ReviewRecord[];ready:boolean;s
 const Context=createContext<Workspace|null>(null)
 export function useReviewWorkspace(){const value=useContext(Context);if(!value)throw new Error('阅卷工作区尚未初始化');return value}
 
-export function ReviewWorkspace({user,offline,onVerified,onLoginRequired,children}:{user:User;offline:boolean;onVerified:(user:User)=>void;onLoginRequired:()=>void;children:ReactNode}){
+export type ReviewQueueOverlayProps = {
+  open: boolean
+  setOpen: (open: boolean) => void
+  pending: ReviewRecord[]
+  failed: ReviewRecord[]
+  conflicts: ReviewRecord[]
+  status: SyncReport
+  error: string
+  retry: () => Promise<void>
+  exportRecords: () => void
+  forget: (owner: string, taskId: string) => Promise<void>
+}
+
+export function ReviewWorkspace({user,offline,onVerified,onLoginRequired,renderQueueOverlay,children}:{user:User;offline:boolean;onVerified:(user:User)=>void;onLoginRequired:()=>void;renderQueueOverlay?:(props:ReviewQueueOverlayProps)=>ReactNode;children:ReactNode}){
   useEffect(() => {
     if (!import.meta.env.PROD || user.role === 'admin' || !('serviceWorker' in navigator)) return
     let mounted = true
@@ -102,10 +115,10 @@ export function ReviewWorkspace({user,offline,onVerified,onLoginRequired,childre
     return()=>clearTimeout(timer)
   },[nextAttempt,queueKey,status.state,sync])
   const pendingCount=records.filter(r=>r.operation).length
-  return <Context.Provider value={{user,offline:offline||status.state==='offline',records,ready,storageError,updateLocked:locked,pendingCount,sync,setQueueTarget,openQueueModal}}>{children}<ReviewQueueStatus records={records} status={status} error={storageError} sync={sync} target={queueTarget} open={queueOpen} setOpen={setQueueOpen}/></Context.Provider>
+  return <Context.Provider value={{user,offline:offline||status.state==='offline',records,ready,storageError,updateLocked:locked,pendingCount,sync,setQueueTarget,openQueueModal}}>{children}<ReviewQueueStatus records={records} status={status} error={storageError} sync={sync} target={queueTarget} open={queueOpen} setOpen={setQueueOpen} renderQueueOverlay={renderQueueOverlay}/></Context.Provider>
 }
 
-function ReviewQueueStatus({records,status,error,sync,target,open,setOpen}:{records:ReviewRecord[];status:SyncReport;error:string;sync:()=>Promise<SyncReport>;target:HTMLDivElement|null;open:boolean;setOpen:(open:boolean)=>void}){
+function ReviewQueueStatus({records,status,error,sync,target,open,setOpen,renderQueueOverlay}:{records:ReviewRecord[];status:SyncReport;error:string;sync:()=>Promise<SyncReport>;target:HTMLDivElement|null;open:boolean;setOpen:(open:boolean)=>void;renderQueueOverlay?:(props:ReviewQueueOverlayProps)=>ReactNode}){
   const pending=records.filter(r=>r.operation),queued=pending.filter(r=>r.status==='queued'),failed=pending.filter(r=>r.status==='failed'),conflicts=pending.filter(r=>r.status==='conflict')
   const {message}=App.useApp()
   async function retry(){
@@ -121,8 +134,10 @@ function ReviewQueueStatus({records,status,error,sync,target,open,setOpen}:{reco
     {pending.length>0&&<Button size="small" onClick={()=>setOpen(true)}>查看本地记录</Button>}</Space></div>
   return <>
     {target?createPortal(notice,target):notice}
-    <Modal title="本地待传评分" width={760} open={open} onCancel={()=>setOpen(false)} footer={<Space><Button onClick={exportRecords}>导出记录</Button><Button onClick={()=>setOpen(false)}>关闭</Button></Space>}>
-      <Table rowKey="key" dataSource={pending} pagination={{defaultPageSize:50}} columns={[{title:'题卡',render:(_,r)=>r.template.name},{title:'题号',render:(_,r)=>questionLabel(r.question)},{title:'分数',render:(_,r)=>r.operation?.score},{title:'状态',render:(_,r)=>r.error||'等待服务器确认'},{title:'操作',render:(_,r)=>r.status==='conflict'?<Popconfirm title="确认已核对或导出这份记录？" description="仅移除本地记录，服务器评分保持当前结果。" onConfirm={()=>forgetReview(r.owner,r.task.id)}><Button size="small">移除本地记录</Button></Popconfirm>:null}]}/>
-    </Modal>
+    {renderQueueOverlay
+      ? renderQueueOverlay({open,setOpen,pending,failed,conflicts,status,error,retry,exportRecords,forget:forgetReview})
+      : <Modal title="本地待传评分" width={760} open={open} onCancel={()=>setOpen(false)} footer={<Space><Button onClick={exportRecords}>导出记录</Button><Button onClick={()=>setOpen(false)}>关闭</Button></Space>}>
+          <Table rowKey="key" dataSource={pending} pagination={{defaultPageSize:50}} columns={[{title:'题卡',render:(_,r)=>r.template.name},{title:'题号',render:(_,r)=>questionLabel(r.question)},{title:'分数',render:(_,r)=>r.operation?.score},{title:'状态',render:(_,r)=>r.error||'等待服务器确认'},{title:'操作',render:(_,r)=>r.status==='conflict'?<Popconfirm title="确认已核对或导出这份记录？" description="仅移除本地记录，服务器评分保持当前结果。" onConfirm={()=>forgetReview(r.owner,r.task.id)}><Button size="small">移除本地记录</Button></Popconfirm>:null}]}/>
+        </Modal>}
   </>
 }

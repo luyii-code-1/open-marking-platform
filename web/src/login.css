@@ -74,3 +74,15 @@
 :root[data-theme='dark'] .login-error{background:#2b1619;border-color:#6b2428;color:#fca5a5}
 :root[data-theme='dark'] .login-notice{background:#132a1e;border-color:#1f5c3a;color:#86efac}
 :root[data-theme='dark'] .route-loading button,:root[data-theme='dark'] .login-links button{color:#60a5fa}
+
+/* Mobile teacher login visual continuity (lightweight, no antd-mobile dependency in startup chunk) */
+.login-screen.is-mobile .login-theme-bar{top:max(12px,env(safe-area-inset-top,0px));right:max(14px,env(safe-area-inset-right,0px))}
+.login-screen.is-mobile .login-content{align-content:start;padding:calc(54px + env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-right,0px)) 20px max(16px,env(safe-area-inset-left,0px))}
+.login-screen.is-mobile .login-card{width:100%;max-width:440px;border-radius:16px;padding:24px 20px 26px;box-shadow:0 4px 20px rgba(15,23,42,.06)}
+.login-screen.is-mobile .login-role-switch{border-radius:10px;padding:4px}
+.login-screen.is-mobile .login-role-btn{min-height:42px;border-radius:8px;font-size:15px}
+.login-screen.is-mobile .login-input{border-radius:10px}
+.login-screen.is-mobile .login-input input{min-height:46px;padding:10px 12px}
+.login-screen.is-mobile .login-eye{width:44px}
+.login-screen.is-mobile .login-button{min-height:48px;border-radius:12px;font-weight:600}
+.login-screen.is-mobile .login-links button{min-height:44px}

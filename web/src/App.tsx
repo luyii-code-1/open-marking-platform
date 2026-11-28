@@ -75,7 +75,7 @@ export function App() {
     : page === 'login' ? null : page
   usePageViews(waiting ? null : displayed, guardPage ? guardView(location.section) : window.location.hash)
   if (waiting) return <div className="screen-center"><PageLoading/></div>
-  if (!user) return <Login portal={loginPortal} sessionNotice={sessionNotice} onDismissSessionNotice={clearSessionNotice} onPortal={value=>{
+  if (!user) return <Login portal={loginPortal} mobile={platform === 'mobile'} sessionNotice={sessionNotice} onDismissSessionNotice={clearSessionNotice} onPortal={value=>{
     if (location.page === 'login') navigate(value ? '#/login/' + value : '#/')
   }} onLogin={(person,selected)=>{
     clearSessionNotice()

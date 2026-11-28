@@ -7,7 +7,7 @@ import { THEME_MODE_LABELS, useThemeMode } from './themeMode'
 
 export type Portal = 'marking' | 'admin'
 type Mode = 'password' | 'passkey' | 'forgot' | 'bootstrap'
-type Props = { portal?: Portal; sessionNotice?: string; onDismissSessionNotice?: () => void; onPortal: (portal?: Portal) => void; onLogin: (user: User, portal: Portal) => void }
+type Props = { portal?: Portal; mobile?: boolean; sessionNotice?: string; onDismissSessionNotice?: () => void; onPortal: (portal?: Portal) => void; onLogin: (user: User, portal: Portal) => void }
 type FieldProps = InputHTMLAttributes<HTMLInputElement> & { label: string; name: string }
 
 function Field({ label, name, type = 'text', ...props }: FieldProps) {
@@ -24,7 +24,7 @@ function Field({ label, name, type = 'text', ...props }: FieldProps) {
   </div>
 }
 
-export function Login({ portal, sessionNotice, onDismissSessionNotice, onPortal, onLogin }: Props) {
+export function Login({ portal, mobile = false, sessionNotice, onDismissSessionNotice, onPortal, onLogin }: Props) {
   const [role, setRole] = useState<Portal>(() => portal || (sessionStorage.getItem('omp-login-role') === 'admin' ? 'admin' : 'marking'))
   const [mode, setMode] = useState<Mode>('password'), [loading, setLoading] = useState(false)
   const [error, setError] = useState(''), [notice, setNotice] = useState('')
@@ -98,7 +98,7 @@ export function Login({ portal, sessionNotice, onDismissSessionNotice, onPortal,
   const { mode: themeMode, cycle: cycleTheme } = useThemeMode()
   const recovery = mode === 'forgot', bootstrap = mode === 'bootstrap'
   const title = recovery ? '重置密码' : bootstrap ? '创建管理员' : role === 'admin' ? '管理员登录' : '教师端登录'
-  return <div className="login-screen"><div className="login-theme-bar"><button type="button" className="login-theme-btn" onClick={cycleTheme}>{THEME_MODE_LABELS[themeMode]}</button></div><main className="login-content"><section className="login-card">
+  return <div className={`login-screen${mobile ? ' is-mobile' : ''}`}><div className="login-theme-bar"><button type="button" className="login-theme-btn" onClick={cycleTheme}>{THEME_MODE_LABELS[themeMode]}</button></div><main className="login-content"><section className="login-card">
     {(recovery || bootstrap) && <button type="button" className="login-back" disabled={loading} onClick={() => selectMode('password')}>
       <span className="login-glyph glyph-back" aria-hidden="true"/>返回登录</button>}
     <Brand login/><h3>{title}</h3>

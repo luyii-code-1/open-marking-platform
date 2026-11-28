@@ -1,0 +1,348 @@
+/* Scoped Ant Design Mobile theme tokens & layout rules for the mobile teacher PWA.
+ * Applied only while MobileTeacherApp is mounted (html.omp-mobile-adm) so desktop chunks and login stay untouched.
+ */
+
+html.omp-mobile-adm {
+  --adm-color-primary: #1677ff;
+  --adm-color-success: #16a34a;
+  --adm-color-warning: #d97706;
+  --adm-color-danger: #dc2626;
+  --adm-color-background: #ffffff;
+  --adm-color-box: #f5f7fa;
+  --adm-color-text: #16283b;
+  --adm-color-text-secondary: #59697c;
+  --adm-color-weak: #64748b;
+  --adm-color-border: #e5e9f0;
+  --adm-font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei UI', 'Segoe UI', sans-serif;
+}
+
+html.omp-mobile-adm[data-prefers-color-scheme='dark'] {
+  --adm-color-primary: #3b82f6;
+  --adm-color-success: #22c55e;
+  --adm-color-warning: #f59e0b;
+  --adm-color-danger: #ef4444;
+  --adm-color-background: #141a24;
+  --adm-color-box: #0b0f16;
+  --adm-color-text: #e6edf3;
+  --adm-color-text-secondary: #9fb0c3;
+  --adm-color-weak: #7d8fa3;
+  --adm-color-border: #253042;
+}
+
+/* Ensure body-mounted Ant Design Mobile portals inherit dark/light tokens & safe areas */
+html.omp-mobile-adm .adm-popup-body,
+html.omp-mobile-adm .adm-dialog-body,
+html.omp-mobile-adm .adm-action-sheet-popup .adm-popup-body {
+  background-color: var(--adm-color-background);
+  color: var(--adm-color-text);
+}
+
+html.omp-mobile-adm .adm-list-body {
+  background-color: var(--adm-color-background);
+  border-color: var(--adm-color-border);
+}
+
+html.omp-mobile-adm .adm-list-item {
+  background-color: var(--adm-color-background);
+  color: var(--adm-color-text);
+}
+
+html.omp-mobile-adm .adm-nav-bar {
+  background-color: var(--adm-color-background);
+  color: var(--adm-color-text);
+  border-bottom: 1px solid var(--adm-color-border);
+  padding-top: env(safe-area-inset-top, 0px);
+  height: calc(46px + env(safe-area-inset-top, 0px));
+}
+
+html.omp-mobile-adm .adm-tab-bar {
+  background-color: var(--adm-color-background);
+  border-top: 1px solid var(--adm-color-border);
+}
+
+/* Mobile Shell & Fixed TabBar */
+.m-adm-shell {
+  min-height: var(--mobile-vh, 100dvh);
+  display: flex;
+  flex-direction: column;
+  background: var(--adm-color-box);
+  color: var(--adm-color-text);
+}
+
+.m-adm-header-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  background: var(--adm-color-background);
+}
+
+.m-adm-body {
+  flex: 1;
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 12px max(12px, env(safe-area-inset-right, 0px)) calc(74px + env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px));
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.m-adm-tabbar-wrap {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  background: var(--adm-color-background);
+  border-top: 1px solid var(--adm-color-border);
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+}
+
+.m-adm-resume {
+  background: var(--adm-color-background);
+  border: 1px solid color-mix(in srgb, var(--adm-color-primary) 26%, var(--adm-color-border));
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.m-adm-resume-badge {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--adm-color-primary);
+}
+
+.m-adm-resume-title {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--adm-color-text);
+}
+
+.m-adm-resume-sub {
+  margin: 0 0 10px;
+  font-size: 13px;
+  color: var(--adm-color-text-secondary);
+}
+
+.m-adm-nav-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.m-adm-nav-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 34px;
+  min-width: 34px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--adm-color-text);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.m-adm-nav-btn:active {
+  background: var(--adm-color-box);
+}
+
+.m-adm-tag-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.m-adm-progress-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--adm-color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Popup Header & Content Padding */
+.m-adm-popup-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid var(--adm-color-border);
+}
+
+.m-adm-popup-head strong {
+  font-size: 16px;
+  font-weight: 650;
+  color: var(--adm-color-text);
+}
+
+.m-adm-popup-body {
+  padding: 12px 16px calc(16px + env(safe-area-inset-bottom, 0px));
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Mobile Marking NavBar & Selector Integration */
+.m-marking .adm-nav-bar {
+  flex-shrink: 0;
+  --height: 48px;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-left: max(8px, env(safe-area-inset-left, 0px));
+  padding-right: max(8px, env(safe-area-inset-right, 0px));
+}
+
+.m-marking .m-adm-title-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  max-width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 2px 4px;
+  cursor: pointer;
+}
+
+.m-marking .m-adm-title-btn strong {
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.m-marking .m-adm-title-btn small {
+  font-size: 11px;
+  color: var(--adm-color-text-secondary);
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.m-marking .m-adm-presets-wrap {
+  min-width: 0;
+  max-height: min(24dvh, 144px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.m-marking .m-adm-presets-wrap .adm-selector {
+  --border-radius: 9px;
+  --padding: 9px 4px;
+  --gap: 7px;
+  --color: var(--adm-color-box);
+  --checked-color: color-mix(in srgb, var(--adm-color-primary) 14%, var(--adm-color-background));
+  --checked-text-color: var(--adm-color-primary);
+  --checked-border: 1.5px solid var(--adm-color-primary);
+  --text-color: var(--adm-color-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.m-marking .m-adm-presets-wrap .adm-selector-item {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.m-marking.is-landscape .m-adm-presets-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+}
+
+@media (max-height: 430px) {
+  .m-marking:not(.is-landscape) .m-adm-presets-wrap {
+    max-height: 52px;
+  }
+}
+
+/* Mobile Paper Lesson & Class Results */
+.m-adm-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.m-adm-kpi-card {
+  background: var(--adm-color-background);
+  border: 1px solid var(--adm-color-border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.m-adm-kpi-card span {
+  font-size: 12px;
+  color: var(--adm-color-text-secondary);
+}
+
+.m-adm-kpi-card strong {
+  font-size: 19px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--adm-color-text);
+}
+
+.m-adm-kpi-card small {
+  font-size: 11px;
+  color: var(--adm-color-weak);
+}
+
+.m-adm-lesson-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--adm-color-background);
+  border: 1px solid var(--adm-color-border);
+  border-radius: 12px;
+}
+
+.m-adm-student-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.m-adm-score-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.m-adm-score-chip {
+  font-size: 12px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--adm-color-box);
+  color: var(--adm-color-text);
+  font-variant-numeric: tabular-nums;
+}

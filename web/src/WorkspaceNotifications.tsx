@@ -82,7 +82,16 @@ export function useWorkspaceNotifications(): NotificationsContextValue {
   return useContext(NotificationsContext) ?? fallbackContext
 }
 
-export function WorkspaceNotificationsProvider({ isAdmin, offline = false, children }: { isAdmin: boolean; offline?: boolean; children: ReactNode }) {
+export type NotificationsDrawerProps = {
+  open: boolean
+  setOpen: (open: boolean) => void
+  slow: boolean
+  templateNotices: Row[]
+  activityLoading: boolean
+  reloadActivity: () => Promise<void>
+}
+
+export function WorkspaceNotificationsProvider({ isAdmin, offline = false, renderDrawer, children }: { isAdmin: boolean; offline?: boolean; renderDrawer?: (props: NotificationsDrawerProps) => ReactNode; children: ReactNode }) {
   const [open, setOpen] = useState(false)
   const [slow, setSlow] = useState(false)
   const [jobs, setJobs] = useState<Row[]>([])
@@ -249,6 +258,7 @@ export function WorkspaceNotificationsProvider({ isAdmin, offline = false, child
       }}
     >
       {children}
+      {renderDrawer ? renderDrawer({ open, setOpen, slow, templateNotices, activityLoading, reloadActivity: loadActivity }) : (
       <Drawer
         title={`重要通知${count > 0 ? `（${count}）` : ''}`}
         open={open}
@@ -378,6 +388,7 @@ export function WorkspaceNotificationsProvider({ isAdmin, offline = false, child
           )}
         </Space>
       </Drawer>
+      )}
       <span className="sr-only" aria-live="polite" data-notification-count={count} />
     </NotificationsContext.Provider>
   )
