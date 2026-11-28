@@ -735,7 +735,7 @@
   min-width: 0;
   min-height: 0;
   overflow: auto;
-  touch-action: pan-x pan-y;
+  touch-action: none;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
   padding: 8px;
@@ -752,6 +752,10 @@
   transition: width 0.08s ease-out;
 }
 
+.m-sheet-stage.is-pinching {
+  transition: none;
+}
+
 .m-sheet-stage .review-sheet,
 .m-sheet-stage img {
   display: block;
@@ -763,6 +767,7 @@
 }
 
 .m-zoom-bar {
+  box-sizing: border-box;
   flex: 0 0 auto;
   width: 100%;
   max-width: 100%;
@@ -778,6 +783,7 @@
 }
 
 .m-zoom-bar button {
+  box-sizing: border-box;
   min-width: 44px;
   min-height: 44px;
   padding: 6px 12px;

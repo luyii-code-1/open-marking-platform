@@ -90,11 +90,13 @@ export function MobileMarking({ initialProjectId, initialTemplateId, initialQues
   const historyContext = useRef('')
   historyContext.current = `${templateId}:${questionId}`
 
-  // Pinch-to-zoom & double-tap tracking
+  // Pinch-to-zoom, single-finger pan, & double-tap tracking
   const pointers = useRef(new Map<number, { x: number; y: number }>())
   const pinchStart = useRef<PinchState | null>(null)
+  const panStart = useRef<{ id: number; x: number; y: number; scrollLeft: number; scrollTop: number } | null>(null)
   const tapStart = useRef<{ id: number; x: number; y: number; moved: number } | null>(null)
   const lastTap = useRef<TapRecord | null>(null)
+  const [pinching, setPinching] = useState(false)
   const [viewportWidth, setViewportWidth] = useState(0)
 
   const progress = useResource<Row>(
@@ -187,7 +189,9 @@ export function MobileMarking({ initialProjectId, initialTemplateId, initialQues
   useEffect(() => {
     pointers.current.clear()
     pinchStart.current = null
+    panStart.current = null
     tapStart.current = null
+    setPinching(false)
   }, [wide])
 
   // Remember last active task for "继续阅卷" only after confirming it is a valid authorized task
@@ -549,17 +553,25 @@ export function MobileMarking({ initialProjectId, initialTemplateId, initialQues
   }
 
   function handlePointerDown(e: ReactPointerEvent<HTMLDivElement>) {
+    try { e.currentTarget.setPointerCapture(e.pointerId) } catch {}
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+    const el = readingRef.current
     if (pointers.current.size === 2) {
+      panStart.current = null
       tapStart.current = null
       lastTap.current = null
-      const el = readingRef.current
+      setPinching(true)
       if (el) {
         const [a, b] = [...pointers.current.values()]
         pinchStart.current = beginPinch(a, b, el.getBoundingClientRect(), el.scrollLeft, el.scrollTop, zoom)
       }
-    } else if (pointers.current.size === 1 && e.pointerType === 'touch') {
-      tapStart.current = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: 0 }
+    } else if (pointers.current.size === 1) {
+      if (el) {
+        panStart.current = { id: e.pointerId, x: e.clientX, y: e.clientY, scrollLeft: el.scrollLeft, scrollTop: el.scrollTop }
+      }
+      if (e.pointerType === 'touch') {
+        tapStart.current = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: 0 }
+      }
     }
   }
 
@@ -569,22 +581,39 @@ export function MobileMarking({ initialProjectId, initialTemplateId, initialQues
     if (tapStart.current && tapStart.current.id === e.pointerId) {
       tapStart.current.moved = Math.max(tapStart.current.moved, Math.hypot(e.clientX - tapStart.current.x, e.clientY - tapStart.current.y))
     }
-    if (pointers.current.size === 2 && pinchStart.current && readingRef.current) {
+    const el = readingRef.current
+    if (pointers.current.size === 2 && pinchStart.current && el) {
       const [a, b] = [...pointers.current.values()]
-      const next = updatePinch(pinchStart.current, a, b, readingRef.current.getBoundingClientRect())
+      const next = updatePinch(pinchStart.current, a, b, el.getBoundingClientRect())
       setZoom(next.zoom)
-      requestAnimationFrame(() => {
-        if (readingRef.current) {
-          readingRef.current.scrollLeft = next.scrollLeft
-          readingRef.current.scrollTop = next.scrollTop
-        }
-      })
+      el.scrollLeft = next.scrollLeft
+      el.scrollTop = next.scrollTop
+    } else if (pointers.current.size === 1 && panStart.current && panStart.current.id === e.pointerId && el) {
+      el.scrollLeft = Math.max(0, panStart.current.scrollLeft - (e.clientX - panStart.current.x))
+      el.scrollTop = Math.max(0, panStart.current.scrollTop - (e.clientY - panStart.current.y))
     }
   }
 
-  function handlePointerUp(e: ReactPointerEvent<HTMLDivElement>) {
+  function handlePointerCancel(e: ReactPointerEvent<HTMLDivElement>) {
+    try { if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId) } catch {}
     pointers.current.delete(e.pointerId)
-    if (pointers.current.size < 2) pinchStart.current = null
+    if (pointers.current.size < 2) {
+      pinchStart.current = null
+      setPinching(false)
+    }
+    if (panStart.current?.id === e.pointerId) panStart.current = null
+    if (tapStart.current?.id === e.pointerId) tapStart.current = null
+    lastTap.current = null
+  }
+
+  function handlePointerUp(e: ReactPointerEvent<HTMLDivElement>) {
+    try { if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId) } catch {}
+    pointers.current.delete(e.pointerId)
+    if (pointers.current.size < 2) {
+      pinchStart.current = null
+      setPinching(false)
+    }
+    if (panStart.current?.id === e.pointerId) panStart.current = null
     if (tapStart.current && tapStart.current.id === e.pointerId) {
       const { moved } = tapStart.current
       tapStart.current = null
@@ -681,9 +710,9 @@ export function MobileMarking({ initialProjectId, initialTemplateId, initialQues
               onPointerDown={handlePointerDown}
               onPointerMove={handlePointerMove}
               onPointerUp={handlePointerUp}
-              onPointerCancel={handlePointerUp}
+              onPointerCancel={handlePointerCancel}
             >
-              <div className="m-sheet-stage" style={stageWidthStyle}>
+              <div className={`m-sheet-stage${pinching ? ' is-pinching' : ''}`} style={stageWidthStyle}>
                 {record ? (
                   <ReviewImage sheet={record.sheet} image={record.image} style={{ filter: `contrast(${contrast})` }} />
                 ) : (

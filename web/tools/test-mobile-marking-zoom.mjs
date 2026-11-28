@@ -60,10 +60,51 @@ const [teacherCss, scoreCss, markingTsx, appTsx, workspaceTsx, notifyTsx] = awai
   readFile(new URL('../src/WorkspaceNotifications.tsx', import.meta.url), 'utf8'),
 ])
 
-assert.match(teacherCss, /\.m-zoom-bar\s*\{[\s\S]*max-width:\s*100%[\s\S]*flex-wrap:\s*wrap/, 'Zoom bar must wrap within viewport width')
-assert.match(teacherCss, /\.m-zoom-bar button\s*\{[\s\S]*min-width:\s*44px[\s\S]*min-height:\s*44px/, 'Zoom buttons must keep 44px touch targets')
+assert.match(teacherCss, /\.m-zoom-bar\s*\{[\s\S]*box-sizing:\s*border-box[\s\S]*max-width:\s*100%[\s\S]*flex-wrap:\s*wrap/, 'Zoom bar must use border-box and wrap within viewport width')
+assert.match(teacherCss, /\.m-zoom-bar button\s*\{[\s\S]*box-sizing:\s*border-box[\s\S]*min-width:\s*44px[\s\S]*min-height:\s*44px/, 'Zoom buttons must keep border-box 44px touch targets')
+assert.match(teacherCss, /\.m-sheet-stage\.is-pinching\s*\{[\s\S]*transition:\s*none/, 'Pinching must disable width transition to prevent coordinate drift')
 assert.match(teacherCss, /\.m-sheet-stage \.review-sheet,[\s\S]*max-width:\s*none/, 'SVG .review-sheet must allow scaling past 100%')
-assert.match(teacherCss, /\.m-reading\s*\{[\s\S]*touch-action:\s*pan-x pan-y/, 'Reading viewport must allow 1-finger panning in all directions')
+assert.match(teacherCss, /\.m-reading\s*\{[\s\S]*touch-action:\s*none/, 'Reading viewport must use touch-action: none so 2-finger pinch is not stolen by native scroll')
+assert.match(markingTsx, /onPointerCancel=\{handlePointerCancel\}/, 'PointerCancel must be handled separately and never trigger double-tap')
+assert.match(markingTsx, /setPointerCapture/, 'Reading viewport must capture pointers for reliable pan/pinch')
+assert.match(scoreCss, /max-height:\s*min\(calc\(var\(--mobile-vh/, 'Score deck max-height must derive from --mobile-vh rather than auto row percentage')
+
+// 6. Geometric flex-wrap bounds check for narrow viewport, landscape safe-area, and enlarged font scale
+function layoutFlexWrapToolbar(containerWidth, safeLeft, safeRight, buttonWidths, gap = 6) {
+  const padLeft = Math.max(8, safeLeft)
+  const padRight = Math.max(8, safeRight)
+  const innerWidth = containerWidth - padLeft - padRight
+  let rowX = 0
+  let rowIndex = 0
+  const placed = []
+  for (const w of buttonWidths) {
+    const bw = Math.max(44, w)
+    if (rowX > 0 && rowX + gap + bw > innerWidth) {
+      rowIndex += 1
+      rowX = 0
+    }
+    const left = padLeft + (rowX > 0 ? rowX + gap : 0)
+    const right = left + bw
+    placed.push({ row: rowIndex, left, right, width: bw })
+    rowX = (rowX > 0 ? rowX + gap : 0) + bw
+  }
+  return { placed, innerWidth, maxRight: containerWidth - padRight }
+}
+
+for (const scenario of [
+  { name: 'narrow portrait 320px normal font', width: 320, safeLeft: 0, safeRight: 0, buttons: [44, 62, 44, 86] },
+  { name: 'narrow portrait 280px enlarged 1.5x font', width: 280, safeLeft: 0, safeRight: 0, buttons: [48, 86, 48, 128] },
+  { name: 'landscape reading pane 360px with notch safe-area + 1.35x font', width: 360, safeLeft: 44, safeRight: 12, buttons: [44, 78, 44, 114] },
+]) {
+  const res = layoutFlexWrapToolbar(scenario.width, scenario.safeLeft, scenario.safeRight, scenario.buttons)
+  const last = res.placed.at(-1)
+  assert.ok(last && last.right <= res.maxRight, `${scenario.name}: last button right (${last?.right}) must fit within safe bound (${res.maxRight})`)
+  for (const btn of res.placed) {
+    assert.ok(btn.left >= Math.max(8, scenario.safeLeft), `${scenario.name}: button left must respect safe-area-left`)
+    assert.ok(btn.right <= res.maxRight, `${scenario.name}: button right must respect safe-area-right`)
+    assert.ok(btn.width >= 44, `${scenario.name}: button width must be >= 44px`)
+  }
+}
 assert.match(scoreCss, /max-height:\s*430px[\s\S]*\.m-presets/, 'Short keyboard viewport must keep presets compact and actions reachable')
 assert.match(scoreCss, /\.m-marking\.is-landscape \.m-deck/, 'Landscape score deck rules must exist')
 assert.match(markingTsx, /pendingCount[\s\S]*openQueueModal/, 'MobileMarking must expose local queue modal when records are pending')

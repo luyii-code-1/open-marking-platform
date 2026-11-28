@@ -36,9 +36,10 @@
 
 /* Portrait default: keep reading area readable and prevent deck overflow */
 .m-marking .m-deck {
+  box-sizing: border-box;
   min-width: 0;
   max-width: 100%;
-  max-height: min(52%, 340px);
+  max-height: min(calc(var(--mobile-vh, 100dvh) * 0.48), 340px);
   overflow-x: clip;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -216,7 +217,7 @@
   }
 
   .m-marking:not(.is-landscape) .m-deck {
-    max-height: 54%;
+    max-height: calc(var(--mobile-vh, 100dvh) * 0.52);
     padding-top: 6px;
     padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px));
     gap: 6px;
@@ -241,7 +242,7 @@
 
 @media (max-height: 430px) {
   .m-marking:not(.is-landscape) .m-deck {
-    max-height: 58%;
+    max-height: calc(var(--mobile-vh, 100dvh) * 0.56);
     gap: 5px;
   }
 
