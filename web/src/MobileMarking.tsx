@@ -138,7 +138,9 @@ export function MobileMarking({ initialProjectId, initialTemplateId, initialQues
     const syncViewport = () => {
       const vh = window.visualViewport?.height ?? window.innerHeight
       const vw = window.visualViewport?.width ?? window.innerWidth
-      if (rootRef.current) rootRef.current.style.setProperty('--mobile-vh', `${Math.max(280, Math.round(vh))}px`)
+      const heightPx = `${Math.max(180, Math.round(vh))}px`
+      if (rootRef.current) rootRef.current.style.setProperty('--mobile-vh', heightPx)
+      document.documentElement.style.setProperty('--mobile-vh', heightPx)
       setWide(isMobileWideLayout(vw, vh))
     }
     syncViewport()
@@ -146,6 +148,7 @@ export function MobileMarking({ initialProjectId, initialTemplateId, initialQues
     window.addEventListener('orientationchange', syncViewport)
     window.visualViewport?.addEventListener('resize', syncViewport)
     return () => {
+      document.documentElement.style.removeProperty('--mobile-vh')
       window.removeEventListener('resize', syncViewport)
       window.removeEventListener('orientationchange', syncViewport)
       window.visualViewport?.removeEventListener('resize', syncViewport)
@@ -921,6 +924,7 @@ export function MobileMarking({ initialProjectId, initialTemplateId, initialQues
 
       <ActionSheet
         visible={moreOpen}
+        closeOnAction
         cancelText="取消"
         actions={moreActions}
         onClose={() => setMoreOpen(false)}
@@ -930,7 +934,11 @@ export function MobileMarking({ initialProjectId, initialTemplateId, initialQues
         visible={historyOpen}
         onMaskClick={() => setHistoryOpen(false)}
         position={wide ? 'right' : 'bottom'}
-        bodyStyle={wide ? { width: 'min(420px, 85vw)', height: '100%', display: 'flex', flexDirection: 'column' } : { borderTopLeftRadius: 16, borderTopRightRadius: 16, height: '76dvh', display: 'flex', flexDirection: 'column' }}
+        bodyStyle={
+          wide
+            ? { width: 'min(420px, 85vw)', height: '100%', maxHeight: 'var(--mobile-vh, 100dvh)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }
+            : { borderTopLeftRadius: 16, borderTopRightRadius: 16, height: 'min(76dvh, calc(var(--mobile-vh, 100dvh) - 12px))', maxHeight: 'calc(var(--mobile-vh, 100dvh) - 12px)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }
+        }
       >
         <div className="m-adm-popup-head">
           <strong>{published ? '我的评分记录（已锁定）' : reopened ? '历史与回评（复核中）' : '评分历史与回评'}</strong>
@@ -996,7 +1004,7 @@ export function MobileMarking({ initialProjectId, initialTemplateId, initialQues
         visible={!!regradeStart}
         onMaskClick={() => setRegradeStart(null)}
         position="bottom"
-        bodyStyle={{ borderTopLeftRadius: 16, borderTopRightRadius: 16 }}
+        bodyStyle={{ borderTopLeftRadius: 16, borderTopRightRadius: 16, maxHeight: 'calc(var(--mobile-vh, 100dvh) - 12px)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
       >
         <div className="m-adm-popup-head">
           <strong>从这份评分起顺序重阅</strong>
@@ -1030,7 +1038,11 @@ export function MobileMarking({ initialProjectId, initialTemplateId, initialQues
         visible={progressOpen}
         onMaskClick={() => setProgressOpen(false)}
         position={wide ? 'right' : 'bottom'}
-        bodyStyle={wide ? { width: 'min(380px, 85vw)', height: '100%', display: 'flex', flexDirection: 'column' } : { borderTopLeftRadius: 16, borderTopRightRadius: 16, maxHeight: '72dvh', display: 'flex', flexDirection: 'column' }}
+        bodyStyle={
+          wide
+            ? { width: 'min(380px, 85vw)', height: '100%', maxHeight: 'var(--mobile-vh, 100dvh)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }
+            : { borderTopLeftRadius: 16, borderTopRightRadius: 16, maxHeight: 'min(72dvh, calc(var(--mobile-vh, 100dvh) - 12px))', display: 'flex', flexDirection: 'column', overflow: 'hidden' }
+        }
       >
         <div className="m-adm-popup-head">
           <strong>任务详情与评阅进度</strong>
@@ -1070,7 +1082,11 @@ export function MobileMarking({ initialProjectId, initialTemplateId, initialQues
         visible={settingsOpen}
         onMaskClick={() => setSettingsOpen(false)}
         position={wide ? 'right' : 'bottom'}
-        bodyStyle={wide ? { width: 'min(360px, 85vw)', height: '100%', display: 'flex', flexDirection: 'column' } : { borderTopLeftRadius: 16, borderTopRightRadius: 16, maxHeight: '72dvh', display: 'flex', flexDirection: 'column' }}
+        bodyStyle={
+          wide
+            ? { width: 'min(360px, 85vw)', height: '100%', maxHeight: 'var(--mobile-vh, 100dvh)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }
+            : { borderTopLeftRadius: 16, borderTopRightRadius: 16, maxHeight: 'min(72dvh, calc(var(--mobile-vh, 100dvh) - 12px))', display: 'flex', flexDirection: 'column', overflow: 'hidden' }
+        }
       >
         <div className="m-adm-popup-head">
           <strong>阅卷设置</strong>

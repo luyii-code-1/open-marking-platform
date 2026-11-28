@@ -3,9 +3,18 @@
  */
 
 .m-marking {
+  box-sizing: border-box;
+  width: 100%;
   max-width: 100%;
   min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
   overflow: hidden;
+}
+
+.m-marking > * {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .m-marking .m-bar {
@@ -22,12 +31,20 @@
   max-width: 100%;
   padding-right: max(10px, env(safe-area-inset-right, 0px));
   padding-left: max(10px, env(safe-area-inset-left, 0px));
-  max-height: 22%;
+  max-height: min(22dvh, calc(var(--mobile-vh, 100dvh) * 0.22));
+  overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
 
+.m-marking .m-notices .review-queue-status {
+  max-width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .m-marking .m-work {
+  grid-template-columns: minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
   max-width: 100%;

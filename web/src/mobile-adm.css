@@ -37,6 +37,40 @@ html.omp-mobile-adm .adm-action-sheet-popup .adm-popup-body {
   color: var(--adm-color-text);
 }
 
+html.omp-mobile-adm .adm-action-sheet-popup .adm-popup-body {
+  box-sizing: border-box;
+  max-height: calc(var(--mobile-vh, 100dvh) - env(safe-area-inset-top, 0px) - 12px);
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+html.omp-mobile-adm .adm-action-sheet {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 100%;
+  overflow: hidden;
+}
+
+html.omp-mobile-adm .adm-action-sheet-extra {
+  flex: 0 0 auto;
+}
+
+html.omp-mobile-adm .adm-action-sheet-button-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+html.omp-mobile-adm .adm-action-sheet-cancel {
+  flex: 0 0 auto;
+}
+
 html.omp-mobile-adm .adm-list-body {
   background-color: var(--adm-color-background);
   border-color: var(--adm-color-border);
@@ -174,22 +208,34 @@ html.omp-mobile-adm .adm-tab-bar {
 
 /* Popup Header & Content Padding */
 .m-adm-popup-head {
+  flex: 0 0 auto;
+  min-width: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 14px 16px 10px;
+  padding: 14px max(16px, calc(env(safe-area-inset-right, 0px) + 8px)) 10px max(16px, calc(env(safe-area-inset-left, 0px) + 8px));
   border-bottom: 1px solid var(--adm-color-border);
 }
 
+.adm-popup-body-position-right .m-adm-popup-head {
+  padding-left: 16px;
+}
+
 .m-adm-popup-head strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 16px;
   font-weight: 650;
   color: var(--adm-color-text);
 }
 
 .m-adm-popup-body {
-  padding: 12px 16px calc(16px + env(safe-area-inset-bottom, 0px));
+  min-width: 0;
+  min-height: 0;
+  padding: 12px max(16px, calc(env(safe-area-inset-right, 0px) + 8px)) calc(16px + env(safe-area-inset-bottom, 0px)) max(16px, calc(env(safe-area-inset-left, 0px) + 8px));
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   display: flex;
@@ -197,8 +243,16 @@ html.omp-mobile-adm .adm-tab-bar {
   gap: 12px;
 }
 
+.adm-popup-body-position-right .m-adm-popup-body {
+  padding-left: 16px;
+}
+
 /* Mobile Marking NavBar & Selector Integration */
 .m-marking .adm-nav-bar {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   flex-shrink: 0;
   --height: 48px;
   padding-top: env(safe-area-inset-top, 0px);
@@ -206,21 +260,38 @@ html.omp-mobile-adm .adm-tab-bar {
   padding-right: max(8px, env(safe-area-inset-right, 0px));
 }
 
+.m-marking .adm-nav-bar-left,
+.m-marking .adm-nav-bar-right {
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.m-marking .adm-nav-bar-title {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 0 4px;
+  overflow: hidden;
+}
+
 .m-marking .m-adm-title-btn {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  width: 100%;
   min-width: 0;
   max-width: 100%;
+  overflow: hidden;
   border: 0;
   background: transparent;
   color: inherit;
-  padding: 2px 4px;
+  padding: 2px 2px;
   cursor: pointer;
 }
 
 .m-marking .m-adm-title-btn strong {
+  display: block;
+  width: 100%;
   font-size: 15px;
   font-weight: 650;
   line-height: 1.2;
@@ -231,6 +302,8 @@ html.omp-mobile-adm .adm-tab-bar {
 }
 
 .m-marking .m-adm-title-btn small {
+  display: block;
+  width: 100%;
   font-size: 11px;
   color: var(--adm-color-text-secondary);
   line-height: 1.2;
@@ -240,15 +313,52 @@ html.omp-mobile-adm .adm-tab-bar {
   max-width: 100%;
 }
 
+@media (max-width: 360px) {
+  .m-marking .adm-nav-bar {
+    padding-left: max(4px, env(safe-area-inset-left, 0px));
+    padding-right: max(4px, env(safe-area-inset-right, 0px));
+  }
+
+  .m-marking .adm-nav-bar-back {
+    margin-right: 0;
+    padding: 6px 2px;
+    font-size: 13px;
+  }
+
+  .m-marking .adm-nav-bar-back-arrow {
+    font-size: 20px;
+  }
+
+  .m-marking .m-adm-nav-right {
+    gap: 3px;
+  }
+
+  .m-marking .m-adm-nav-right .ant-btn {
+    padding: 0 6px;
+    font-size: 12px;
+    height: 26px;
+  }
+
+  .m-marking .m-adm-nav-btn {
+    min-width: 30px;
+    min-height: 30px;
+    padding: 0 3px;
+  }
+}
+
 .m-marking .m-adm-presets-wrap {
   min-width: 0;
+  max-width: 100%;
   max-height: min(24dvh, 144px);
   overflow-y: auto;
+  overflow-x: hidden;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
 }
 
 .m-marking .m-adm-presets-wrap .adm-selector {
+  width: 100%;
+  min-width: 0;
   --border-radius: 9px;
   --padding: 9px 4px;
   --gap: 7px;
@@ -261,6 +371,7 @@ html.omp-mobile-adm .adm-tab-bar {
 }
 
 .m-marking .m-adm-presets-wrap .adm-selector-item {
+  min-width: 0;
   min-height: 44px;
   display: inline-flex;
   align-items: center;

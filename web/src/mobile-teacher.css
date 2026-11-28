@@ -578,7 +578,10 @@
 .m-marking {
   height: var(--mobile-vh, 100dvh);
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto auto minmax(0, 1fr);
   background: var(--m-surface);
   color: var(--m-ink);
@@ -705,12 +708,19 @@
   background: var(--m-wash);
 }
 
-.m-notices:not(:empty) {
+.m-notices:has(> :not(.m-queue-slot)),
+.m-notices:has(.m-queue-slot > *) {
   padding-top: 6px;
+  padding-bottom: 4px;
+}
+
+.m-queue-slot:empty {
+  display: none;
 }
 
 .m-work {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr) auto;
   min-height: 0;
   min-width: 0;
