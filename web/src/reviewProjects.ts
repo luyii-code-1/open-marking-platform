@@ -3,7 +3,7 @@ import {questionLabel} from './mergeQuestions'
 
 export type ProjectFilter = 'in_progress' | 'pending_review' | 'completed' | 'all'
 export type ReviewProject = {
-  id:string; name:string; exam_status:string; subjects:string[]; template_ids:string[]; question_count:number
+  id:string; name:string; exam_status:string; subjects:string[]; template_ids:string[]; question_count:number; created_at?:number|null
 }
 export type AssignedQuestion = {
   template_id:string; question_id:string; template_name:string; subject_name?:string; grade_name?:string; card_name?:string

@@ -13,6 +13,7 @@ import { localProjectId, projectQuestions, questionKey, withCachedProjects, type
 import { hasUnsentReview, settleReviewWrites } from './reviewStore'
 import { ReviewWorkspace, useReviewWorkspace } from './ReviewWorkspace'
 import { SessionActivity } from './SessionActivity'
+import { WorkspaceNotificationButton, WorkspaceNotificationsProvider } from './WorkspaceNotifications'
 import { THEME_MODE_LABELS, useThemeMode, type ThemeMode } from './themeMode'
 import { getUiTheme } from './uiTheme'
 import { confirmLeaving, type useNavigation } from './useNavigation'
@@ -67,11 +68,13 @@ export default function MobileTeacherApp(props: Props) {
   return (
     <ConfigProvider locale={zhCN} theme={getUiTheme(resolved)}>
       <AntApp>
-        <SessionActivity token={authToken} />
-        <RealtimeStatus key={authToken} user={user} onProfile={acceptUser} onExpired={endSession} />
-        <ReviewWorkspace key={`${user.id}:${authToken}`} user={user} offline={offlineAccess} onVerified={acceptUser} onLoginRequired={endSession}>
-          <MobileWorkspace {...props} />
-        </ReviewWorkspace>
+        <WorkspaceNotificationsProvider isAdmin={false} offline={offlineAccess}>
+          <SessionActivity token={authToken} />
+          <RealtimeStatus key={authToken} user={user} onProfile={acceptUser} onExpired={endSession} />
+          <ReviewWorkspace key={`${user.id}:${authToken}`} user={user} offline={offlineAccess} onVerified={acceptUser} onLoginRequired={endSession}>
+            <MobileWorkspace {...props} />
+          </ReviewWorkspace>
+        </WorkspaceNotificationsProvider>
       </AntApp>
     </ConfigProvider>
   )
@@ -227,10 +230,17 @@ function MobileHome({
     )
   }
 
-  // Resolve best "继续阅卷" target: local draft > remembered task > first assigned question
+  // Resolve best "继续阅卷" target: local draft > validated remembered task > first assigned question
   const localDraft = workspace.records.find(r => r.status === 'draft' && hasUnsentReview(r))
     || workspace.records.find(r => r.status === 'draft')
-  const remembered = readMobileTask(workspace.user.id)
+  const rawRemembered = readMobileTask(workspace.user.id)
+  const rememberedValid = !!rawRemembered && (
+    workspace.records.some(r => r.template.id === rawRemembered.templateId && r.question.id === rawRemembered.questionId)
+    || workspace.offline
+    || !catalog.loaded
+    || projects.some(p => p.template_ids.includes(rawRemembered.templateId))
+  )
+  const remembered = rememberedValid ? rawRemembered : null
   const fallbackQuestion = projectQuestions(firstProjectTasks.data, firstActiveProject ? cached.get(firstActiveProject.id) : undefined)
     .find(q => !q.published)
 
@@ -279,6 +289,7 @@ function MobileHome({
           <h1>我的阅卷</h1>
         </div>
         <div className="m-head-actions">
+          {!workspace.offline && <WorkspaceNotificationButton compact />}
           {!workspace.offline && (
             <button type="button" className="m-icon-btn" aria-label="刷新任务" disabled={catalog.loading} onClick={() => void catalog.reload()}>
               <ReloadOutlined spin={catalog.loading} />
@@ -292,7 +303,14 @@ function MobileHome({
       </header>
 
       {workspace.offline && <div className="m-banner info">当前处于离线模式，仅展示本机已缓存的阅卷任务。</div>}
-      {pendingLocalCount > 0 && <div className="m-banner warn">本机有 {pendingLocalCount} 份评分待确认或补传，联网后将自动同步。</div>}
+      {pendingLocalCount > 0 && (
+        <div className="m-banner warn" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+          <span>本机有 {pendingLocalCount} 份评分待确认或补传，联网后将自动同步。</span>
+          <button type="button" className="m-link-btn" style={{ padding: '2px 6px' }} onClick={workspace.openQueueModal}>
+            查看本地记录
+          </button>
+        </div>
+      )}
       {catalog.error && <div className="m-banner error" role="alert">{catalog.error}</div>}
 
       {resumeTarget && (
@@ -359,6 +377,7 @@ function MobileHome({
                   </div>
                   <span className="m-list-sub">
                     {p.subjects.length ? `${p.subjects.join('、')} · ` : ''}{p.question_count} 道分配题目
+                    {p.created_at ? ` · ${new Date(p.created_at * 1000).toLocaleString()}` : ''}
                   </span>
                 </div>
                 <span className="m-chevron" aria-hidden="true">›</span>
@@ -455,7 +474,7 @@ function MobileProjectQuestions({
                 <span>
                   {row.ordinary_total === undefined
                     ? '本机已缓存'
-                    : `已评 ${done} / ${total}${row.arbitration_total ? `（含仲裁 ${row.arbitration_completed || 0}/${row.arbitration_total}）` : ''}`}
+                    : `阅卷 ${row.ordinary_completed || 0} / ${row.ordinary_total} · 仲裁 ${row.arbitration_completed || 0} / ${row.arbitration_total || 0}`}
                 </span>
                 {row.ordinary_total !== undefined && (
                   <div className="m-progress-track" aria-hidden="true">

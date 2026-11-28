@@ -82,7 +82,7 @@ export function useWorkspaceNotifications(): NotificationsContextValue {
   return useContext(NotificationsContext) ?? fallbackContext
 }
 
-export function WorkspaceNotificationsProvider({ isAdmin, children }: { isAdmin: boolean; children: ReactNode }) {
+export function WorkspaceNotificationsProvider({ isAdmin, offline = false, children }: { isAdmin: boolean; offline?: boolean; children: ReactNode }) {
   const [open, setOpen] = useState(false)
   const [slow, setSlow] = useState(false)
   const [jobs, setJobs] = useState<Row[]>([])
@@ -99,15 +99,17 @@ export function WorkspaceNotificationsProvider({ isAdmin, children }: { isAdmin:
   const lastNotice = useRef(0)
 
   const loadTemplateNotices = useCallback(async () => {
+    if (offline) return
     try {
       const items = await request<Row[]>('/teacher-templates/notifications')
       if (mounted.current && Array.isArray(items)) setTemplateNotices(items)
     } catch {
       /* Ignore offline or transient errors. */
     }
-  }, [])
+  }, [offline])
 
   const loadActivity = useCallback(async () => {
+    if (offline) return
     void loadTemplateNotices()
     if (!isAdmin) return
     setActivityLoading(true)
@@ -124,21 +126,29 @@ export function WorkspaceNotificationsProvider({ isAdmin, children }: { isAdmin:
     } finally {
       if (mounted.current) setActivityLoading(false)
     }
-  }, [isAdmin, loadTemplateNotices])
+  }, [isAdmin, offline, loadTemplateNotices])
 
   useEffect(() => watchChanges(roots => {
-    if (!roots || roots.includes('teacher-templates')) void loadTemplateNotices()
-  }), [loadTemplateNotices])
+    if (!offline && (!roots || roots.includes('teacher-templates'))) void loadTemplateNotices()
+  }), [offline, loadTemplateNotices])
 
   useEffect(() => {
     mounted.current = true
-    if (!isAdmin) {
+    if (!isAdmin || offline) {
       setJobs([])
       setExams([])
       setEvents([])
       setActivityLoaded(false)
       setActivityLoading(false)
       setActivityError('')
+    }
+    if (offline) {
+      setSlow(false)
+      setTemplateNotices([])
+      return () => {
+        mounted.current = false
+        notification.destroy('service-slow')
+      }
     }
     let stopped = false
     let timer: ReturnType<typeof setTimeout>
@@ -176,7 +186,7 @@ export function WorkspaceNotificationsProvider({ isAdmin, children }: { isAdmin:
       clearTimeout(timer)
       notification.destroy('service-slow')
     }
-  }, [isAdmin, loadActivity, loadTemplateNotices, notification])
+  }, [isAdmin, offline, loadActivity, loadTemplateNotices, notification])
 
   const dismissedSet = useMemo(() => new Set(dismissed), [dismissed])
   const visibleJobs = useMemo(

@@ -1,0 +1,385 @@
+/* Mobile marking score deck layout: narrow screens, short/keyboard viewports, landscape, and safe areas.
+ * Scope: .m-marking shell & .m-deck scoring controls only (reading canvas and zoom controls are styled separately).
+ */
+
+.m-marking {
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.m-marking .m-bar {
+  min-width: 0;
+  max-width: 100%;
+  padding-top: calc(6px + env(safe-area-inset-top, 0px));
+  padding-right: max(10px, env(safe-area-inset-right, 0px));
+  padding-bottom: 6px;
+  padding-left: max(4px, env(safe-area-inset-left, 0px));
+}
+
+.m-marking .m-notices {
+  min-width: 0;
+  max-width: 100%;
+  padding-right: max(10px, env(safe-area-inset-right, 0px));
+  padding-left: max(10px, env(safe-area-inset-left, 0px));
+  max-height: 22%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.m-marking .m-work {
+  min-width: 0;
+  min-height: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+/* Portrait default: keep reading area readable and prevent deck overflow */
+.m-marking .m-deck {
+  min-width: 0;
+  max-width: 100%;
+  max-height: min(52%, 340px);
+  overflow-x: clip;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding-top: 8px;
+  padding-right: max(12px, env(safe-area-inset-right, 0px));
+  padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+  padding-left: max(12px, env(safe-area-inset-left, 0px));
+  gap: 8px;
+}
+
+.m-marking .m-deck-top {
+  min-width: 0;
+  flex-shrink: 0;
+  gap: 6px 8px;
+}
+
+.m-marking .m-deck-badges {
+  min-width: 0;
+  flex: 1 1 auto;
+  gap: 4px 6px;
+}
+
+.m-marking .m-link-btn {
+  flex-shrink: 0;
+  min-height: 32px;
+  padding: 4px 6px;
+  touch-action: manipulation;
+}
+
+.m-marking .m-presets {
+  min-width: 0;
+  max-width: 100%;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 7px;
+  max-height: min(24dvh, 144px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.m-marking .m-presets button {
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  touch-action: manipulation;
+}
+
+.m-marking .m-actions {
+  min-width: 0;
+  max-width: 100%;
+  flex-shrink: 0;
+  gap: 8px;
+}
+
+.m-marking .m-score-field {
+  min-width: 0;
+  flex: 0 1 auto;
+  padding: 0 9px;
+}
+
+.m-marking .m-score-field input {
+  min-width: 40px;
+  max-width: 58px;
+}
+
+.m-marking .m-send-btn {
+  min-width: 0;
+  flex: 1 1 0;
+  padding: 10px 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  touch-action: manipulation;
+}
+
+.m-marking .m-deck-foot {
+  min-width: 0;
+  max-width: 100%;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  row-gap: 4px;
+  column-gap: 8px;
+}
+
+.m-marking .m-feedback {
+  min-width: 0;
+  flex: 1 1 140px;
+  overflow-wrap: anywhere;
+}
+
+.m-marking .m-quick-nav {
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.m-marking .m-quick-nav button {
+  min-height: 32px;
+  padding: 4px 8px;
+  white-space: nowrap;
+  touch-action: manipulation;
+}
+
+/* Narrow portrait screens (<= 360px): tighter spacing, zero horizontal overflow */
+@media (max-width: 360px) {
+  .m-marking .m-bar {
+    gap: 4px;
+    padding-right: max(6px, env(safe-area-inset-right, 0px));
+    padding-left: max(2px, env(safe-area-inset-left, 0px));
+  }
+
+  .m-marking .m-bar-back {
+    width: 36px;
+    height: 36px;
+  }
+
+  .m-marking .m-progress-pill {
+    padding: 4px 8px;
+    font-size: 11px;
+  }
+
+  .m-marking .m-bar-action {
+    width: 32px;
+    height: 32px;
+  }
+
+  .m-marking .m-deck {
+    padding-right: max(10px, env(safe-area-inset-right, 0px));
+    padding-left: max(10px, env(safe-area-inset-left, 0px));
+    gap: 6px;
+  }
+
+  .m-marking .m-presets {
+    gap: 5px;
+  }
+
+  .m-marking .m-presets button {
+    min-height: 40px;
+    font-size: 15px;
+  }
+
+  .m-marking .m-actions {
+    gap: 6px;
+  }
+
+  .m-marking .m-score-field {
+    padding: 0 7px;
+    font-size: 12px;
+  }
+
+  .m-marking .m-score-field input {
+    min-width: 36px;
+    max-width: 48px;
+    font-size: 18px;
+  }
+
+  .m-marking .m-send-btn {
+    padding: 8px 10px;
+    font-size: 14px;
+  }
+}
+
+/* Short viewports & open soft keyboard (portrait): preserve answer reading space & keep submit reachable */
+@media (max-height: 560px) {
+  .m-marking:not(.is-landscape) .m-bar {
+    min-height: calc(46px + env(safe-area-inset-top, 0px));
+    padding-top: calc(4px + env(safe-area-inset-top, 0px));
+    padding-bottom: 4px;
+  }
+
+  .m-marking:not(.is-landscape) .m-deck {
+    max-height: 54%;
+    padding-top: 6px;
+    padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px));
+    gap: 6px;
+  }
+
+  .m-marking:not(.is-landscape) .m-presets {
+    max-height: 92px;
+    gap: 5px;
+  }
+
+  .m-marking:not(.is-landscape) .m-presets button {
+    min-height: 40px;
+    font-size: 15px;
+  }
+
+  .m-marking:not(.is-landscape) .m-score-field input,
+  .m-marking:not(.is-landscape) .m-send-btn {
+    height: 40px;
+    min-height: 40px;
+  }
+}
+
+@media (max-height: 430px) {
+  .m-marking:not(.is-landscape) .m-deck {
+    max-height: 58%;
+    gap: 5px;
+  }
+
+  /* Compact single-row horizontal preset strip when soft keyboard takes most of the screen */
+  .m-marking:not(.is-landscape) .m-presets {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    max-height: 42px;
+    gap: 6px;
+    padding-bottom: 2px;
+  }
+
+  .m-marking:not(.is-landscape) .m-presets button {
+    flex: 0 0 auto;
+    min-width: 48px;
+    min-height: 36px;
+    padding: 0 10px;
+    font-size: 14px;
+  }
+
+  .m-marking:not(.is-landscape) .m-deck-foot {
+    min-height: 24px;
+  }
+}
+
+/* Landscape mode: right-side scoring deck with independent preset scroll & pinned actions */
+.m-marking.is-landscape .m-bar {
+  min-height: calc(44px + env(safe-area-inset-top, 0px));
+  padding-top: calc(4px + env(safe-area-inset-top, 0px));
+  padding-right: max(10px, env(safe-area-inset-right, 0px));
+  padding-bottom: 4px;
+  padding-left: max(6px, env(safe-area-inset-left, 0px));
+}
+
+.m-marking.is-landscape .m-work {
+  grid-template-columns: minmax(0, 1fr) clamp(196px, 31vw, 292px);
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.m-marking.is-landscape .m-deck {
+  max-height: 100%;
+  height: 100%;
+  min-height: 0;
+  border-top: 0;
+  border-left: 1px solid var(--m-line);
+  padding-top: 8px;
+  padding-right: max(12px, env(safe-area-inset-right, 0px));
+  padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+  padding-left: 10px;
+  overflow-x: clip;
+  overflow-y: hidden;
+  gap: 7px;
+}
+
+.m-marking.is-landscape .m-presets {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  overflow-x: hidden;
+  overflow-y: auto;
+  align-content: start;
+  gap: 6px;
+}
+
+.m-marking.is-landscape .m-presets button {
+  min-height: 40px;
+  font-size: 15px;
+}
+
+.m-marking.is-landscape .m-actions {
+  margin-top: auto;
+  flex-direction: column;
+  flex-shrink: 0;
+  gap: 6px;
+}
+
+.m-marking.is-landscape .m-score-field {
+  width: 100%;
+  justify-content: center;
+}
+
+.m-marking.is-landscape .m-send-btn {
+  width: 100%;
+  flex: 0 0 auto;
+  min-height: 42px;
+}
+
+.m-marking.is-landscape .m-deck-foot {
+  flex-shrink: 0;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+
+.m-marking.is-landscape .m-feedback {
+  flex: 0 0 auto;
+}
+
+.m-marking.is-landscape .m-quick-nav {
+  width: 100%;
+  margin-left: 0;
+  justify-content: space-between;
+}
+
+/* Very short landscape screens (e.g. phone landscape with soft keyboard or 320px–380px height) */
+@media (max-height: 420px) {
+  .m-marking.is-landscape .m-work {
+    grid-template-columns: minmax(0, 1fr) clamp(184px, 34vw, 248px);
+  }
+
+  .m-marking.is-landscape .m-deck {
+    padding-top: 6px;
+    padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px));
+    gap: 5px;
+    overflow-y: auto;
+  }
+
+  .m-marking.is-landscape .m-presets {
+    min-height: 40px;
+    gap: 5px;
+  }
+
+  .m-marking.is-landscape .m-presets button {
+    min-height: 36px;
+    font-size: 14px;
+  }
+
+  .m-marking.is-landscape .m-score-field input {
+    height: 38px;
+    font-size: 18px;
+  }
+
+  .m-marking.is-landscape .m-send-btn {
+    min-height: 38px;
+    padding: 7px 10px;
+    font-size: 14px;
+  }
+}

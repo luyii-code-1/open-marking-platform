@@ -620,6 +620,17 @@
 .m-bar-title {
   min-width: 0;
   flex: 1;
+  border: 0;
+  padding: 2px 4px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 8px;
+}
+
+.m-bar-title:active {
+  background: var(--m-wash);
 }
 
 .m-bar-title strong {
@@ -707,21 +718,27 @@
 
 .m-reading-wrap {
   position: relative;
+  width: 100%;
+  max-width: 100%;
   min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
   background: var(--m-wash);
+  overflow: hidden;
 }
 
 .m-reading {
-  flex: 1;
+  flex: 1 1 0;
+  width: 100%;
+  max-width: 100%;
   min-width: 0;
   min-height: 0;
   overflow: auto;
+  touch-action: pan-x pan-y;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
-  padding: 10px 8px 44px;
+  padding: 8px;
   background: var(--m-wash);
 }
 
@@ -739,44 +756,71 @@
 .m-sheet-stage img {
   display: block;
   width: 100%;
+  max-width: none;
   height: auto;
   user-select: none;
   -webkit-user-drag: none;
 }
 
-.m-zoom-fab {
-  position: absolute;
-  right: 10px;
-  bottom: 10px;
-  z-index: 10;
-  display: inline-flex;
+.m-zoom-bar {
+  flex: 0 0 auto;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 2px;
-  padding: 3px 4px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--m-surface) 92%, transparent);
-  border: 1px solid var(--m-line);
-  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.14);
-  backdrop-filter: blur(8px);
+  justify-content: center;
+  gap: 6px;
+  padding: 6px max(8px, env(safe-area-inset-right, 0px)) 6px max(8px, env(safe-area-inset-left, 0px));
+  background: var(--m-surface);
+  border-top: 1px solid var(--m-line);
 }
 
-.m-zoom-fab button {
-  min-width: 32px;
-  height: 30px;
-  padding: 0 7px;
-  border: 0;
-  border-radius: 999px;
-  background: transparent;
+.m-zoom-bar button {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 6px 12px;
+  border: 1px solid var(--m-line);
+  border-radius: 10px;
+  background: var(--m-wash);
   color: var(--m-ink);
-  font-size: 12px;
+  font-size: 14px;
+  font-weight: 500;
   font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  white-space: nowrap;
+  touch-action: manipulation;
   cursor: pointer;
 }
 
-.m-zoom-fab button[aria-pressed='true'] {
+.m-zoom-bar button[aria-pressed='true'] {
+  border-color: var(--m-brand);
   background: var(--m-tint);
   color: var(--m-brand);
   font-weight: 600;
+}
+
+.m-zoom-bar button:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.m-context-card {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--m-wash);
+  border: 1px solid var(--m-line);
+  font-size: 13px;
+  color: var(--m-sub);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.m-context-card strong {
+  color: var(--m-ink);
+  font-size: 14px;
 }
 
 /* Fixed Bottom / Side Scoring Deck */

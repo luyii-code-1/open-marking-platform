@@ -9,7 +9,7 @@ import { forgetReview, hasUnsentReview, isReviewUpdateLocked, listReviews, retry
 import {useUnsavedChanges} from './useNavigation'
 import { reviewTransport, syncReviewRecords, type SyncReport } from './reviewSync'
 
-type Workspace={user:User;offline:boolean;records:ReviewRecord[];ready:boolean;storageError:string;updateLocked:boolean;sync:()=>Promise<SyncReport>;setQueueTarget:(target:HTMLDivElement|null)=>void}
+type Workspace={user:User;offline:boolean;records:ReviewRecord[];ready:boolean;storageError:string;updateLocked:boolean;pendingCount:number;sync:()=>Promise<SyncReport>;setQueueTarget:(target:HTMLDivElement|null)=>void;openQueueModal:()=>void}
 const Context=createContext<Workspace|null>(null)
 export function useReviewWorkspace(){const value=useContext(Context);if(!value)throw new Error('阅卷工作区尚未初始化');return value}
 
@@ -42,6 +42,8 @@ export function ReviewWorkspace({user,offline,onVerified,onLoginRequired,childre
   const {message}=App.useApp()
   useUnsavedChanges(records.some(hasUnsentReview),true)
   const [queueTarget,setQueueTarget]=useState<HTMLDivElement|null>(null)
+  const [queueOpen,setQueueOpen]=useState(false)
+  const openQueueModal=useCallback(()=>setQueueOpen(true),[])
   const current=useRef({user,offline,onVerified,onLoginRequired});current.current={user,offline,onVerified,onLoginRequired}
   const flight=useRef<Promise<SyncReport>|null>(null),rerun=useRef(false),mounted=useRef(true),loadVersion=useRef(0)
   const reload=useCallback(async()=>{const version=++loadVersion.current;try{const rows=await listReviews(user.id);if(mounted.current&&version===loadVersion.current){setRecords(rows);setStorageError('');setReady(true)}}catch(e){if(mounted.current){setStorageError((e as Error).message);setReady(true)}}},[user.id])
@@ -99,19 +101,20 @@ export function ReviewWorkspace({user,offline,onVerified,onLoginRequired,childre
     const timer=setTimeout(()=>void sync(),Math.max(0,nextAttempt-Date.now()))
     return()=>clearTimeout(timer)
   },[nextAttempt,queueKey,status.state,sync])
-  return <Context.Provider value={{user,offline:offline||status.state==='offline',records,ready,storageError,updateLocked:locked,sync,setQueueTarget}}>{children}<ReviewQueueStatus records={records} status={status} error={storageError} sync={sync} target={queueTarget}/></Context.Provider>
+  const pendingCount=records.filter(r=>r.operation).length
+  return <Context.Provider value={{user,offline:offline||status.state==='offline',records,ready,storageError,updateLocked:locked,pendingCount,sync,setQueueTarget,openQueueModal}}>{children}<ReviewQueueStatus records={records} status={status} error={storageError} sync={sync} target={queueTarget} open={queueOpen} setOpen={setQueueOpen}/></Context.Provider>
 }
 
-function ReviewQueueStatus({records,status,error,sync,target}:{records:ReviewRecord[];status:SyncReport;error:string;sync:()=>Promise<SyncReport>;target:HTMLDivElement|null}){
-  const [open,setOpen]=useState(false)
-  const pending=records.filter(r=>r.operation),failed=pending.filter(r=>r.status==='failed'),conflicts=pending.filter(r=>r.status==='conflict')
+function ReviewQueueStatus({records,status,error,sync,target,open,setOpen}:{records:ReviewRecord[];status:SyncReport;error:string;sync:()=>Promise<SyncReport>;target:HTMLDivElement|null;open:boolean;setOpen:(open:boolean)=>void}){
+  const pending=records.filter(r=>r.operation),queued=pending.filter(r=>r.status==='queued'),failed=pending.filter(r=>r.status==='failed'),conflicts=pending.filter(r=>r.status==='conflict')
   const {message}=App.useApp()
   async function retry(){
     try{await Promise.all(failed.map(retryFailedReview));await sync()}catch(e){message.error((e as Error).message)}
   }
   function exportRecords(){const blob=new Blob([JSON.stringify(pending.map(r=>({task_id:r.task.id,template:r.template.name,question:questionLabel(r.question),score:r.operation?.score,operation_id:r.operation?.id,status:r.status,reason:r.error})),null,2)],{type:'application/json'});const url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download='阅卷待传记录.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}
-  const notice=(failed.length>0||conflicts.length>0||error||status.state==='upgrade')&&<div className="review-queue-status" role="alert"><Space wrap>
+  const notice=(pending.length>0||error||status.state==='upgrade')&&<div className="review-queue-status" role="alert"><Space wrap>
     {error&&<Alert type="error" message={'本地保存不可用：'+error}/>}
+    {queued.length>0&&failed.length===0&&conflicts.length===0&&<span>{queued.length} 份评分正在等待服务器确认</span>}
     {failed.length>0&&<><span>{failed.length} 份评分重试 3 次后仍未上传，分数已保存在本机。</span><Button size="small" onClick={retry}>重试上传</Button></>}
     {conflicts.length>0&&<span>{conflicts.length} 份评分需要核对</span>}
     {status.message&&<span>{status.message}</span>}
