@@ -240,6 +240,7 @@ def create_route(kind):
                 value['status']='draft'
                 for field in STATUS_FIELDS:value.pop(field,None)
                 value['exam_status_mode']='auto'
+                value['created_at']=time.time()
             if kind=='subjects' and value.get('group_mode','custom') not in ('custom','default'):raise HTTPException(422,'分组方式无效')
             if kind=='groups':
                 from .statistics_projects import is_statistics_group

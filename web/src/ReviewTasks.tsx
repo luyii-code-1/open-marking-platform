@@ -55,7 +55,14 @@ export function ReviewTasks({projectId,filter,onFilter,onProject,onOpen}:Props) 
   if (projectId) return <ProjectTasks key={projectId} projectId={projectId} project={project} cached={cached.get(projectId)}
     catalogPending={!workspace.offline&&!catalog.loaded} catalogError={catalog.error} onBack={()=>onProject()} onOpen={onOpen}/>
 
-  const visible=projects.filter(p=>filter==='all'||p.exam_status===filter||(filter==='in_progress'&&(p.exam_status==='cached'||p.exam_status==='pending_review')))
+  const isInProgress = (p: ReviewProject & { recently_completed?: boolean }) =>
+    p.exam_status === 'in_progress' || p.exam_status === 'cached' || p.exam_status === 'pending_review' || (p.exam_status === 'completed' && !!p.recently_completed)
+  const counts = {
+    in_progress: projects.filter(isInProgress).length,
+    completed: projects.filter(p => p.exam_status === 'completed').length,
+    all: projects.length,
+  }
+  const visible=projects.filter(p=>filter==='all'||(filter==='in_progress'?isInProgress(p):p.exam_status===filter))
   const emptyText=projects.length?<span>此状态下暂无考试。<Button type="link" onClick={()=>onFilter('all')}>查看全部考试</Button></span>
     :workspace.offline?'本机暂无缓存的阅卷任务。联网后可在阅卷中心领取作答。'
     :!catalog.loaded||catalog.error?'考试列表尚未加载。'
@@ -63,7 +70,7 @@ export function ReviewTasks({projectId,filter,onFilter,onProject,onOpen}:Props) 
   return <Card title="我的阅卷考试" extra={!workspace.offline&&<Button onClick={catalog.reload} loading={catalog.loading}>刷新</Button>}>
     <ErrorNotice error={catalog.error}/>
     <Segmented<ProjectFilter> aria-label="考试状态" value={filter} onChange={onFilter} style={{marginBottom:12}} options={[
-      {value:'in_progress',label:'进行中'},{value:'completed',label:'已结束'},{value:'all',label:'全部'},
+      {value:'in_progress',label:`进行中 (${counts.in_progress})`},{value:'completed',label:`已结束 (${counts.completed})`},{value:'all',label:`全部 (${counts.all})`},
     ]}/>
     <Table<ReviewProject> rowKey="id" dataSource={visible} loading={!catalog.loaded&&catalog.loading}
       onRow={p=>rowNavigation(()=>onProject(p.id),p.name)} locale={{emptyText}}
@@ -71,6 +78,7 @@ export function ReviewTasks({projectId,filter,onFilter,onProject,onOpen}:Props) 
         {title:'考试项目',dataIndex:'name',render:(name,p)=><Button type="link" onClick={()=>onProject(p.id)}>{name}</Button>},
         {title:'我的科目',render:(_,p)=>p.subjects.join('、')||'—'},
         {title:'分配题数',dataIndex:'question_count',width:100},
+        {title:'创建时间',dataIndex:'created_at',width:170,render:(v?:number|null)=>v?new Date(v*1000).toLocaleString():'—'},
         {title:'考试状态',width:110,render:(_,p)=><Status value={p.exam_status}/>},
       ]}/>
   </Card>

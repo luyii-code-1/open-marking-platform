@@ -195,13 +195,15 @@ def review_projects(current=Depends(user)):
         db.execute('BEGIN')
         rows = db.execute("""
             SELECT p.id, json_extract(p.body,'$.name'), json_extract(p.body,'$.exam_status_mode'),
+                   json_extract(p.body,'$.created_at'), json_extract(p.body,'$.completed_at'),
                    json_extract(s.body,'$.name'), t.id, count(*)
         """ + _PERSONAL_PROJECT_ASSIGNMENTS + ' GROUP BY p.id,p.body,s.id,s.body,t.id ORDER BY max(p.rowid) DESC,s.id,t.id',
             (current['id'], current['id']))
         projects = {}
-        for project_id, name, mode, subject, template_id, count in rows:
+        for project_id, name, mode, created_at, completed_at, subject, template_id, count in rows:
             project = projects.setdefault(project_id, {
                 'id': project_id, 'name': name, 'exam_status_mode': mode or 'auto',
+                'created_at': created_at, 'completed_at': completed_at,
                 'subjects': [], 'template_ids': [], 'question_count': 0,
             })
             if subject not in project['subjects']:

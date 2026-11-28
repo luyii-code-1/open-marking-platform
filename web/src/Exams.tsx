@@ -507,9 +507,21 @@ export function Exams({ location, navigate }: { location: ExamLocation; navigate
   }, [ready, recentKey, project?.id, invalid])
 
   const recentProjects = recent.flatMap(id => projects.data.filter(p => p.id === id))
+  const isInProgressProject = (p: Row) =>
+    (p.exam_status || 'in_progress') === 'in_progress' || (p.exam_status === 'completed' && !!p.recently_completed)
+  const statusCounts = {
+    in_progress: projects.data.filter(isInProgressProject).length,
+    pending_review: projects.data.filter(p => (p.exam_status || 'in_progress') === 'pending_review').length,
+    completed: projects.data.filter(p => (p.exam_status || 'in_progress') === 'completed').length,
+    all: projects.data.length,
+  }
   const filteredProjects = {
     ...projects,
-    data: projects.data.filter(p => statusFilter === 'all' || (p.exam_status || 'in_progress') === statusFilter),
+    data: projects.data.filter(p => {
+      if (statusFilter === 'all') return true
+      if (statusFilter === 'in_progress') return isInProgressProject(p)
+      return (p.exam_status || 'in_progress') === statusFilter
+    }),
   }
 
   const returnKey = `omp-designer-return:${location.groupId}`
@@ -765,6 +777,7 @@ export function Exams({ location, navigate }: { location: ExamLocation; navigate
                               <div className="recent-exam-card-meta">
                                 <span className="numeric-cell">
                                   {projectSubjects.length} 门科目 · {cardCount} 份题卡
+                                  {p.created_at ? ` · ${new Date(p.created_at * 1000).toLocaleDateString()}` : ''}
                                 </span>
                                 <RightOutlined className="recent-exam-card-arrow" />
                               </div>
@@ -784,10 +797,10 @@ export function Exams({ location, navigate }: { location: ExamLocation; navigate
                         value={statusFilter}
                         onChange={setStatusFilter}
                         options={[
-                          { value: 'in_progress', label: '进行中' },
-                          { value: 'pending_review', label: '等待审查' },
-                          { value: 'completed', label: '已完成' },
-                          { value: 'all', label: '全部' },
+                          { value: 'in_progress', label: `进行中 (${statusCounts.in_progress})` },
+                          { value: 'pending_review', label: `等待审查 (${statusCounts.pending_review})` },
+                          { value: 'completed', label: `已完成 (${statusCounts.completed})` },
+                          { value: 'all', label: `全部 (${statusCounts.all})` },
                         ]}
                       />
                     }
@@ -816,6 +829,12 @@ export function Exams({ location, navigate }: { location: ExamLocation; navigate
                         render: (name: string, row: Row) => <Space><a href={examPath({ projectId: row.id })}>{name}</a>{row.category === 'statistics' && <Tag>统计</Tag>}</Space>,
                       },
                       { title: '科目', render: (_: unknown, row: Row) => `${subjects.data.filter(s => s.project_id === row.id).length} 门` },
+                      {
+                        title: '创建时间',
+                        dataIndex: 'created_at',
+                        width: 170,
+                        render: (v: number | null | undefined) => (v ? new Date(v * 1000).toLocaleString() : '—'),
+                      },
                       {
                         title: '后台任务',
                         render: (_: unknown, row: Row) => {
