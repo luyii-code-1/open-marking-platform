@@ -58,7 +58,7 @@ export function App() {
   const guardPage = location.page === 'http-guard'
   const loginPortal = guardPage ? 'admin' : location.page === 'login' && (location.section === 'admin' || location.section === 'marking') ? location.section : undefined
   const admin = user?.role==='admin'||user?.role==='manager', management = admin && (user.role==='admin'||(portal==='admin'&&location.page!=='marking'))&&!offlineAccess
-  const page = management&&location.page==='marking'?'dashboard':offlineAccess?'marking':location.page==='settings'&&user?.role==='manager'?'dashboard':management || ['dashboard','marking','teacher-templates','results','account'].includes(location.page) ? location.page : 'dashboard'
+  const page = management&&location.page==='marking'?'dashboard':offlineAccess?'marking':location.page==='settings'&&user?.role==='manager'?'dashboard':management || ['dashboard','marking','lesson','teacher-templates','results','account'].includes(location.page) ? location.page : 'dashboard'
   const waiting = checking || !!user && verifiedToken !== authToken
   const displayed = !user ? (loginPortal ? 'login/' + loginPortal : 'login')
     : guardPage ? (user.role === 'admin' && !offlineAccess ? 'http-guard/' + guardView(location.section) : null)
